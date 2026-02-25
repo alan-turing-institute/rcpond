@@ -131,10 +131,7 @@ class ServiceNow:
         }
         resp = self.session.get(self.endpoint, params=params)
         resp.raise_for_status()
-        return [
-            Ticket(**_extract_display_values(record, TICKET_FIELDS))
-            for record in resp.json()["result"]
-        ]
+        return [Ticket(**_extract_display_values(record, TICKET_FIELDS)) for record in resp.json()["result"]]
 
     def get_full_ticket(self, ticket: Ticket) -> FullTicket:
         """Get full ticket details including catalog variables."""
@@ -194,5 +191,6 @@ class ServiceNow:
         resp.raise_for_status()
         results = resp.json()["result"]
         if not results:
-            raise RuntimeError("Could not determine current user sys_id")
+            err_msg = "Could not determine current user sys_id"
+            raise RuntimeError(err_msg)
         return results[0]["sys_id"]
