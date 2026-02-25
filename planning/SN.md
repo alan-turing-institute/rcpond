@@ -25,13 +25,13 @@ cloud computing facilities".
 ```python
 the_sn.get_unassigned_tickets()
 ```
-Returns a list of `ticket`s.
+Returns a list of `Ticket`s.
 
 Get the full ticket information for a given ticket
 ```python
-the_sn.get_ticket(ticket)
+the_sn.get_full_ticket(ticket)
 ```
-where ticket is a `ticket`. Returns a `full_ticket`.
+where ticket is a `Ticket`. Returns a `FullTicket`.
 
 ### Posting a work note
 
@@ -39,8 +39,7 @@ Post a work note:
 ```python
 the_sn.post_note(ticket, note)
 ```
-where `ticket` is either a ticket or a `full_ticket` and `note` is
-a string.
+where `ticket` is a `Ticket` and `note` is a string.
 
 ### Assigning tickets
 
