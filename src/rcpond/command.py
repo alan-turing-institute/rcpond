@@ -20,7 +20,7 @@
 
 
 # Assumed import paths
-from rcpond.llm import LLM
+from rcpond.llm import LLM, LLMResponse
 from rcpond.servicenow import ServiceNow, Ticket
 from rcpond.undefined_middle_blob import (
     construct_prompt,
@@ -36,6 +36,7 @@ def _display_output(*stuff):
     Params:
         stuff: undefined things to display to the user. Precise syntax and structure TBD.
     """
+    pass
 
 
 def display_all_tickets(assigned_only: bool):
@@ -106,15 +107,17 @@ def process_specific_ticket(ticket_id: str, dry_run: bool):
     ticket: Ticket = service_now.get_ticket(ticket_id)
 
     # See note above about how the construct_prompt accesses config
-    prompt = construct_prompt(ticket, config)
+    system_prompt, user_prompt = construct_prompt(ticket, config)
 
     # Here `response` = the text generated for the user to read (arguably the whole thing is a "response")
     # If there is a better terminology to distinguish this, then we should adopt that.
-    response, reasoning, action_plans = llm.process_prompt(prompt)
+    llm_response: LLMResponse = llm.generate(system_prompt, user_prompt, config.model)
+    response = llm_response.response_text
+    reasoning = llm_response.reasoning
+    planned_tool_call = llm_response.planned_tool_calls
 
-    if not dry_run:
-        for plan in action_plans:
-            process_action_plan(plan)
+    if not dry_run and planned_tool_call is not None:
+        process_action_plan(planned_tool_call)
 
     _display_output(response, reasoning)
 
