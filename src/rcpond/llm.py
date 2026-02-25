@@ -5,7 +5,7 @@ from dataclasses import dataclass
 class LLMResponse:
     response_text: str
     reasoning: str | None = None
-    planned_tool_calls: list[dict] | None = None
+    planned_tool_call: dict | None = None
 
 
 class LLM:
