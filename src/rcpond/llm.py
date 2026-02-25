@@ -20,13 +20,13 @@ class LLM:
             The API key for the OpenAI compatible API. If None, will load from environment variable `OPENAI_API_KEY`.
         """
 
-    def _generate(self, prompt: str, model: str) -> str:
-        """Generate a response from the LLM given a prompt.
+    def _generate(self, messages: list[dict], model: str) -> dict:
+        """Generate a response from the LLM given a list of messages.
 
         Parameters
         ----------
-        prompt : str
-            The prompt to generate a response for.
+        messages : list[dict]
+            The messages to generate a response for, in OpenAI format.
         model : str
             The model to use for generation.
 
@@ -37,11 +37,11 @@ class LLM:
         """
         # Call requests.post to the OpenAI compatible API to get the response from the LLM
         # response = requests.post(
-        #     f"{self.base_url}/v1/completions",
+        #     f"{self.base_url}/v1/chat/completions",
         #     headers={"Authorization": f"Bearer {self.api_key}"},
         #     json={
         #         "model": model,
-        #         "prompt": prompt,
+        #         "messages": messages,
         #     }
         # )
         # response.raise_for_status()
@@ -86,9 +86,10 @@ class LLM:
             The generated response from the LLM.
         """
 
-        # Format the system and user prompt into a single prompt
+        # Format system_prompt and user_prompt into messages list:
+        # `messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]`
         # Call the `_generate` method to get the response from the LLM
-        # `response = self._generate(prompt, model=model)`
+        # `response = self._generate(messages, model=model)`
         # Parse the response from the LLM into the `LLMResponse` dataclass
         # `llm_response = self._parse_response(response)`
         # return llm_response
