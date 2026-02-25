@@ -42,7 +42,6 @@ class LLM:
         #     json={
         #         "model": model,
         #         "prompt": prompt,
-        #         "max_tokens": 2048,
         #     }
         # )
         # response.raise_for_status()
