@@ -107,6 +107,7 @@ select = [
 ignore = [
   "PLR",    # Design related pylint codes
   "ISC001", # Conflicts with formatter
+  "E501",   # Line too long
 ]
 unfixable = [
   "F401",   # Would remove unused imports
