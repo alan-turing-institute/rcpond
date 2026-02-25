@@ -105,7 +105,7 @@ def _extract_display_values(record: dict, fields: list[str]) -> dict:
     return result
 
 
-class SN:
+class ServiceNow:
     """Client for ServiceNow HPC/cloud access request tickets."""
 
     BASE_URL = "https://turing-api.azure-api.net/dev-research/api/now/table"

@@ -1,31 +1,10 @@
-# Notes and assumptions
-#
-# `load_config()` should return either a dict or a data class (TBD)
-#
-# `construct_prompt()` will need access to the config (in order to get the system
-# prompt, prompt template, available tools etc). It is not clear if should be passed
-# as a param (example here) or via an enclosing class, or some other means
-#
-# Here the return value of `llm.process_prompt` is assumed to be a tuple
-# (response, reasoning, action_plans). There might be other preferred ways to define
-# this (eg as a class or dict etc).
-#
-# The `ServiceNow` class can either be an abstraction to:
-# * The main production ServiceNow instance
-# * The development ServiceNow instance
-# * A directory of scraped html files
-# This could be controlled either by the configuration file/object and/or by using
-# subclasses. Once initialised the caller should not have to care about the
-# underlying data source
-
-
 # Assumed import paths
 from rcpond.llm import LLM, LLMResponse
-from rcpond.servicenow import ServiceNow, Ticket
+from rcpond.servicenow import ServiceNow, Ticket, FullTicket
 from rcpond.undefined_middle_blob import (
     construct_prompt,
     load_config,
-    process_action_plan,
+    process_planned_tool_call,
 )
 
 
@@ -39,25 +18,19 @@ def _display_output(*stuff):
     pass
 
 
-def display_all_tickets(assigned_only: bool):
+def display_all_tickets():
     """
     Display the list of relevant tickets from ServiceNow to the user.
-
-    Params:
-        assigned_only:
-            True : only include the tickets that have been assigned to the current individual user
-            False : all tickets are "unassigned to an individual" but are "assigned to the current user's
-                    assignment group"
 
     """
     config = load_config()
     service_now: ServiceNow = ServiceNow(config)
 
-    tickets: list[Ticket] = service_now.get_all_tickets(assigned_only)
+    tickets: list[Ticket] = service_now.get_unassigned_tickets()
     _display_output(tickets)
 
 
-def process_next_ticket(assigned_only: bool, dry_run: bool):
+def process_next_ticket(dry_run: bool):
     """
     Processes an arbitrarily selected ServiceNow ticket, reviewing it via an LLM.
     * The response and reasoning at displayed to the user.
@@ -65,64 +38,58 @@ def process_next_ticket(assigned_only: bool, dry_run: bool):
       performed.
 
     Params:
-        assigned_only:
-            True : only include the tickets that have been assigned to the current individual user
-            False : all tickets are "unassigned to an individual" but are "assigned to the current user's
-                    assignment group"
         dry_run:
+            True : Planned tool calls returned by the LLM will NOT be attempted
+            False : Planned tool calls returned by the LLM WILL be attempted
     """
     # This function is very similar to `batch_process_tickets` and probably should be refactored.
 
     config = load_config()
     service_now: ServiceNow = ServiceNow(config)
 
-    tickets: list[Ticket] = service_now.get_all_tickets(assigned_only)
-    next_ticket_id = tickets.pop().ticket_id
+    tickets: list[Ticket] = service_now.get_unassigned_tickets()
+    next_ticket = tickets.pop()
 
     # This stub code here unnecessarily recreates the `llm` and `service_now` objects. This
     # should be fixed as these objects should only need to be created once. However until
     # the structure of the other modules is defined this is not possible.
-    process_specific_ticket(next_ticket_id, dry_run)
+    process_specific_ticket(next_ticket, dry_run)
 
 
-def process_specific_ticket(ticket_id: str, dry_run: bool):
+def process_specific_ticket(ticket: Ticket, dry_run: bool):
     """
-    Processes the ServiceNow ticket identified by `ticket_id`, reviewing it via an LLM.
+    Processes the ServiceNow ticket identified by `ticket`, reviewing it via an LLM.
     * The response and reasoning at displayed to the user.
     * If the LLM recommends one or more actions AND `dry_run` == false, the actions are
       performed.
 
     Params:
-        ticket_id: The ServiceNow ticket number. (ServiceNow uses the field name "Number", but the values are
-                   strings - example `RES0001752`)
+        ticket: The ServiceNow ticket object.
         dry_run:
-            True : Action plans returned by the LLM will NOT be attempted
-            False : Action plans returned by the LLM WILL be attempted
+            True : Planned tool calls returned by the LLM will NOT be attempted
+            False : Planned tool calls returned by the LLM WILL be attempted
     """
 
     config = load_config()
     service_now: ServiceNow = ServiceNow(config)
     llm: LLM = LLM(config)
 
-    ticket: Ticket = service_now.get_ticket(ticket_id)
+    full_ticket: FullTicket = service_now.get_full_ticket(ticket)
 
     # See note above about how the construct_prompt accesses config
-    system_prompt, user_prompt = construct_prompt(ticket, config)
+    system_prompt, user_prompt = construct_prompt(full_ticket, config)
 
     # Here `response` = the text generated for the user to read (arguably the whole thing is a "response")
     # If there is a better terminology to distinguish this, then we should adopt that.
     llm_response: LLMResponse = llm.generate(system_prompt, user_prompt, config.model)
-    response = llm_response.response_text
-    reasoning = llm_response.reasoning
-    planned_tool_call = llm_response.planned_tool_calls
 
-    if not dry_run and planned_tool_call is not None:
-        process_action_plan(planned_tool_call)
+    if not dry_run and llm_response.planned_tool_call is not None:
+        process_planned_tool_call(llm_response.planned_tool_call)
 
-    _display_output(response, reasoning)
+    _display_output(llm_response)
 
 
-def batch_process_tickets(assigned_only: bool, dry_run: bool):
+def batch_process_tickets(dry_run: bool):
     """
     Processes all of the available ServiceNow tickets, reviewing each one individually via an LLM.
     * The response and reasoning at displayed to the user.
@@ -130,13 +97,9 @@ def batch_process_tickets(assigned_only: bool, dry_run: bool):
       performed.
 
     Params:
-        assigned_only:
-            True (default) only include the tickets that have been assigned to the current individual user
-            False : all tickets are "unassigned to an individual" but are "assigned to the current user's
-                    assignment group"
         dry_run:
-            True : Action plans returned by the LLM will NOT be attempted
-            False : Action plans returned by the LLM WILL be attempted
+            True : Planned tool calls returned by the LLM will NOT be attempted
+            False : Planned tool calls returned by the LLM WILL be attempted
     """
     # Notes
     #
@@ -151,6 +114,6 @@ def batch_process_tickets(assigned_only: bool, dry_run: bool):
     config = load_config()
     service_now: ServiceNow = ServiceNow(config)
 
-    tickets: list[Ticket] = service_now.get_all_tickets(assigned_only)
+    tickets: list[Ticket] = service_now.get_unassigned_tickets()
     for next_ticket in tickets:
-        process_specific_ticket(next_ticket.ticket_id, dry_run)
+        process_specific_ticket(next_ticket, dry_run)
