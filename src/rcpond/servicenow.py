@@ -1,23 +1,43 @@
-"""Interface to ServiceNow for managing HPC/cloud access request tickets."""
+"""A limited interface to ServiceNow.
+
+Provides a class, `ServiceNow`, which wraps the ServiceNow
+API. The only functions are:
+
+- To get a list of unassigned tickets;
+- To get full details of a ticket;
+- To assign oneself to a ticket; and
+- To post a “work note” to a ticket.
+
+Tickets are returned as instances of a `Ticket` dataclass which
+contains a few, high-level details. The subclass `FullTicket` contains
+in addition the fields submitted by the requestor on the request form.
+
+The URL of the ServiceNow API is hardcoded, but you will need to
+supply a user authentication token.
+
+This version filters out all tickets that are not requests for HPC or
+Azure resource.
+"""
 
 from dataclasses import dataclass
-
 import requests
-
 
 @dataclass
 class Ticket:
+    """A ticket; contains only high-level details about the ticket."""
     sys_id: str
+    """The internal ServiceNow identifier for the ticket."""
     number: str
+    """The ticket number as recognised by agents."""
     opened_at: str
     requested_for: str
     u_category: str
     u_sub_category: str
     short_description: str
 
-
 @dataclass
 class FullTicket(Ticket):
+    """Full details from the original submission."""
     work_notes: str
     project_title: str
     research_area_programme: str
@@ -44,8 +64,8 @@ class FullTicket(Ticket):
     users_who_require_access_names_and_emails: str
     cost_compute_time_breakdown: str
 
-
-TICKET_FIELDS = [
+## TODO: Delete all of this
+_TICKET_FIELDS = [
     "sys_id",
     "number",
     "opened_at",
@@ -56,7 +76,7 @@ TICKET_FIELDS = [
 ]
 
 # Maps FullTicket field names to ServiceNow API field names.
-VARIABLE_FIELD_MAP = {
+_VARIABLE_FIELD_MAP = {
     "work_notes": "work_notes",
     "project_title": "variables.project_title",
     "research_area_programme": "variables.research_area_programme",
@@ -108,8 +128,8 @@ def _extract_display_values(record: dict, fields: list[str]) -> dict:
 class ServiceNow:
     """Client for ServiceNow HPC/cloud access request tickets."""
 
-    BASE_URL = "https://turing-api.azure-api.net/dev-research/api/now/table"
-    TABLE = "x_tati_resmgt_research"
+    _BASE_URL = "https://turing-api.azure-api.net/dev-research/api/now/table"
+    _TABLE = "x_tati_resmgt_research"
 
     def __init__(self, token: str):
         self.endpoint = f"{self.BASE_URL}/{self.TABLE}"
