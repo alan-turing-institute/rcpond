@@ -2,13 +2,18 @@
 
 import typing
 from dataclasses import dataclass
+import inspect
 
-
-@dataclass
 class Tool:
-    name: str
-    function: typing.Callable
-    parameters: dict
+    def __init__(self, func: typing.Callable):
+        self.function = func
+        self.name = func.__name__
+        self.description = func.__doc__
+        self.parameters = self._get_param_list()
+
+    def _get_param_list(self) -> dict:
+        sig = inspect.signature(self.function)
+        return {name: param.annotation for name, param in sig.parameters.items()}
 
 
 def get_available_tools(**kwargs) -> list[Tool]:
