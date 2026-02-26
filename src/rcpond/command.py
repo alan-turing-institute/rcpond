@@ -1,11 +1,9 @@
 # Assumed import paths
 from rcpond.llm import LLM, LLMResponse
 from rcpond.servicenow import FullTicket, ServiceNow, Ticket
-from rcpond.undefined_middle_blob import (
-    construct_prompt,
-    load_config,
-    process_planned_tool_call,
-)
+from rcpond.config import load_config
+from rcpond.prompt import construct_prompt
+from rcpond.tools import process_planned_tool_call
 
 
 def _display_output(*stuff):
