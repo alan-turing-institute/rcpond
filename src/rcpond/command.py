@@ -1,11 +1,9 @@
 # Assumed import paths
+from rcpond.config import load_config
 from rcpond.llm import LLM, LLMResponse
+from rcpond.prompt import construct_prompt
 from rcpond.servicenow import FullTicket, ServiceNow, Ticket
-from rcpond.undefined_middle_blob import (
-    construct_prompt,
-    load_config,
-    process_planned_tool_call,
-)
+from rcpond.tools import process_planned_tool_call
 
 
 def _display_output(*stuff):
@@ -23,7 +21,7 @@ def display_all_tickets():
 
     """
     config = load_config()
-    service_now: ServiceNow = ServiceNow(config)
+    service_now: ServiceNow = ServiceNow(config.servicenow_token)
 
     tickets: list[Ticket] = service_now.get_unassigned_tickets()
     _display_output(tickets)
@@ -44,7 +42,7 @@ def process_next_ticket(dry_run: bool):
     # This function is very similar to `batch_process_tickets` and probably should be refactored.
 
     config = load_config()
-    service_now: ServiceNow = ServiceNow(config)
+    service_now: ServiceNow = ServiceNow(config.servicenow_token)
 
     tickets: list[Ticket] = service_now.get_unassigned_tickets()
     next_ticket = tickets.pop()
@@ -70,8 +68,8 @@ def process_specific_ticket(ticket: Ticket, dry_run: bool):
     """
 
     config = load_config()
-    service_now: ServiceNow = ServiceNow(config)
-    llm: LLM = LLM(config.base_url, config.api_key)
+    service_now: ServiceNow = ServiceNow(config.servicenow_token)
+    llm: LLM = LLM(config.llm_base_url, config.llm_api_key)
 
     full_ticket: FullTicket = service_now.get_full_ticket(ticket)
 
@@ -80,7 +78,7 @@ def process_specific_ticket(ticket: Ticket, dry_run: bool):
 
     # Here `response` = the text generated for the user to read (arguably the whole thing is a "response")
     # If there is a better terminology to distinguish this, then we should adopt that.
-    llm_response: LLMResponse = llm.generate(system_prompt, user_prompt, config.model)
+    llm_response: LLMResponse = llm.generate(system_prompt, user_prompt, config.llm_model)
 
     if not dry_run and llm_response.planned_tool_call is not None:
         process_planned_tool_call(llm_response.planned_tool_call)
@@ -111,7 +109,7 @@ def batch_process_tickets(dry_run: bool):
     # This function is very similar to `process_next_ticket` and probably should be refactored.
 
     config = load_config()
-    service_now: ServiceNow = ServiceNow(config)
+    service_now: ServiceNow = ServiceNow(config.servicenow_token)
 
     tickets: list[Ticket] = service_now.get_unassigned_tickets()
     for next_ticket in tickets:
