@@ -26,7 +26,7 @@ def get_available_tools(**kwargs) -> list[Tool]:
     """
 
 
-def process_planned_tool_call(planned_tool_call: dict) -> None:  # noqa: ARG001
+def call_tool(planned_tool_call: dict) -> None:  # noqa: ARG001
     """Execute a tool call planned by the LLM.
 
     Parameters
