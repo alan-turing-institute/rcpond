@@ -1,4 +1,7 @@
+import os
 from dataclasses import dataclass
+
+import requests
 
 
 @dataclass
@@ -9,18 +12,20 @@ class LLMResponse:
 
 
 class LLM:
-    def __init__(self, base_url: str | None, api_key: str | None) -> None:
+    def __init__(self, base_url: str | None = None, api_key: str | None = None) -> None:
         """Initialise the LLM class.
 
         Parameters
         ----------
         base_url : str | None
-            The base URL of the OpenAI compatible API. If None, will load from environment variable `OPENAI_BASE_URL`.
+            The full chat completions endpoint URL of the OpenAI compatible API. If None, will load from environment variable `OPENAI_BASE_URL`.
         api_key : str | None
             The API key for the OpenAI compatible API. If None, will load from environment variable `OPENAI_API_KEY`.
         """
+        self.base_url = base_url or os.environ["OPENAI_BASE_URL"]
+        self.api_key = api_key or os.environ["OPENAI_API_KEY"]
 
-    def _generate(self, messages: list[dict], model: str) -> dict:
+    def _generate(self, messages: list[dict], model: str, tools: list[dict] | None = None) -> dict:
         """Generate a response from the LLM given a list of messages.
 
         Parameters
@@ -29,30 +34,34 @@ class LLM:
             The messages to generate a response for, in OpenAI format.
         model : str
             The model to use for generation.
+        tools : list[dict] | None
+            Optional list of tool definitions in OpenAI format.
 
         Returns
         -------
         dict
             The generated response from the LLM as json.
         """
-        # Call requests.post to the OpenAI compatible API to get the response from the LLM
-        # response = requests.post(
-        #     f"{self.base_url}/v1/chat/completions",
-        #     headers={"Authorization": f"Bearer {self.api_key}"},
-        #     json={
-        #         "model": model,
-        #         "messages": messages,
-        #     }
-        # )
-        # response.raise_for_status()
-        # return response.json()
+        payload = {
+            "model": model,
+            "messages": messages,
+        }
+        if tools:
+            payload["tools"] = tools
+        response = requests.post(
+            self.base_url,
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            json=payload,
+        )
+        response.raise_for_status()
+        return response.json()
 
-    def _parse_response(self, response: str):
+    def _parse_response(self, response: dict) -> LLMResponse:
         """Parse the response from the LLM into the `LLMResponse` dataclass.
 
         Parameters
         ----------
-        response : str
+        response : dict
             The response from the LLM to parse.
 
         Returns
@@ -60,13 +69,18 @@ class LLM:
         LLMResponse
             The parsed response from the LLM.
         """
-        # Example response
-        # {"id":"95e9a85b25094094ace2ad03d2511637","model":"gpt-oss-120b","choices":[{"index":0,"message":{"role":"assistant","content":"Hello! How can I assist you today?","reasoning_content":"The user just says \"Hello\". Probably a greeting. We respond politely."},"finish_reason":"stop","content_filter_results":{"violence":{"filtered":false,"severity":"safe"},"sexual":{"filtered":false,"severity":"safe"},"hate":{"filtered":false,"severity":"safe"},"self_harm":{"filtered":false,"severity":"safe"}}}],"usage":{"prompt_tokens":68,"completion_tokens":34,"total_tokens":102,"audio_prompt_tokens":0},"created":1772030968,"object":"chat.completion","prompt_filter_results":[{"prompt_index":0,"content_filter_results":{"violence":{"filtered":false,"severity":"safe"},"sexual":{"filtered":false,"severity":"safe"},"hate":{"filtered":false,"severity":"safe"},"self_harm":{"filtered":false,"severity":"safe"},"jailbreak":{"filtered":false,"detected":false}}}]}%
+        message = response["choices"][0]["message"]
+        response_text = message.get("content", "")
+        reasoning = message.get("reasoning_content")
+        tool_calls = message.get("tool_calls")
+        planned_tool_call = tool_calls[0] if tool_calls else None
+        return LLMResponse(
+            response_text=response_text,
+            reasoning=reasoning,
+            planned_tool_call=planned_tool_call,
+        )
 
-        # Parse the response from the LLM into the `LLMResponse` dataclass
-        # Also parse tool calls if they exist in response
-
-    def generate(self, system_prompt: str, user_prompt: str, model: str) -> LLMResponse:
+    def generate(self, system_prompt: str, user_prompt: str, model: str, tools: list[dict] | None = None) -> LLMResponse:
         """Generate an LLM response given a system prompt and a user prompt.
         Formats the system and user prompt into a single prompt and calls the `_generate` method to get the response from the LLM.
         LLM response is parsed into `LLMResponse` dataclass.
@@ -79,17 +93,17 @@ class LLM:
             The user prompt to generate a response for.
         model: str
             The model to use for generation.
+        tools : list[dict] | None
+            Optional list of tool definitions in OpenAI format.
 
         Returns
         -------
         LLMResponse
             The generated response from the LLM.
         """
-
-        # Format system_prompt and user_prompt into messages list:
-        # `messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]`
-        # Call the `_generate` method to get the response from the LLM
-        # `response = self._generate(messages, model=model)`
-        # Parse the response from the LLM into the `LLMResponse` dataclass
-        # `llm_response = self._parse_response(response)`
-        # return llm_response
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+        response = self._generate(messages, model=model, tools=tools)
+        return self._parse_response(response)
