@@ -4,7 +4,7 @@ from rcpond.config import Config
 from rcpond.servicenow import FullTicket
 
 
-def construct_prompt(full_ticket: FullTicket, config: Config) -> tuple[str, str]:
+def construct_prompt(full_ticket: FullTicket, config: Config) -> tuple[str, str]:  # noqa: ARG001
     """Construct the system and user prompts for the LLM given a full ticket and config.
 
     Reads the RULES.md file to form the system prompt. Formats the ticket data
