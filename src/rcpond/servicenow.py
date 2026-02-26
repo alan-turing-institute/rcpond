@@ -22,10 +22,16 @@ Azure resource.
 from dataclasses import dataclass
 import requests
 
+
 @dataclass
 class Ticket:
     """A ticket; contains only high-level details about the ticket."""
+<<<<<<< HEAD
     sys_id            : str
+=======
+
+    sys_id: str
+>>>>>>> origin/issue-7-servicenow
     """The internal ServiceNow identifier for the ticket."""
     number            : str
     """The ticket number as recognised by agents."""
@@ -35,9 +41,11 @@ class Ticket:
     u_sub_category    : str
     short_description : str
 
+
 @dataclass
 class FullTicket(Ticket):
     """Full details from the original submission."""
+<<<<<<< HEAD
     work_notes                  : str
     project_title               : str
     research_area_programme     : str
@@ -50,6 +58,21 @@ class FullTicket(Ticket):
     pmu_contact_email           : str
     credits_requested           : str
     which_facility              : str
+=======
+
+    work_notes: str
+    project_title: str
+    research_area_programme: str
+    if_other_please_specify: str
+    pi_supervisor_name: str
+    pi_supervisor_email: str
+    which_service: str
+    subscription_type: str
+    which_finance_code: str
+    pmu_contact_email: str
+    credits_requested: str
+    which_facility: str
+>>>>>>> origin/issue-7-servicenow
     if_other_please_specify_facility: str
     cpu_hours_required          : str
     gpu_hours_required          : str
@@ -63,6 +86,7 @@ class FullTicket(Ticket):
     computational_requirements  : str
     users_who_require_access_names_and_emails: str
     cost_compute_time_breakdown : str
+
 
 ## TODO: Delete all of this
 _TICKET_FIELDS = [
@@ -136,7 +160,7 @@ class ServiceNow:
     # ServiceNow configuration 
     _BASE_URL = "https://turing-api.azure-api.net/dev-research/api/now/table"
     _TABLE    = "x_tati_resmgt_research"
-    _FILTER   = "assigned_toISEMPTY" 
+    _FILTER   = "assigned_toISEMPTY^short_description=Request access to HPC and cloud computing facilities" 
 
     def __init__(self, token: str):
         self.endpoint = f"{self.BASE_URL}/{self.TABLE}"
@@ -150,6 +174,7 @@ class ServiceNow:
         )
 
     def get_unassigned_tickets(self) -> list[Ticket]:
+
         """Get unassigned tickets."""
 
         ## Get the list of unassigned tickets as JSON
