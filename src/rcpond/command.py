@@ -1,6 +1,6 @@
 # Assumed import paths
 from rcpond.llm import LLM, LLMResponse
-from rcpond.servicenow import ServiceNow, Ticket, FullTicket
+from rcpond.servicenow import FullTicket, ServiceNow, Ticket
 from rcpond.undefined_middle_blob import (
     construct_prompt,
     load_config,
@@ -15,7 +15,6 @@ def _display_output(*stuff):
     Params:
         stuff: undefined things to display to the user. Precise syntax and structure TBD.
     """
-    pass
 
 
 def display_all_tickets():
@@ -72,7 +71,7 @@ def process_specific_ticket(ticket: Ticket, dry_run: bool):
 
     config = load_config()
     service_now: ServiceNow = ServiceNow(config)
-    llm: LLM = LLM(config)
+    llm: LLM = LLM(config.base_url, config.api_key)
 
     full_ticket: FullTicket = service_now.get_full_ticket(ticket)
 
