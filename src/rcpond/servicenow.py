@@ -25,44 +25,44 @@ import requests
 @dataclass
 class Ticket:
     """A ticket; contains only high-level details about the ticket."""
-    sys_id: str
+    sys_id            : str
     """The internal ServiceNow identifier for the ticket."""
-    number: str
+    number            : str
     """The ticket number as recognised by agents."""
-    opened_at: str
-    requested_for: str
-    u_category: str
-    u_sub_category: str
-    short_description: str
+    opened_at         : str
+    requested_for     : str
+    u_category        : str
+    u_sub_category    : str
+    short_description : str
 
 @dataclass
 class FullTicket(Ticket):
     """Full details from the original submission."""
-    work_notes: str
-    project_title: str
-    research_area_programme: str
-    if_other_please_specify: str
-    pi_supervisor_name: str
-    pi_supervisor_email: str
-    which_service: str
-    subscription_type: str
-    which_finance_code: str
-    pmu_contact_email: str
-    credits_requested: str
-    which_facility: str
+    work_notes                  : str
+    project_title               : str
+    research_area_programme     : str
+    if_other_please_specify     : str
+    pi_supervisor_name          : str
+    pi_supervisor_email         : str
+    which_service               : str
+    subscription_type           : str
+    which_finance_code          : str
+    pmu_contact_email           : str
+    credits_requested           : str
+    which_facility              : str
     if_other_please_specify_facility: str
-    cpu_hours_required: str
-    gpu_hours_required: str
-    new_or_existing_allocation: str
+    cpu_hours_required          : str
+    gpu_hours_required          : str
+    new_or_existing_allocation  : str
     azure_subscription_id_or_hpc_group_project_id: str
-    start_date: str
-    end_date: str
-    data_sensitivity: str
-    platform_justification: str
-    research_justification: str
-    computational_requirements: str
+    start_date                  : str
+    end_date                    : str
+    data_sensitivity            : str
+    platform_justification      : str
+    research_justification      : str
+    computational_requirements  : str
     users_who_require_access_names_and_emails: str
-    cost_compute_time_breakdown: str
+    cost_compute_time_breakdown : str
 
 ## TODO: Delete all of this
 _TICKET_FIELDS = [
@@ -126,10 +126,17 @@ def _extract_display_values(record: dict, fields: list[str]) -> dict:
 
 
 class ServiceNow:
-    """Client for ServiceNow HPC/cloud access request tickets."""
+    """Simple wrapper around limited parts of the ServiceNow API.
 
+       Example:
+       >>> the_service = ServiceNow("abc...efg")
+    
+    """
+
+    # ServiceNow configuration 
     _BASE_URL = "https://turing-api.azure-api.net/dev-research/api/now/table"
-    _TABLE = "x_tati_resmgt_research"
+    _TABLE    = "x_tati_resmgt_research"
+    _FILTER   = "assigned_toISEMPTY" 
 
     def __init__(self, token: str):
         self.endpoint = f"{self.BASE_URL}/{self.TABLE}"
@@ -143,11 +150,12 @@ class ServiceNow:
         )
 
     def get_unassigned_tickets(self) -> list[Ticket]:
-        """Get unassigned HPC/cloud access request tickets."""
+        """Get unassigned tickets."""
+
+        ## Get the list of unassigned tickets as JSON
         params = {
-            "sysparm_query": "assigned_toISEMPTY",
-            "sysparm_fields": ",".join(TICKET_FIELDS),
-            "sysparm_display_value": "true",
+            "sysparm_query": _FILTER,
+            "sysparm_display_value": "all",
         }
         resp = self.session.get(self.endpoint, params=params)
         resp.raise_for_status()
@@ -157,7 +165,7 @@ class ServiceNow:
         ]
 
     def get_full_ticket(self, ticket: Ticket) -> FullTicket:
-        """Get full ticket details including catalog variables."""
+        """Get full ticket details."""
         all_api_fields = TICKET_FIELDS + list(VARIABLE_FIELD_MAP.values())
         params = {
             "sysparm_fields": ",".join(all_api_fields),
