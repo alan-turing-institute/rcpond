@@ -22,9 +22,11 @@ Azure resource.
 from dataclasses import dataclass
 import requests
 
+
 @dataclass
 class Ticket:
     """A ticket; contains only high-level details about the ticket."""
+
     sys_id: str
     """The internal ServiceNow identifier for the ticket."""
     number: str
@@ -35,9 +37,11 @@ class Ticket:
     u_sub_category: str
     short_description: str
 
+
 @dataclass
 class FullTicket(Ticket):
     """Full details from the original submission."""
+
     work_notes: str
     project_title: str
     research_area_programme: str
@@ -63,6 +67,7 @@ class FullTicket(Ticket):
     computational_requirements: str
     users_who_require_access_names_and_emails: str
     cost_compute_time_breakdown: str
+
 
 ## TODO: Delete all of this
 _TICKET_FIELDS = [
@@ -144,8 +149,12 @@ class ServiceNow:
 
     def get_unassigned_tickets(self) -> list[Ticket]:
         """Get unassigned HPC/cloud access request tickets."""
+        query = (
+            "assigned_toISEMPTY"
+            "^short_description=Request access to HPC and cloud computing facilities"
+        )
         params = {
-            "sysparm_query": "assigned_toISEMPTY",
+            "sysparm_query": query,
             "sysparm_fields": ",".join(TICKET_FIELDS),
             "sysparm_display_value": "true",
         }
