@@ -3,8 +3,8 @@
 Provides a class, `ServiceNow`, which wraps the ServiceNow
 API. The only functions are:
 
-- `get_unassigned_tickets`: To get a list of unassigned tickets;
-- `get_full_ticket`: To get full details of a ticket;
+- `ServiceNow.get_unassigned_tickets()`: To get a list of unassigned tickets;
+- `ServiceNow.get_full_ticket()`: To get full details of a ticket;
 - To assign oneself to a ticket; and
 - To post a “work note” to a ticket.
 
@@ -71,7 +71,7 @@ class FullTicket(Ticket):
         """Create a new FullTicket starting from a Ticket and passing
         only the additional fields.
         """
-        return cls(**dataclasses.asdict(t), **extras)
+        return cls(**(dataclasses.asdict(t)), **extras)
 
 
 ## --------------------------------------------------------------------------------
@@ -87,16 +87,17 @@ def _extract_display_value(fld: dict | str) -> str:
     else:
         return fld
 
-def _extract_ticket_fields(tkt: dict) -> dict:
+## tkt: The JSON from the API call (as a dictionary)
+def _extract_ticket_fields(tkt: dict, fields: list[str]) -> dict:
     return {
-        field.name: _extract_display_value(tkt.get(field.name))
-        for field in dataclasses.fields(Ticket)
+        field: _extract_display_value(tkt.get(field))
+        for field in fields
     }
 
 
 
 ## --------------------------------------------------------------------------------
-## The main class of this module
+## Interace to this module
     
 class ServiceNow:
     """Simple wrapper around limited parts of the ServiceNow API.
@@ -127,6 +128,8 @@ class ServiceNow:
            credits.
         """
 
+        ticket_fields = [field.name for field in dataclasses.fields(Ticket)]
+        
         ## Get the list of unassigned tickets as JSON
         resp = self.session.get(self._BASE_URL + "/" + self._TABLE,
                                 params = {
@@ -139,7 +142,7 @@ class ServiceNow:
 
         ## Parse the JSON for each ticket
         return [
-            Ticket(** _extract_ticket_fields(tkt))
+            Ticket(** _extract_ticket_fields(tkt, ticket_fields))
             for tkt in resp.json()["result"]
         ]
 
@@ -148,39 +151,45 @@ class ServiceNow:
         """Get full ticket details."""
 
         ## Get details from ServiceNow as JSON
-        extra_fields = [field.name for field in dataclasses.fields(FullTicket)]
+        extra_fields = {field.name for field in dataclasses.fields(FullTicket)} - {field.name for field in dataclasses.fields(Ticket)}
 
         resp = self.session.get(self._BASE_URL + "/" + self._TABLE + "/" + tkt.sys_id,
                                 params = {
                                     "sysparm_fields": ",".join(extra_fields),
                                     "sysparm_display_value": "true"
-                                    }
+                                }
                                 )
 
         resp.raise_for_status()
 
         ## Parse the returned JSON
-        record = resp.json()["result"]
+        result = resp.json()["result"]
 
-        kwargs = _extract_display_values(record, TICKET_FIELDS)
+        return FullTicket.from_Ticket(tkt, **_extract_ticket_fields(result, extra_fields))
 
-        for field_name, api_name in VARIABLE_FIELD_MAP.items():
-            kwargs[field_name] = record.get(api_name, "")
 
-        return FullTicket.from_ticket(tkt, **extras)
+    
+    def post_note(self, ticket: Ticket, note: str) -> None:
+        """Post a work note to a ticket.
 
-    # def post_note(self, ticket: Ticket, note: str) -> None:
-    #     """Post a work note to a ticket."""
-    #     resp = self.session.patch(
+           NOT IMPLEMENTED"""
+        raise RuntimeError("ServiceNow.post_note is not yet implemented.")
+
+    # resp = self.session.patch(
     #         f"{self.endpoint}/{ticket.sys_id}",
     #         json={"work_notes": note},
     #     )
     #     resp.raise_for_status()
 
-    # def assign_myself(self, ticket: Ticket) -> None:
-    #     """Assign the current user to a ticket.
+    def assign_myself(self, ticket: Ticket) -> None:
+        """Assign the current user to a ticket.
 
-    #     Looks up the current user's sys_id via the sys_user table using
+        Not yet implemented.
+        """
+
+        raise RuntimeErorr("ServiceNow.assign_myself is not yet implemented")
+
+    #     looks up the current user's sys_id via the sys_user table using
     #     the same bearer token, then patches the ticket's assigned_to field.
     #     Note: this assumes the /api/now/table/sys_user endpoint is accessible
     #     and that the token maps to a user with a 'user_name' field. This may
