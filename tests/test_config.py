@@ -2,11 +2,10 @@ import pytest
 
 from rcpond.config import load_config
 
-
 # --- Fixtures ---
 
 
-@pytest.fixture
+@pytest.fixture()
 def path_files(tmp_path):
     """Create placeholder files for the two Path config fields."""
     rules = tmp_path / "RULES.md"
@@ -16,7 +15,7 @@ def path_files(tmp_path):
     return rules, template
 
 
-@pytest.fixture
+@pytest.fixture()
 def all_values(path_files):
     """A complete set of config values with valid paths."""
     rules, template = path_files
@@ -132,12 +131,13 @@ def test_cli_args_none_does_not_override_dotenv(tmp_path, all_values):
 def test_both_params_none_raises_when_no_env_vars_set(monkeypatch):
     """With no sources at all, load_config should raise."""
     from dataclasses import fields
+
     from rcpond.config import Config, _env_var_name
 
     for field in fields(Config):
         monkeypatch.delenv(_env_var_name(field.name), raising=False)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Missing required configuration"):
         load_config(env_path=None, cli_args=None)
 
 
@@ -156,7 +156,7 @@ def test_missing_multiple_fields_raises(tmp_path, all_values):
     partial = {k: v for k, v in all_values.items() if k in ("llm_base_url", "llm_model")}
     env_file = write_dotenv(tmp_path, partial)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Missing required configuration"):
         load_config(env_path=env_file)
 
 

@@ -23,8 +23,8 @@ def _env_var_name(field_name: str) -> str:
 
 def _parse_dotenv(env_path: Path) -> dict[str, str]:
     result = {}
-    for line in env_path.read_text().splitlines():
-        line = line.strip()
+    for raw_line in env_path.read_text().splitlines():
+        line = raw_line.strip()
         if not line or line.startswith("#"):
             continue
         if "=" in line:
@@ -32,12 +32,13 @@ def _parse_dotenv(env_path: Path) -> dict[str, str]:
             result[key.strip()] = value.strip()
     return result
 
+
 def _confirm_path_exists(path_as_str: str) -> Path:
     path = Path(path_as_str).resolve()
 
     if path.exists():
         return path
-    
+
     err_msg = f"Path {path_as_str} cannot be found"
     raise ValueError(err_msg)
 
@@ -88,10 +89,10 @@ def load_config(env_path: Path | None = None, cli_args: dict | None = None) -> C
         msg = f"Missing required configuration: {', '.join(missing)}"
         raise ValueError(msg)
 
-    # Confirm field containing paths are valid
+    # Confirm path fields are valid and construct Config
     hints = typing.get_type_hints(Config)
-    for field in fields(Config):
-        if hints[field.name] is Path:
-            values[field.name] = _confirm_path_exists(values[field.name])
-
-    return Config(**values)
+    config_kwargs: dict[str, str | Path] = {
+        field.name: _confirm_path_exists(values[field.name]) if hints[field.name] is Path else values[field.name]
+        for field in fields(Config)
+    }
+    return Config(**config_kwargs)  # type: ignore[arg-type]
