@@ -182,6 +182,27 @@ def test_invalid_template_path_raises(all_values):
 # --- dotenv format ---
 
 
+def test_dotenv_malformed_line_raises(tmp_path, all_values):
+    env_file = tmp_path / ".env"
+    lines = ["# comment", ""]
+    lines += [f"RCPOND_{k.upper()}={v}" for k, v in all_values.items()]
+    lines.insert(4, "RCPOND_LLM_MODEL gpt-4")  # line 3 (after comment + blank): missing '='
+    env_file.write_text("\n".join(lines))
+
+    with pytest.raises(ValueError, match="line 5"):
+        load_config(env_path=env_file)
+
+
+def test_dotenv_duplicate_key_raises(tmp_path, all_values):
+    env_file = tmp_path / ".env"
+    lines = [f"RCPOND_{k.upper()}={v}" for k, v in all_values.items()]
+    lines.append("RCPOND_LLM_MODEL=gpt-3.5")  # duplicate of an earlier line
+    env_file.write_text("\n".join(lines))
+
+    with pytest.raises(ValueError, match="RCPOND_LLM_MODEL"):
+        load_config(env_path=env_file)
+
+
 def test_dotenv_ignores_comments_and_blank_lines(tmp_path, all_values):
     env_file = tmp_path / ".env"
     lines = ["# This is a comment", ""]

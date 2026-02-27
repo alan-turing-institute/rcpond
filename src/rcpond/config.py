@@ -23,13 +23,27 @@ def _env_var_name(field_name: str) -> str:
 
 def _parse_dotenv(env_path: Path) -> dict[str, str]:
     result = {}
-    for raw_line in env_path.read_text().splitlines():
+    for line_number, raw_line in enumerate(env_path.read_text().splitlines(), start=1):
         line = raw_line.strip()
+
+        # Skip over comments
         if not line or line.startswith("#"):
             continue
-        if "=" in line:
-            key, _, value = line.partition("=")
-            result[key.strip()] = value.strip()
+
+        # Error if a non-blank line is not a comment or a value assigned with a `=`
+        if "=" not in line:
+            msg = f"Malformed line {line_number} in {env_path}: {raw_line!r}"
+            raise ValueError(msg)
+        key, _, value = line.partition("=")
+        key = key.strip()
+
+        # Error if there are duplicate keys
+        if key in result:
+            msg = f"Duplicate key {key!r} at line {line_number} in {env_path}"
+            raise ValueError(msg)
+        
+        # Now we have the actual value
+        result[key] = value.strip()
     return result
 
 
