@@ -10,17 +10,15 @@ import re
 import sys
 
 # Keys to check and their known-safe placeholder values
+# Add keys to be checked and safe placeholders in this dict
 CHECKED_KEYS: dict[str, set[str]] = {
     "RCPOND_LLM_API_KEY": {"your-api-key-here", ""},
     "RCPOND_SERVICENOW_TOKEN": {"your-servicenow-token", ""},
 }
 
-# Matches lines like: RCPOND_LLM_API_KEY=some-value
-_PATTERN = re.compile(
-    r"^("
-    + "|".join(re.escape(k) for k in CHECKED_KEYS)
-    + r")\s*=\s*(.*)$"
-)
+# Matches RCPOND_LLM_API_KEY=value, RCPOND_LLM_API_KEY: value, RCPOND_LLM_API_KEY value
+# Searches anywhere in the line so commented-out secrets are also caught.
+_PATTERN = re.compile(r"(" + "|".join(re.escape(k) for k in CHECKED_KEYS) + r")[\s:=]+(.*?)$")
 
 
 def check_file(path: str) -> list[str]:
@@ -29,14 +27,12 @@ def check_file(path: str) -> list[str]:
     try:
         with open(path, encoding="utf-8", errors="ignore") as f:
             for line_no, line in enumerate(f, start=1):
-                m = _PATTERN.match(line.rstrip())
+                m = _PATTERN.search(line.rstrip())
                 if m:
                     key, value = m.group(1), m.group(2).strip()
                     safe_values = CHECKED_KEYS[key]
                     if value not in safe_values:
-                        violations.append(
-                            f"  {path}:{line_no}: {key} appears to contain a real secret"
-                        )
+                        violations.append(f"  {path}:{line_no}: {key} appears to contain a real secret")
     except (OSError, UnicodeDecodeError):
         pass
     return violations
@@ -48,10 +44,10 @@ def main(files: list[str]) -> int:
         all_violations.extend(check_file(path))
 
     if all_violations:
-        print("Possible secrets detected — commit blocked:")  # noqa: T201
+        print("Possible secrets detected — commit blocked:")
         for v in all_violations:
-            print(v)  # noqa: T201
-        print(  # noqa: T201
+            print(v)
+        print(
             "\nIf this is a false positive, move the value to a "
             "local .env file (which should be git-ignored) and "
             "use a placeholder in any committed file."

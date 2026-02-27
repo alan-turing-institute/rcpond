@@ -8,6 +8,31 @@ from pathlib import Path
 
 @dataclass
 class Config:
+    """Validated runtime configuration for rcpond.
+
+    Normally callers should not create this class directly, but use the function
+    `load_config` instead. `load_config` will populated the fields from .env file,
+    environment variables, and/or CLI arguments, ensureing that all fields are
+    present and that path fields are resolved and checked for existence at load time.
+
+    Attributes
+    ----------
+    llm_base_url : str
+        Base URL of the LLM API endpoint.
+    llm_api_key : str
+        API key for authenticating with the LLM provider.
+    llm_model : str
+        Model identifier to use for LLM requests.
+    servicenow_token : str
+        Bearer token for authenticating with the ServiceNow API.
+    servicenow_url : str
+        Base URL of the ServiceNow instance.
+    rules_path : Path
+        Path to the RULES.md file used to construct the system prompt.
+    system_prompt_template_path : Path
+        Path to the Jinja2 template used to render the system prompt.
+    """
+
     llm_base_url: str
     llm_api_key: str
     llm_model: str
@@ -60,7 +85,16 @@ def _confirm_path_exists(path_as_str: str) -> Path:
 def load_config(env_path: Path | None = None, cli_args: dict | None = None) -> Config:
     """Load configuration from .env file, environment variables, and CLI args.
 
-    Precedence (lowest to highest): .env file < environment variables < cli_args.
+    Precedence (lowest to highest):
+    - .env file
+    - environment variables
+    - cli_args.
+
+    Meaning that:
+    - any values specified in environment variable will override those in a .env file.
+    - any values specified in cli_args will override those in either a .env file or an
+      environment variable.
+
     Raises ValueError if any required field is missing after all sources are merged.
 
     Parameters
