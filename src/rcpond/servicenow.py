@@ -189,7 +189,6 @@ class ServiceNow:
 
         raise RuntimeErorr("ServiceNow.assign_myself is not yet implemented")
 
-<<<<<<< HEAD
     #     looks up the current user's sys_id via the sys_user table using
     #     the same bearer token, then patches the ticket's assigned_to field.
     #     Note: this assumes the /api/now/table/sys_user endpoint is accessible
@@ -222,22 +221,3 @@ class ServiceNow:
     #     if not results:
     #         raise RuntimeError("Could not determine current user sys_id")
     #     return results[0]["sys_id"]
-=======
-        Uses the sys_user table with sysparm_limit=1 and a query scoped to
-        the authenticated session. This is a best-effort approach — the exact
-        mechanism may vary by ServiceNow instance configuration.
-        """
-        user_url = f"{self.BASE_URL}/sys_user"
-        params = {
-            "sysparm_query": "user_name=javascript:gs.getUserName()",
-            "sysparm_fields": "sys_id",
-            "sysparm_limit": "1",
-        }
-        resp = self.session.get(user_url, params=params)
-        resp.raise_for_status()
-        results = resp.json()["result"]
-        if not results:
-            err_msg = "Could not determine current user sys_id"
-            raise RuntimeError(err_msg)
-        return results[0]["sys_id"]
->>>>>>> main
