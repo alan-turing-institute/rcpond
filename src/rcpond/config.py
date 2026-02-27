@@ -41,7 +41,7 @@ def _parse_dotenv(env_path: Path) -> dict[str, str]:
         if key in result:
             msg = f"Duplicate key {key!r} at line {line_number} in {env_path}"
             raise ValueError(msg)
-        
+
         # Now we have the actual value
         result[key] = value.strip()
     return result
