@@ -1,7 +1,10 @@
 """Configuration loading and validation for rcpond."""
 
-from dataclasses import dataclass
+import os
+import typing
+from dataclasses import dataclass, fields
 from pathlib import Path
+
 
 @dataclass
 class Config:
@@ -13,18 +16,82 @@ class Config:
     rules_path: Path
     system_prompt_template_path: Path
 
-def load_config() -> Config:
-    """Load configuration from environment variables, .env file, and/or command-line params.
 
-    Default values vs eror on missing values, precedence order and basic verification logic TBD.
+def _env_var_name(field_name: str) -> str:
+    return f"RCPOND_{field_name.upper()}"
+
+
+def _parse_dotenv(env_path: Path) -> dict[str, str]:
+    result = {}
+    for line in env_path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            key, _, value = line.partition("=")
+            result[key.strip()] = value.strip()
+    return result
+
+def _confirm_path_exists(path_as_str: str) -> Path:
+    path = Path(path_as_str).resolve()
+
+    if path.exists():
+        return path
+    
+    err_msg = f"Path {path_as_str} cannot be found"
+    raise ValueError(err_msg)
+
+
+def load_config(env_path: Path | None = None, cli_args: dict | None = None) -> Config:
+    """Load configuration from .env file, environment variables, and CLI args.
+
+    Precedence (lowest to highest): .env file < environment variables < cli_args.
+    Raises ValueError if any required field is missing after all sources are merged.
+
+    Parameters
+    ----------
+    env_path : Path | None
+        Path to a .env file to load. If None, no .env file is read.
+    cli_args : dict | None
+        Dict of config field names to values from the CLI. None values are ignored.
 
     Returns
     -------
     Config
         The loaded and validated configuration.
     """
-    # Load from .env file if present
-    # Load from actual environment variables
-    # Apply command-line param overrides
-    # Verify required fields are present
-    # Return populated Config dataclass
+    values: dict[str, str] = {}
+
+    # 1. Load from .env file (lowest precedence)
+    if env_path is not None:
+        dotenv_vars = _parse_dotenv(env_path)
+        for field in fields(Config):
+            env_key = _env_var_name(field.name)
+            if env_key in dotenv_vars:
+                values[field.name] = dotenv_vars[env_key]
+
+    # 2. Override with actual environment variables
+    for field in fields(Config):
+        env_key = _env_var_name(field.name)
+        if env_key in os.environ:
+            values[field.name] = os.environ[env_key]
+
+    # 3. Override with CLI args (highest precedence)
+    if cli_args:
+        for field in fields(Config):
+            if field.name in cli_args and cli_args[field.name] is not None:
+                values[field.name] = cli_args[field.name]
+
+    # Verify all required fields are present
+    missing = [field.name for field in fields(Config) if field.name not in values]
+    if missing:
+        msg = f"Missing required configuration: {', '.join(missing)}"
+        raise ValueError(msg)
+
+    # Confirm field containing paths are valid
+    hints = typing.get_type_hints(Config)
+    for field in fields(Config):
+        if hints[field.name] is Path:
+            values[field.name] = _confirm_path_exists(values[field.name])
+
+    return Config(**values)
