@@ -38,6 +38,11 @@ dev = [
   "pytest-cov >=3",
   "pre-commit",
 ]
+docs = [
+    "markdown-include>=0.8.1",
+    "mkdocs>=1.6.1",
+    "mkdocstrings[python]>=1.0.3",
+]
 
 [project.urls]
 Homepage = "https://github.com/alan-turing-institute/rcpond"
