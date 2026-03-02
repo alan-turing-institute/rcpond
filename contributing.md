@@ -94,12 +94,22 @@ This renders the entire `rcpond` package recursively. Docstrings should follow
 [NumPy style](https://numpydoc.readthedocs.io/en/latest/format.html).
 
 
-## Serving the docs locally
+## Verifiying and serving the docs locally
 
 Install the docs dependencies and start the MkDocs development server:
 
+Ensure that the optional "docs" dependency group is installed, which includes MkDocs and its plugins:
 ```bash
 uv pip install -e ".[docs]"
+```
+
+To verify the documentation builds correctly, you can run:
+```bash
+mkdocs build --strict --verbose
+```
+
+To serve the documentation locally, start the MkDocs development server:
+```bash
 mkdocs serve
 ```
 
