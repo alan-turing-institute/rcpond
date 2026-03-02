@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -53,18 +54,31 @@ NO_REASONING_RESPONSE = {
 }
 
 
+def make_config(**overrides):
+    defaults = {
+        "llm_chat_completions_url": "https://example.com/chat/completions",
+        "llm_api_key": "test-key",
+        "llm_model": "gpt-oss-120b",
+        "servicenow_token": "fake-token",
+        "servicenow_url": "https://example.com/servicenow",
+        "rules_path": Path("/tmp/rules.txt"),
+        "system_prompt_template_path": Path("/tmp/prompt.txt"),
+    }
+    defaults.update(overrides)
+    return Config(**defaults)
+
+
 @pytest.fixture
 def llm():
-    config = Config(chat_completions_url="https://example.com/chat/completions", api_key="test-key")
-    return LLM(config)
+    return LLM(make_config())
 
 
 class TestInit:
     def test_init_stores_values(self):
-        config = Config(chat_completions_url="https://example.com/chat", api_key="my-key")
+        config = make_config(llm_chat_completions_url="https://example.com/chat", llm_api_key="my-key")
         llm = LLM(config)
-        assert llm.chat_completions_url == "https://example.com/chat"
-        assert llm.api_key == "my-key"
+        assert llm.llm_chat_completions_url == "https://example.com/chat"
+        assert llm.llm_api_key == "my-key"
 
 
 class TestGenerate:

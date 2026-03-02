@@ -23,8 +23,8 @@ class LLM:
         config : Config
             Configuration object containing the chat completions URL and API key.
         """
-        self.chat_completions_url = config.chat_completions_url
-        self.api_key = config.api_key
+        self.llm_chat_completions_url = config.llm_chat_completions_url
+        self.llm_api_key = config.llm_api_key
 
     def _generate(self, messages: list[dict], model: str, tools: list[dict] | None = None) -> dict[str, Any]:
         """Generate a response from the LLM given a list of messages.
@@ -50,8 +50,8 @@ class LLM:
         if tools:
             payload["tools"] = tools
         response = requests.post(
-            self.chat_completions_url,
-            headers={"Authorization": f"Bearer {self.api_key}"},
+            self.llm_chat_completions_url,
+            headers={"Authorization": f"Bearer {self.llm_api_key}"},
             json=payload,
         )
         response.raise_for_status()
