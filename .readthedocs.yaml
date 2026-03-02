@@ -9,17 +9,6 @@ build:
   os: ubuntu-24.04
   tools:
     python: "3.13"
-  jobs:
-    post_checkout:
-      # Copy documentation files to the docs/ directory
-      # For some, ReadTheDocs doesn't recognise these as symlinks to the source
-      # files, so as as workaround we copy the files to the docs/ here instead.
-      # - cp -f README.md docs/index.md
-      # - cp -f contributing.md docs/contributing.md
-      # - cp -f licence.md docs/licence.md
-      # - cp -f code_of_conduct.md docs/code_of_conduct.md
-      - ls -la *.md
-      - ls -la docs/
 
 # Build documentation with Mkdocs
 mkdocs:
