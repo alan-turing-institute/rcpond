@@ -15,9 +15,11 @@ build:
       # For some, ReadTheDocs doesn't recognise these as symlinks to the source
       # files, so as as workaround we copy the files to the docs/ here instead.
       # - cp -f README.md docs/index.md
-      - cp -f contributing.md docs/contributing.md
-      - cp -f licence.md docs/licence.md
-      - cp -f code_of_conduct.md docs/code_of_conduct.md
+      # - cp -f contributing.md docs/contributing.md
+      # - cp -f licence.md docs/licence.md
+      # - cp -f code_of_conduct.md docs/code_of_conduct.md
+      ls -l *.md
+      ls -l docs/
 
 # Build documentation with Mkdocs
 mkdocs:
