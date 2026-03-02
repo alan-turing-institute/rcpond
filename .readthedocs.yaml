@@ -18,8 +18,8 @@ build:
       # - cp -f contributing.md docs/contributing.md
       # - cp -f licence.md docs/licence.md
       # - cp -f code_of_conduct.md docs/code_of_conduct.md
-      ls -l *.md
-      ls -l docs/
+      - ls -la *.md
+      - ls -la docs/
 
 # Build documentation with Mkdocs
 mkdocs:
