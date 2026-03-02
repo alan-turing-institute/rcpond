@@ -1,7 +1,10 @@
-import os
+import json
 from dataclasses import dataclass
+from typing import Any
 
 import requests
+
+from rcpond.config import Config
 
 
 @dataclass
@@ -12,20 +15,18 @@ class LLMResponse:
 
 
 class LLM:
-    def __init__(self, base_url: str | None = None, api_key: str | None = None) -> None:
+    def __init__(self, config: Config) -> None:
         """Initialise the LLM class.
 
         Parameters
         ----------
-        base_url : str | None
-            The full chat completions endpoint URL of the OpenAI compatible API. If None, will load from environment variable `OPENAI_BASE_URL`.
-        api_key : str | None
-            The API key for the OpenAI compatible API. If None, will load from environment variable `OPENAI_API_KEY`.
+        config : Config
+            Configuration object containing the chat completions URL and API key.
         """
-        self.base_url = base_url or os.environ["OPENAI_BASE_URL"]
-        self.api_key = api_key or os.environ["OPENAI_API_KEY"]
+        self.chat_completions_url = config.chat_completions_url
+        self.api_key = config.api_key
 
-    def _generate(self, messages: list[dict], model: str, tools: list[dict] | None = None) -> dict:
+    def _generate(self, messages: list[dict], model: str, tools: list[dict] | None = None) -> dict[str, Any]:
         """Generate a response from the LLM given a list of messages.
 
         Parameters
@@ -39,8 +40,8 @@ class LLM:
 
         Returns
         -------
-        dict
-            The generated response from the LLM as json.
+        dict[str, Any]
+            The generated response from the LLM as a parsed dictionary.
         """
         payload = {
             "model": model,
@@ -49,7 +50,7 @@ class LLM:
         if tools:
             payload["tools"] = tools
         response = requests.post(
-            self.base_url,
+            self.chat_completions_url,
             headers={"Authorization": f"Bearer {self.api_key}"},
             json=payload,
         )
@@ -73,7 +74,16 @@ class LLM:
         response_text = message.get("content", "")
         reasoning = message.get("reasoning_content")
         tool_calls = message.get("tool_calls")
-        planned_tool_call = tool_calls[0] if tool_calls else None
+        planned_tool_call = None
+        if tool_calls:
+            tool_call = tool_calls[0]
+            planned_tool_call = {
+                **tool_call,
+                "function": {
+                    **tool_call["function"],
+                    "arguments": json.loads(tool_call["function"]["arguments"]),
+                },
+            }
         return LLMResponse(
             response_text=response_text,
             reasoning=reasoning,

@@ -29,6 +29,7 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
+    "pytest>=9.0.2",
     "requests>=2.32.5",
 ]
 
