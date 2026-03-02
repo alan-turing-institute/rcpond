@@ -39,8 +39,8 @@ dev = [
   "pre-commit",
 ]
 docs = [
-    "markdown-include>=0.8.1",
     "mkdocs>=1.6.1",
+    "mkdocs-awesome-pages-plugin>=2.9",
     "mkdocstrings[python]>=1.0.3",
 ]
 

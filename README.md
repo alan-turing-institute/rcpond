@@ -24,11 +24,11 @@ uv pip install .
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for instructions on how to contribute.
+See [CONTRIBUTING.md](contributing.md) for instructions on how to contribute.
 
 ## License
 
-Distributed under the terms of the [MIT license](LICENSE).
+Distributed under the terms of the [MIT licence](licence.md).
 
 
 <!-- prettier-ignore-start -->

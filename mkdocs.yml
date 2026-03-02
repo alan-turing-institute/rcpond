@@ -4,6 +4,7 @@ theme:
   highlightjs: true
 plugins:
   - search
+  - awesome-pages
   - mkdocstrings:
       handlers:
         # See: https://mkdocstrings.github.io/python/usage/
@@ -12,6 +13,4 @@ plugins:
             docstring_style: numpy
             show_submodules: true
 markdown_extensions:
-  - markdown_include.include:
-      base_path: .
   - admonition

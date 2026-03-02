@@ -51,3 +51,56 @@ pre-commit run -a
 ```
 
 to check all files.
+
+# Documentation
+
+## Adding a new docs page
+
+Create a Markdown file anywhere under `docs/`. For example:
+
+```bash
+touch docs/my-new-page.md
+```
+
+The [mkdocs-awesome-pages-plugin](https://github.com/lukasgeiter/mkdocs-awesome-pages-plugin)
+will pick it up automatically. The page
+will appear in the nav after any explicitly listed entries in `docs/.pages`. To
+control where it sits relative to other pages, add it to the `nav` list in
+`docs/.pages` before the `...` entry.
+
+## Linking a root-level file into the docs
+
+A small number of pages (home, contributing, licence, code of conduct) are
+served from files that live in the repository root rather than in `docs/`. This
+is done via symlinks and then add the symlink filename is added to the appropriate position in `docs/.pages`.
+
+```bash
+ln -s ../my-root-file.md docs/my-root-file.md
+```
+
+This intended only to save duplication for files that should be visible directly from the GitHub repo as well as the documentation. Most other documentation should live in `docs/` as a regular file.
+
+## API reference
+
+The API reference is generated automatically from docstrings using
+[mkdocstrings](https://mkdocstrings.github.io/python/). The entry point is
+`docs/api.md`, which contains a single directive:
+
+```
+::: rcpond
+```
+
+This renders the entire `rcpond` package recursively. Docstrings should follow
+[NumPy style](https://numpydoc.readthedocs.io/en/latest/format.html).
+
+
+## Serving the docs locally
+
+Install the docs dependencies and start the MkDocs development server:
+
+```bash
+uv pip install -e ".[docs]"
+mkdocs serve
+```
+
+The site is then available at `http://127.0.0.1:8000`.

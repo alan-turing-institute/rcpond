@@ -1,1 +1,1 @@
-{!CODE_OF_CONDUCT.md!}
+../code_of_conduct.md
