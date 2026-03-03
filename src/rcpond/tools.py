@@ -2,7 +2,6 @@
 
 import inspect
 import typing
-from dataclasses import dataclass
 
 
 class Tool:
