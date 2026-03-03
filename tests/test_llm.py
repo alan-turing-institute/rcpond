@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 
 from rcpond.config import Config
 from rcpond.llm import LLM, LLMResponse
@@ -68,7 +69,7 @@ def make_config(**overrides):
     return Config(**defaults)
 
 
-@pytest.fixture
+@pytest.fixture()
 def llm():
     return LLM(make_config())
 
@@ -114,6 +115,24 @@ class TestGenerate:
 
         call_kwargs = mock_post.call_args
         assert call_kwargs.kwargs["json"]["tools"] == tools
+
+    # e.g. cannot connect
+    @patch("rcpond.llm.requests.post")
+    def test_generate_raises_on_connection_error(self, mock_post, llm):
+        mock_post.side_effect = requests.exceptions.ConnectionError("Failed to connect")
+
+        with pytest.raises(requests.exceptions.ConnectionError):
+            llm._generate(messages=[{"role": "user", "content": "Hi"}], model="gpt-oss-120b")
+
+    # e.g. invalid model chosen
+    @patch("rcpond.llm.requests.post")
+    def test_generate_raises_on_http_error(self, mock_post, llm):
+        mock_response = MagicMock()
+        mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError("500 Server Error")
+        mock_post.return_value = mock_response
+
+        with pytest.raises(requests.exceptions.HTTPError):
+            llm._generate(messages=[{"role": "user", "content": "Hi"}], model="fake-model")
 
     @patch("rcpond.llm.requests.post")
     def test_generate_does_not_include_tools_when_none(self, mock_post, llm):
