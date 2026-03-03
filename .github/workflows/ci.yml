@@ -8,20 +8,6 @@ on:
       - main
 
 jobs:
-  pre-commit:
-    name: Format + lint code
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@v4
-        with:
-          python-version: "3.x"
-      - uses: pre-commit/action@v3.0.0
-        with:
-          extra_args: --hook-stage manual --all-files
-
   checks:
     name: Run tests for Python ${{ matrix.python-version }} on ${{ matrix.runs-on }}
     runs-on: ${{ matrix.runs-on }}
@@ -52,3 +38,17 @@ jobs:
 
       - name: Upload coverage report
         uses: codecov/codecov-action@v3.1.4
+
+  pre-commit:
+    name: Format + lint code
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.x"
+      - uses: pre-commit/action@v3.0.0
+        with:
+          extra_args: --hook-stage manual --all-files
