@@ -116,9 +116,16 @@ ignore = [
   "PLR",    # Design related pylint codes
   "ISC001", # Conflicts with formatter
   "E501",   # Line too long
+  "RET505"  # JG: My if's have else blocks and I like it that way.
 ]
 unfixable = [
   "F401",   # Would remove unused imports
   "F841",   # Would remove unused variables
 ]
 flake8-unused-arguments.ignore-variadic-names = true  # allow unused *args/**kwargsisort.required-imports = ["from __future__ import annotations"]
+
+[dependency-groups]
+dev = [
+    "pdoc>=16.0.0",
+    "types-requests>=2.32.4.20260107",
+]
