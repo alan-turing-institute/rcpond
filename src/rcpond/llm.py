@@ -1,3 +1,19 @@
+"""An interface to an OpenAI-compatible chat completions API.
+
+Provides a class, `LLM`, which wraps the chat completions endpoint.
+The only function is:
+
+- `LLM.generate()`: To generate a response given a system prompt and
+  a user prompt, optionally with tool definitions.
+
+Responses are returned as instances of an `LLMResponse` dataclass
+containing the response text, optional reasoning content, and any
+planned tool call.
+
+The chat completions URL and API key are supplied via a `Config`
+object.
+"""
+
 import json
 from dataclasses import dataclass
 from typing import Any
@@ -9,12 +25,27 @@ from rcpond.config import Config
 
 @dataclass
 class LLMResponse:
+    """The parsed response from an LLM chat completion."""
     response_text: str
+    """The text content of the response."""
     reasoning: str | None = None
+    """Optional reasoning content (e.g. from models that support chain-of-thought)."""
     planned_tool_call: dict | None = None
+    """Optional tool call requested by the model, with arguments parsed from JSON."""
 
+
+## --------------------------------------------------------------------------------
+## Interface to this module
 
 class LLM:
+    """Simple wrapper around an OpenAI-compatible chat completions API.
+
+    Example:
+    >>> llm = LLM(config)
+    >>> response = llm.generate("You are helpful.", "Hello!", model="gpt-4")
+
+    """
+
     def __init__(self, config: Config) -> None:
         """Initialise the LLM class.
 
@@ -76,6 +107,8 @@ class LLM:
         tool_calls = message.get("tool_calls")
         planned_tool_call = None
         if tool_calls:
+            ## The API returns function arguments as a JSON string;
+            ## parse them into a dict for downstream use.
             tool_call = tool_calls[0]
             planned_tool_call = {
                 **tool_call,
