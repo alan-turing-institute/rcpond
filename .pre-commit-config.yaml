@@ -31,6 +31,15 @@ repos:
       # then, format
       - id: ruff-format
 
+  - repo: local
+    hooks:
+      - id: check-secrets
+        name: Check for accidentally committed secrets
+        language: script
+        entry: pre-commit-scripts/check_secrets.py
+        types: [text]
+        exclude: ^(pre-commit-scripts/check_secrets\.py|tests/test_check_secrets\.py)$
+
   # - repo: https://github.com/pre-commit/mirrors-mypy
   #   rev: "v1.11.1"
   #   hooks:
