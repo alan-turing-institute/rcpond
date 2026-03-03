@@ -11,6 +11,9 @@ jobs:
   pre-commit:
     name: Format + lint code
     runs-on: ubuntu-latest
+    # Reverse order of check until all mypy check routinely pass
+    # A more appropriate order would be pre-commit first then unittests
+    needs: [checks]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,7 +28,8 @@ jobs:
   checks:
     name: Run tests for Python ${{ matrix.python-version }} on ${{ matrix.runs-on }}
     runs-on: ${{ matrix.runs-on }}
-    needs: [pre-commit]
+    # Reverse order of check until all mypy check routinely pass
+    # needs: [pre-commit]
     strategy:
       fail-fast: false
       matrix:
