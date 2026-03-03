@@ -24,7 +24,7 @@ Example use
 >>> the_sn = ServiceNow("ab...def")
 >>> the_sn.get_unassigned_tickets()
 
-"""
+""" 
 
 import dataclasses
 from dataclasses import dataclass

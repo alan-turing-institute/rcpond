@@ -61,12 +61,12 @@ class Config:
     rules_path: Path = field(init=False)
     system_prompt_template_path: Path = field(init=False)
 
-    def __post_init__(self, env_path: Path | None, cli_args: dict | None) -> None:
+    def __post_init__(self, env_path: str | None, cli_args: dict | None) -> None:
         values: dict[str, str] = {}
 
         # 1. Load from .env file (lowest precedence)
         if env_path is not None:
-            dotenv_vars = _parse_dotenv(env_path)
+            dotenv_vars = _parse_dotenv(_confirm_path_exists(env_path))
             for f in fields(self):
                 env_key = _env_var_name(f.name)
                 if env_key in dotenv_vars:
