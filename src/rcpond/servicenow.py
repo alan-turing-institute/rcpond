@@ -28,50 +28,55 @@ Example use
 
 import dataclasses
 from dataclasses import dataclass
+
 import requests
+
 
 @dataclass
 class Ticket:
     """A ticket; contains only high-level details about the ticket."""
-    sys_id            : str
+
+    sys_id: str
     """The internal ServiceNow identifier for the ticket."""
-    number            : str
+    number: str
     """The ticket number as recognised by agents."""
-    opened_at         : str
+    opened_at: str
     """A timestamp, formatted as `DD/MM/YYYY HH:MM:SS` """
-    requested_for     : str
-    u_category        : str
-    u_sub_category    : str
-    short_description : str
+    requested_for: str
+    u_category: str
+    u_sub_category: str
+    short_description: str
+
 
 @dataclass
 class FullTicket(Ticket):
     """A ticket; includes full details from the original submission."""
-    work_notes                  : str
-    project_title               : str
-    research_area_programme     : str
-    if_other_please_specify     : str
-    pi_supervisor_name          : str
-    pi_supervisor_email         : str
-    which_service               : str
-    subscription_type           : str
-    which_finance_code          : str
-    pmu_contact_email           : str
-    credits_requested           : str
-    which_facility              : str
+
+    work_notes: str
+    project_title: str
+    research_area_programme: str
+    if_other_please_specify: str
+    pi_supervisor_name: str
+    pi_supervisor_email: str
+    which_service: str
+    subscription_type: str
+    which_finance_code: str
+    pmu_contact_email: str
+    credits_requested: str
+    which_facility: str
     if_other_please_specify_facility: str
-    cpu_hours_required          : str
-    gpu_hours_required          : str
-    new_or_existing_allocation  : str
+    cpu_hours_required: str
+    gpu_hours_required: str
+    new_or_existing_allocation: str
     azure_subscription_id_or_hpc_group_project_id: str
-    start_date                  : str
-    end_date                    : str
-    data_sensitivity            : str
-    platform_justification      : str
-    research_justification      : str
-    computational_requirements  : str
+    start_date: str
+    end_date: str
+    data_sensitivity: str
+    platform_justification: str
+    research_justification: str
+    computational_requirements: str
     users_who_require_access_names_and_emails: str
-    cost_compute_time_breakdown : str
+    cost_compute_time_breakdown: str
 
     @classmethod
     def from_Ticket(cls, t: Ticket, **extras):
@@ -83,7 +88,8 @@ class FullTicket(Ticket):
 
 ## --------------------------------------------------------------------------------
 ## Utilities
-    
+
+
 ## Extract, from the record returned from ServiceNow, the fields
 ## defined in Ticket. A value in the record is either a string,
 ## or a dictionary with keys "value", "display_value", and (sometimes)
@@ -94,27 +100,23 @@ def _extract_display_value(fld: dict | str) -> str:
     else:
         return fld
 
+
 ## tkt: The JSON from the API call (as a dictionary)
 def _extract_ticket_fields(tkt: dict, fields: set[str]) -> dict:
-    return {
-        field: _extract_display_value(tkt.get(field))
-        for field in fields
-    }
-
+    return {field: _extract_display_value(tkt.get(field)) for field in fields}
 
 
 ## --------------------------------------------------------------------------------
 ## Interace to this module
-    
-class ServiceNow:
-    """Simple wrapper around limited parts of the ServiceNow API.
-    
-    """
 
-    # ServiceNow configuration 
+
+class ServiceNow:
+    """Simple wrapper around limited parts of the ServiceNow API."""
+
+    # ServiceNow configuration
     _BASE_URL = "https://turing-api.azure-api.net/dev-research/api/now/table"
-    _TABLE    = "x_tati_resmgt_research"
-    _FILTER   = "assigned_toISEMPTY^short_description=Request access to HPC and cloud computing facilities" 
+    _TABLE = "x_tati_resmgt_research"
+    _FILTER = "assigned_toISEMPTY^short_description=Request access to HPC and cloud computing facilities"
 
     def __init__(self, token: str):
         self.session = requests.Session()
@@ -126,43 +128,35 @@ class ServiceNow:
             }
         )
 
-
     def get_unassigned_tickets(self) -> list[Ticket]:
         """Get unassigned tickets that are applications for HPC/Azure
-           credits.
+        credits.
         """
 
         ticket_fields = {field.name for field in dataclasses.fields(Ticket)}
-        
+
         ## Get the list of unassigned tickets as JSON
-        resp = self.session.get(self._BASE_URL + "/" + self._TABLE,
-                                params = {
-                                    "sysparm_query": self._FILTER,
-                                    "sysparm_display_value": "all"
-                                    }
-                                )
+        resp = self.session.get(
+            self._BASE_URL + "/" + self._TABLE, params={"sysparm_query": self._FILTER, "sysparm_display_value": "all"}
+        )
 
         resp.raise_for_status()
 
         ## Parse the JSON for each ticket
-        return [
-            Ticket(** _extract_ticket_fields(tkt, ticket_fields))
-            for tkt in resp.json()["result"]
-        ]
-
+        return [Ticket(**_extract_ticket_fields(tkt, ticket_fields)) for tkt in resp.json()["result"]]
 
     def get_full_ticket(self, tkt: Ticket) -> FullTicket:
         """Get full ticket details."""
 
         ## Get details from ServiceNow as JSON
-        extra_fields = {field.name for field in dataclasses.fields(FullTicket)} - {field.name for field in dataclasses.fields(Ticket)}
+        extra_fields = {field.name for field in dataclasses.fields(FullTicket)} - {
+            field.name for field in dataclasses.fields(Ticket)
+        }
 
-        resp = self.session.get(self._BASE_URL + "/" + self._TABLE + "/" + tkt.sys_id,
-                                params = {
-                                    "sysparm_fields": ",".join(extra_fields),
-                                    "sysparm_display_value": "all"
-                                }
-                                )
+        resp = self.session.get(
+            self._BASE_URL + "/" + self._TABLE + "/" + tkt.sys_id,
+            params={"sysparm_fields": ",".join(extra_fields), "sysparm_display_value": "all"},
+        )
 
         resp.raise_for_status()
 
@@ -171,13 +165,13 @@ class ServiceNow:
 
         return FullTicket.from_Ticket(tkt, **_extract_ticket_fields(result, extra_fields))
 
-
-    
-    def post_note(self, ticket: Ticket, note: str) -> None:
+    def post_note(self, _1: Ticket, _2: str) -> None:
         """Post a work note to a ticket.
 
-           NOT IMPLEMENTED"""
-        raise RuntimeError("ServiceNow.post_note is not yet implemented.")
+        Not yet implemented."""
+
+        msg = "ServiceNow.post_note is not yet implemented."
+        raise RuntimeError(msg)
 
     # resp = self.session.patch(
     #         f"{self.endpoint}/{ticket.sys_id}",
@@ -185,13 +179,13 @@ class ServiceNow:
     #     )
     #     resp.raise_for_status()
 
-    def assign_myself(self, ticket: Ticket) -> None:
+    def assign_myself(self, _: Ticket) -> None:
         """Assign the current user to a ticket.
 
         Not yet implemented.
         """
-
-        raise RuntimeErorr("ServiceNow.assign_myself is not yet implemented")
+        msg = "ServiceNow.assign_myself is not yet implemented"
+        raise RuntimeError(msg)
 
     #     looks up the current user's sys_id via the sys_user table using
     #     the same bearer token, then patches the ticket's assigned_to field.
