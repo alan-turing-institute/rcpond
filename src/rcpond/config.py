@@ -1,8 +1,23 @@
-"""Configuration loading and validation for rcpond."""
+"""Configuration loading and validation for rcpond.
+
+Provides a `Config` class which loads configuration from three sources, in order
+of increasing precedence:
+
+1. A .env file (if ``env_path`` is supplied)
+2. Environment variables prefixed with ``RCPOND_`` (e.g. ``RCPOND_LLM_MODEL``)
+3. Explicit CLI arguments passed as ``cli_args``
+
+Values from a higher-precedence source always override lower-precedence ones.
+A ``ValueError`` is raised if any required field is still missing after all
+sources are merged, or if a path field does not exist on disk.
+
+The constructor implements some basic validation of parameters, specifically
+ensuring that the file paths are valid.
+"""
 
 import os
 import typing
-from dataclasses import dataclass, fields
+from dataclasses import InitVar, dataclass, field, fields
 from pathlib import Path
 
 
@@ -10,10 +25,12 @@ from pathlib import Path
 class Config:
     """Validated runtime configuration for rcpond.
 
-    Normally callers should not create this class directly, but use the function
-    `load_config` instead. `load_config` will populated the fields from .env file,
-    environment variables, and/or CLI arguments, ensureing that all fields are
-    present and that path fields are resolved and checked for existence at load time.
+    Parameters
+    ----------
+    env_path : Path | None
+        Path to a .env file to load. If None, no .env file is read.
+    cli_args : dict | None
+        Dict of config field names to values from the CLI. None values are ignored.
 
     Attributes
     ----------
@@ -33,13 +50,52 @@ class Config:
         Path to the Jinja2 template used to render the system prompt.
     """
 
-    llm_base_url: str
-    llm_api_key: str
-    llm_model: str
-    servicenow_token: str
-    servicenow_url: str
-    rules_path: Path
-    system_prompt_template_path: Path
+    env_path: InitVar[Path | None] = None
+    cli_args: InitVar[dict | None] = None
+
+    llm_base_url: str = field(init=False)
+    llm_api_key: str = field(init=False)
+    llm_model: str = field(init=False)
+    servicenow_token: str = field(init=False)
+    servicenow_url: str = field(init=False)
+    rules_path: Path = field(init=False)
+    system_prompt_template_path: Path = field(init=False)
+
+    def __post_init__(self, env_path: Path | None, cli_args: dict | None) -> None:
+        values: dict[str, str] = {}
+
+        # 1. Load from .env file (lowest precedence)
+        if env_path is not None:
+            dotenv_vars = _parse_dotenv(env_path)
+            for f in fields(self):
+                env_key = _env_var_name(f.name)
+                if env_key in dotenv_vars:
+                    values[f.name] = dotenv_vars[env_key]
+
+        # 2. Override with actual environment variables
+        for f in fields(self):
+            env_key = _env_var_name(f.name)
+            if env_key in os.environ:
+                values[f.name] = os.environ[env_key]
+
+        # 3. Override with CLI args (highest precedence)
+        if cli_args:
+            for f in fields(self):
+                if f.name in cli_args and cli_args[f.name] is not None:
+                    values[f.name] = cli_args[f.name]
+
+        # Verify all required fields are present
+        missing = [f.name for f in fields(self) if f.name not in values]
+        if missing:
+            msg = f"Missing required configuration: {', '.join(missing)}"
+            raise ValueError(msg)
+
+        # Confirm path fields are valid and set attributes
+        field_names = {f.name for f in fields(self)}
+        hints = {k: v for k, v in typing.get_type_hints(Config).items() if k in field_names}
+        for f in fields(self):
+            value = _confirm_path_exists(values[f.name]) if hints[f.name] is Path else values[f.name]
+            setattr(self, f.name, value)
 
 
 def _env_var_name(field_name: str) -> str:
@@ -80,67 +136,3 @@ def _confirm_path_exists(path_as_str: str) -> Path:
 
     err_msg = f"Path {path_as_str} cannot be found"
     raise ValueError(err_msg)
-
-
-def load_config(env_path: Path | None = None, cli_args: dict | None = None) -> Config:
-    """Load configuration from .env file, environment variables, and CLI args.
-
-    Precedence (lowest to highest):
-    - .env file
-    - environment variables
-    - cli_args.
-
-    Meaning that:
-    - any values specified in environment variable will override those in a .env file.
-    - any values specified in cli_args will override those in either a .env file or an
-      environment variable.
-
-    Raises ValueError if any required field is missing after all sources are merged.
-
-    Parameters
-    ----------
-    env_path : Path | None
-        Path to a .env file to load. If None, no .env file is read.
-    cli_args : dict | None
-        Dict of config field names to values from the CLI. None values are ignored.
-
-    Returns
-    -------
-    Config
-        The loaded and validated configuration.
-    """
-    values: dict[str, str] = {}
-
-    # 1. Load from .env file (lowest precedence)
-    if env_path is not None:
-        dotenv_vars = _parse_dotenv(env_path)
-        for field in fields(Config):
-            env_key = _env_var_name(field.name)
-            if env_key in dotenv_vars:
-                values[field.name] = dotenv_vars[env_key]
-
-    # 2. Override with actual environment variables
-    for field in fields(Config):
-        env_key = _env_var_name(field.name)
-        if env_key in os.environ:
-            values[field.name] = os.environ[env_key]
-
-    # 3. Override with CLI args (highest precedence)
-    if cli_args:
-        for field in fields(Config):
-            if field.name in cli_args and cli_args[field.name] is not None:
-                values[field.name] = cli_args[field.name]
-
-    # Verify all required fields are present
-    missing = [field.name for field in fields(Config) if field.name not in values]
-    if missing:
-        msg = f"Missing required configuration: {', '.join(missing)}"
-        raise ValueError(msg)
-
-    # Confirm path fields are valid and construct Config
-    hints = typing.get_type_hints(Config)
-    config_kwargs: dict[str, str | Path] = {
-        field.name: _confirm_path_exists(values[field.name]) if hints[field.name] is Path else values[field.name]
-        for field in fields(Config)
-    }
-    return Config(**config_kwargs)  # type: ignore[arg-type]

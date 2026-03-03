@@ -5,8 +5,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "pre-commit-scripts"))
 
-from check_secrets import check_file, main  # noqa: E402
-
+from check_secrets import check_file, main
 
 # --- Helpers ---
 

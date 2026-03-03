@@ -1,5 +1,5 @@
 # Assumed import paths
-from rcpond.config import load_config
+from rcpond.config import Config
 from rcpond.llm import LLM, LLMResponse
 from rcpond.prompt import construct_prompt
 from rcpond.servicenow import FullTicket, ServiceNow, Ticket
@@ -20,7 +20,7 @@ def display_all_tickets():
     Display the list of relevant tickets from ServiceNow to the user.
 
     """
-    config = load_config()
+    config = Config()
     service_now: ServiceNow = ServiceNow(config.servicenow_token)
 
     tickets: list[Ticket] = service_now.get_unassigned_tickets()
@@ -41,7 +41,7 @@ def process_next_ticket(dry_run: bool):
     """
     # This function is very similar to `batch_process_tickets` and probably should be refactored.
 
-    config = load_config()
+    config = Config()
     service_now: ServiceNow = ServiceNow(config.servicenow_token)
 
     tickets: list[Ticket] = service_now.get_unassigned_tickets()
@@ -67,7 +67,7 @@ def process_specific_ticket(ticket: Ticket, dry_run: bool):
             False : Planned tool calls returned by the LLM WILL be attempted
     """
 
-    config = load_config()
+    config = Config()
     service_now: ServiceNow = ServiceNow(config.servicenow_token)
     llm: LLM = LLM(config.llm_base_url, config.llm_api_key)
 
@@ -108,7 +108,7 @@ def batch_process_tickets(dry_run: bool):
     #
     # This function is very similar to `process_next_ticket` and probably should be refactored.
 
-    config = load_config()
+    config = Config()
     service_now: ServiceNow = ServiceNow(config.servicenow_token)
 
     tickets: list[Ticket] = service_now.get_unassigned_tickets()
