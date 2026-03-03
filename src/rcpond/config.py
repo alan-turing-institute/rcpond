@@ -34,7 +34,7 @@ class Config:
 
     Attributes
     ----------
-    llm_base_url : str
+    llm_chat_completions_url : str
         Base URL of the LLM API endpoint.
     llm_api_key : str
         API key for authenticating with the LLM provider.
@@ -53,7 +53,7 @@ class Config:
     env_path: InitVar[Path | None] = None
     cli_args: InitVar[dict | None] = None
 
-    llm_base_url: str = field(init=False)
+    llm_chat_completions_url: str = field(init=False)
     llm_api_key: str = field(init=False)
     llm_model: str = field(init=False)
     servicenow_token: str = field(init=False)

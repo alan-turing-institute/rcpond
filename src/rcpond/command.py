@@ -3,7 +3,7 @@ from rcpond.config import Config
 from rcpond.llm import LLM, LLMResponse
 from rcpond.prompt import construct_prompt
 from rcpond.servicenow import FullTicket, ServiceNow, Ticket
-from rcpond.tools import process_planned_tool_call
+from rcpond.tools import call_tool
 
 
 def _display_output(*stuff):
@@ -69,7 +69,7 @@ def process_specific_ticket(ticket: Ticket, dry_run: bool):
 
     config = Config()
     service_now: ServiceNow = ServiceNow(config.servicenow_token)
-    llm: LLM = LLM(config.llm_base_url, config.llm_api_key)
+    llm: LLM = LLM(config)
 
     full_ticket: FullTicket = service_now.get_full_ticket(ticket)
 
@@ -81,7 +81,7 @@ def process_specific_ticket(ticket: Ticket, dry_run: bool):
     llm_response: LLMResponse = llm.generate(system_prompt, user_prompt, config.llm_model)
 
     if not dry_run and llm_response.planned_tool_call is not None:
-        process_planned_tool_call(llm_response.planned_tool_call)
+        call_tool(llm_response.planned_tool_call)
 
     _display_output(llm_response)
 
