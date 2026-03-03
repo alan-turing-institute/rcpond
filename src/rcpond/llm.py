@@ -26,6 +26,7 @@ from rcpond.config import Config
 @dataclass
 class LLMResponse:
     """The parsed response from an LLM chat completion."""
+
     response_text: str
     """The text content of the response."""
     reasoning: str | None = None
@@ -36,6 +37,7 @@ class LLMResponse:
 
 ## --------------------------------------------------------------------------------
 ## Interface to this module
+
 
 class LLM:
     """Simple wrapper around an OpenAI-compatible chat completions API.
@@ -123,7 +125,9 @@ class LLM:
             planned_tool_call=planned_tool_call,
         )
 
-    def generate(self, system_prompt: str, user_prompt: str, model: str, tools: list[dict] | None = None) -> LLMResponse:
+    def generate(
+        self, system_prompt: str, user_prompt: str, model: str, tools: list[dict] | None = None
+    ) -> LLMResponse:
         """Generate an LLM response given a system prompt and a user prompt.
         Formats the system and user prompt into a single prompt and calls the `_generate` method to get the response from the LLM.
         LLM response is parsed into `LLMResponse` dataclass.
