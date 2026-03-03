@@ -1,8 +1,8 @@
 """Tool definitions available to the LLM and execution of planned tool calls."""
 
-import typing
-from dataclasses import dataclass
 import inspect
+import typing
+
 
 class Tool:
     def __init__(self, func: typing.Callable):

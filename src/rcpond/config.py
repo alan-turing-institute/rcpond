@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 
+
 @dataclass
 class Config:
     llm_chat_completions_url: str
@@ -12,6 +13,7 @@ class Config:
     servicenow_url: str
     rules_path: Path
     system_prompt_template_path: Path
+
 
 def load_config() -> Config:
     """Load configuration from environment variables, .env file, and/or command-line params.
