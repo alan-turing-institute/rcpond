@@ -1,28 +1,34 @@
 """A limited interface to ServiceNow.
 
 Provides a class, `ServiceNow`, which wraps the ServiceNow
-API. The only functions are:
+API. The only methods are:
 
-- `ServiceNow.get_unassigned_tickets()`: To get a list of unassigned tickets;
-- `ServiceNow.get_full_ticket()`: To get full details of a ticket;
-- To assign oneself to a ticket; and
-- To post a “work note” to a ticket.
+- `ServiceNow.get_unassigned_tickets()`: Get a list of unassigned tickets;
+- `ServiceNow.get_full_ticket()`: Get full details of a ticket;
+- `assign_myself()` (Not implemented) Assign oneself to a ticket; and
+- `post_note()` (Not implemented) Post a “work note” to a ticket.
 
 Tickets are returned as instances of a `Ticket` dataclass which
 contains a few, high-level details. The subclass `FullTicket` contains
-in addition the fields submitted by the requestor on the request form.
+,in addition, the fields submitted by the requestor on the request form.
 
 The URL of the ServiceNow API is hardcoded, but you will need to
 supply a user authentication token.
 
 This version filters out all tickets that are not requests for HPC or
 Azure resource.
+
+Example use
+-----------
+
+>>> the_sn = ServiceNow("ab...def")
+>>> the_sn.get_unassigned_tickets()
+
 """
 
 import dataclasses
 from dataclasses import dataclass
 import requests
-
 
 @dataclass
 class Ticket:
@@ -32,6 +38,7 @@ class Ticket:
     number            : str
     """The ticket number as recognised by agents."""
     opened_at         : str
+    """A timestamp, formatted as `DD/MM/YYYY HH:MM:SS` """
     requested_for     : str
     u_category        : str
     u_sub_category    : str
@@ -88,7 +95,7 @@ def _extract_display_value(fld: dict | str) -> str:
         return fld
 
 ## tkt: The JSON from the API call (as a dictionary)
-def _extract_ticket_fields(tkt: dict, fields: list[str]) -> dict:
+def _extract_ticket_fields(tkt: dict, fields: set[str]) -> dict:
     return {
         field: _extract_display_value(tkt.get(field))
         for field in fields
@@ -101,9 +108,6 @@ def _extract_ticket_fields(tkt: dict, fields: list[str]) -> dict:
     
 class ServiceNow:
     """Simple wrapper around limited parts of the ServiceNow API.
-
-       Example:
-       >>> the_service = ServiceNow("abc...efg")
     
     """
 
@@ -128,7 +132,7 @@ class ServiceNow:
            credits.
         """
 
-        ticket_fields = [field.name for field in dataclasses.fields(Ticket)]
+        ticket_fields = {field.name for field in dataclasses.fields(Ticket)}
         
         ## Get the list of unassigned tickets as JSON
         resp = self.session.get(self._BASE_URL + "/" + self._TABLE,
@@ -156,7 +160,7 @@ class ServiceNow:
         resp = self.session.get(self._BASE_URL + "/" + self._TABLE + "/" + tkt.sys_id,
                                 params = {
                                     "sysparm_fields": ",".join(extra_fields),
-                                    "sysparm_display_value": "true"
+                                    "sysparm_display_value": "all"
                                 }
                                 )
 
