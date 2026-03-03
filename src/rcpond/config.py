@@ -1,18 +1,34 @@
 """Configuration loading and validation for rcpond.
 
-Provides a `Config` class which loads configuration from three sources, in order
-of increasing precedence:
+Provides class `Config` to read, parse, and make available
+configuration variables required at runtime.  The constructor loads
+configuration from:
 
-1. A .env file (if ``env_path`` is supplied)
+1. A file (if ``env_path`` is supplied)
 2. Environment variables prefixed with ``RCPOND_`` (e.g. ``RCPOND_LLM_MODEL``)
 3. Explicit CLI arguments passed as ``cli_args``
 
-Values from a higher-precedence source always override lower-precedence ones.
-A ``ValueError`` is raised if any required field is still missing after all
-sources are merged, or if a path field does not exist on disk.
+Values from a later sources override earlier ones.  A ``ValueError``
+is raised if any required field is still missing after all sources are
+merged, or if a path field does not exist on disk.
 
 The constructor implements some basic validation of parameters, specifically
 ensuring that the file paths are valid.
+
+File format
+-----------
+
+The format of the configuration file is, for example,
+```
+SERVICENOW_URL=https://turing-api.azure-api.net/dev-research/api/now/table
+...
+```
+
+Example use
+-----------
+
+>>> the_config = Config("~/.config/rcpond/rcpond.txt")
+>>> the_config.SERVICENOW_URL
 """
 
 import os
