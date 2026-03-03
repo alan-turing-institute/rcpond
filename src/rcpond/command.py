@@ -69,7 +69,7 @@ def process_specific_ticket(ticket: Ticket, dry_run: bool):
 
     config = load_config()
     service_now: ServiceNow = ServiceNow(config.servicenow_token)
-    llm: LLM = LLM(config.llm_base_url, config.llm_api_key)
+    llm: LLM = LLM(config)
 
     full_ticket: FullTicket = service_now.get_full_ticket(ticket)
 
