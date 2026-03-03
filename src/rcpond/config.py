@@ -6,7 +6,7 @@ from pathlib import Path
 
 @dataclass
 class Config:
-    llm_base_url: str
+    llm_chat_completions_url: str
     llm_api_key: str
     llm_model: str
     servicenow_token: str
