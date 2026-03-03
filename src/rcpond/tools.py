@@ -26,8 +26,8 @@ def get_available_tools(**kwargs) -> list[Tool]:
     Parameters
     ----------
     kwargs: this is a placeholder. In practise the tools might be dependant on other
-    component or configuration values. For example the tool "servicenow_comment_on_ticket"
-    will probably need access the ServiceNow object.
+        component or configuration values. For example the tool "servicenow_comment_on_ticket"
+        will probably need access the ServiceNow object.
     """
 
 

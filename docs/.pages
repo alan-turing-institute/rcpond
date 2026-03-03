@@ -1,0 +1,9 @@
+nav:
+  - Home: index.md
+  - ...
+  - Development:
+    - contributing.md
+    - licence.md
+    - code_of_conduct.md
+  - API:
+    - api.md
