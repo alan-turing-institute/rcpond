@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -55,27 +54,37 @@ NO_REASONING_RESPONSE = {
 }
 
 
-def make_config(**overrides):
-    defaults = {
-        "llm_chat_completions_url": "https://example.com/chat/completions",
-        "llm_api_key": "test-key",
-        "llm_model": "gpt-oss-120b",
-        "servicenow_token": "fake-token",
-        "servicenow_url": "https://example.com/servicenow",
-        "rules_path": Path("/tmp/rules.txt"),
-        "system_prompt_template_path": Path("/tmp/prompt.txt"),
-    }
-    defaults.update(overrides)
-    return Config(**defaults)
+@pytest.fixture()
+def make_config(tmp_path):
+    rules_file = tmp_path / "rules.txt"
+    prompt_file = tmp_path / "prompt.txt"
+
+    rules_file.touch()
+    prompt_file.touch()
+
+    def _make_config(**overrides):
+        defaults = {
+            "llm_chat_completions_url": "https://example.com/chat/completions",
+            "llm_api_key": "test-key",
+            "llm_model": "gpt-oss-120b",
+            "servicenow_token": "fake-token",
+            "servicenow_url": "https://example.com/servicenow",
+            "rules_path": str(rules_file),
+            "system_prompt_template_path": str(prompt_file),
+        }
+        defaults.update(overrides)
+        return Config(cli_args=defaults)
+
+    return _make_config
 
 
 @pytest.fixture()
-def llm():
+def llm(make_config):
     return LLM(make_config())
 
 
 class TestInit:
-    def test_init_stores_values(self):
+    def test_init_stores_values(self, make_config):
         config = make_config(llm_chat_completions_url="https://example.com/chat", llm_api_key="my-key")
         llm = LLM(config)
         assert llm.llm_chat_completions_url == "https://example.com/chat"

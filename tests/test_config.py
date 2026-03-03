@@ -22,7 +22,7 @@ def all_values(path_files):
     """A complete set of config values with valid paths."""
     rules, template = path_files
     return {
-        "llm_base_url": "https://api.example.com",
+        "llm_chat_completions_url": "https://api.example.com",
         "llm_api_key": "test-api-key",
         "llm_model": "gpt-4",
         "servicenow_token": "sn-token",
@@ -49,7 +49,7 @@ def test_load_from_dotenv_only(tmp_path, all_values, path_files):
 
     config = Config(env_path=env_file)
 
-    assert config.llm_base_url == "https://api.example.com"
+    assert config.llm_chat_completions_url == "https://api.example.com"
     assert config.llm_api_key == "test-api-key"
     assert config.llm_model == "gpt-4"
     assert config.rules_path == rules.resolve()
@@ -62,14 +62,14 @@ def test_load_from_env_vars_only(monkeypatch, all_values):
 
     config = Config()
 
-    assert config.llm_base_url == "https://api.example.com"
+    assert config.llm_chat_completions_url == "https://api.example.com"
     assert config.llm_model == "gpt-4"
 
 
 def test_load_from_cli_args_only(all_values):
     config = Config(cli_args=all_values)
 
-    assert config.llm_base_url == "https://api.example.com"
+    assert config.llm_chat_completions_url == "https://api.example.com"
     assert config.llm_model == "gpt-4"
 
 
@@ -221,7 +221,7 @@ def test_fields_are_config_values_only():
     """InitVar params (env_path, cli_args) must not appear in fields()."""
     field_names = [f.name for f in fields(Config)]
     assert field_names == [
-        "llm_base_url",
+        "llm_chat_completions_url",
         "llm_api_key",
         "llm_model",
         "servicenow_token",
