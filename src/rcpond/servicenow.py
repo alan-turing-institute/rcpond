@@ -24,7 +24,7 @@ Example use
 >>> the_sn = ServiceNow("ab...def")
 >>> the_sn.get_unassigned_tickets()
 
-""" 
+"""
 
 import dataclasses
 from dataclasses import dataclass
@@ -102,8 +102,8 @@ def _extract_display_value(fld: dict | str) -> str:
 
 
 ## tkt: The JSON from the API call (as a dictionary)
-def _extract_ticket_fields(tkt: dict, fields: set[str]) -> dict:
-    return {field: _extract_display_value(tkt.get(field)) for field in fields}
+def _extract_ticket_fields(tkt: dict[str, dict | str], fields: set[str]) -> dict:
+    return {field: _extract_display_value(tkt.get(field, "")) for field in fields}
 
 
 ## --------------------------------------------------------------------------------

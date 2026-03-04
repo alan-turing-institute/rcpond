@@ -49,7 +49,7 @@ class Config:
 
     Parameters
     ----------
-    env_path : Path | None
+    env_path : str | None
         Path to a .env file to load. If None, no .env file is read.
     cli_args : dict | None
         Dict of config field names to values from the CLI. None values are ignored.
@@ -72,7 +72,7 @@ class Config:
         Path to the Jinja2 template used to render the system prompt.
     """
 
-    env_path: InitVar[Path | None] = None
+    env_path: InitVar[str | None] = None
     cli_args: InitVar[dict | None] = None
 
     llm_chat_completions_url: str = field(init=False)
