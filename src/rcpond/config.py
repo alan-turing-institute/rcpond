@@ -5,7 +5,7 @@ configuration variables required at runtime.  The constructor loads
 configuration from:
 
 1. A file (if ``env_path`` is supplied)
-2. Environment variables prefixed with ``RCPOND_`` (e.g. ``RCPOND_LLM_MODEL``)
+2. Environment variables prefixed with ``RCPOND_`` and uppercased (e.g. ``RCPOND_LLM_MODEL``)
 3. Explicit CLI arguments passed as ``cli_args``
 
 Values from a later sources override earlier ones.  A ``ValueError``
@@ -18,17 +18,23 @@ ensuring that the file paths are valid.
 File format
 -----------
 
-The format of the configuration file is, for example,
+The format of the configuration file is:
 ```
-SERVICENOW_URL=https://turing-api.azure-api.net/dev-research/api/now/table
-...
+RCPOND_LLM_CHAT_COMPLETIONS_URL=...
+RCPOND_LLM_API_KEY=your-api-key-here
+RCPOND_LLM_MODEL=...
+RCPOND_SERVICENOW_TOKEN=your-servicenow-token
+RCPOND_SERVICENOW_URL=https://turing-api.azure-api.net/dev-research/api/now/table
+RCPOND_RULES_PATH=/path/to/rule/file
+RCPOND_SYSTEM_PROMPT_TEMPLATE_PATH=/path/to/prompt/file
 ```
 
 Example use
 -----------
 
->>> the_config = Config("~/.config/rcpond/rcpond.txt")
->>> the_config.SERVICENOW_URL
+>>> the_config = Config("/home/.config/rcpond/rcpond.txt")
+>>> the_config.servicenow_token
+
 """
 
 import os
