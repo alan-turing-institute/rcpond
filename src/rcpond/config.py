@@ -21,9 +21,9 @@ File format
 The format of the configuration file is:
 ```
 RCPOND_LLM_CHAT_COMPLETIONS_URL=...
-RCPOND_LLM_API_KEY=...
+RCPOND_LLM_API_KEY=your-api-key-here
 RCPOND_LLM_MODEL=...
-RCPOND_SERVICENOW_TOKEN=ABC...DEF
+RCPOND_SERVICENOW_TOKEN=your-servicenow-token
 RCPOND_SERVICENOW_URL=https://turing-api.azure-api.net/dev-research/api/now/table
 RCPOND_RULES_PATH=/path/to/rule/file
 RCPOND_SYSTEM_PROMPT_TEMPLATE_PATH=/path/to/prompt/file
