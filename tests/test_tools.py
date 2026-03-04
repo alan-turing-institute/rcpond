@@ -3,7 +3,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from rcpond.servicenow import Ticket
-from rcpond.tools import _IMPLEMENTATIONS, Tool, call_tool, get_available_tools
+from rcpond.tool import Tool
+from rcpond.tools import _IMPLEMENTATIONS, call_tool, get_available_tools
 
 # --- Tool class ---
 
