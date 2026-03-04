@@ -11,6 +11,8 @@ RCPond is a tool to partly automate RCP (Research Computing Platform) requests. 
 - `src/rcpond/` — Main package source code
   - `llm.py` — LLM client wrapping an OpenAI-compatible chat completions API
   - `servicenow.py` — ServiceNow client for managing HPC/cloud access request tickets
+  - `prompt.py` — Constructs system and user prompts for LLM calls
+  - `tools.py` — Defines available LLM tools and dispatches tool calls
   - `command.py` — High-level commands (display tickets, process tickets via LLM)
 - `tests/` — Unit tests (pytest)
 - `planning/` — Design documents and specifications
@@ -24,9 +26,10 @@ RCPond is a tool to partly automate RCP (Research Computing Platform) requests. 
 
 ## Architecture Notes
 
-- **Config pattern**: Modules accept a config object rather than reading environment variables directly. Config loading is centralised via `load_config()` (not yet implemented). The `LLM` class expects a config object with `chat_completions_url` and `api_key` attributes.
+- **Config pattern**: Modules accept a config object rather than reading environment variables directly. Config is loaded via the `Config` constructor (see `config.py`).
 - **LLM API**: Uses the OpenAI-compatible chat completions API via raw `requests` (not the openai SDK). The `response.json()` call returns a parsed Python dict. Tool call `function.arguments` comes as a JSON string from the API and is parsed to a dict in `_parse_response`.
 - **Dataclasses**: Used throughout for data structures (`Ticket`, `FullTicket`, `LLMResponse`).
+- **System prompt template**: Uses Python `str.format(rules=rules_text)` — not Jinja2. The template path comes from `config.system_prompt_template_path`.
 - **Documentation style**: Each module should have lightweight inline docs following this pattern:
   - **Module docstring**: A top-level `"""..."""` summarising the module's purpose, listing its public API, describing return types, and noting configuration requirements.
   - **Class docstrings**: A brief one-liner with a usage example (`>>> ...`).
