@@ -88,11 +88,6 @@ def test_construct_prompt_returns_strings(config, full_ticket):
     assert isinstance(user_prompt, str)
 
 
-def test_system_prompt_contains_rules(config, full_ticket, rules_text):
-    system_prompt, _ = construct_prompt(full_ticket, config)
-    assert rules_text in system_prompt
-
-
 def test_system_prompt_uses_template(config, full_ticket, template_text, rules_text):
     system_prompt, _ = construct_prompt(full_ticket, config)
     # Template text with {rules} replaced should equal the system prompt
