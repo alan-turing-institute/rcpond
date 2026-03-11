@@ -93,3 +93,38 @@ class FullTicket(Ticket):
     users_who_require_access_names_and_emails: str     
     cost_compute_time_breakdown: str                   
 ```
+
+
+
+# Thoughts on authentication methods
+
+## Using an API token (current approach)
+
+This seems to be the simplest approach.
+
+### Setup process:
+
+- IT setup permissions for the user to access the ServiceNow API, via MS Entra ID. This is a one-off process.
+- The uses the Entra ID portal to generate an API token, which they can copy and paste into the CLI config. This is a one-off process.
+- `rcpond` authenticates to the ServiceNow API using the token.
+
+### Observations
+
+- Actions taken by `rcpond` are not directly attributed to the user, but appear in the UI as being taken by "Research API User" (`research_cmd_user`). It is unclear where this name is configured, but it was probably setup by IT.
+- It is possible for "Research API User" to create "work notes" and assign tickets to real users, so the token evidently has permissions to do these things.
+- The `research_cmd_user` entity is clear distinct from the real user. It is unclear if how this would translate to using `rcpond` in production.
+  - Given the small number of users who will have access to `rcpond`,  would it be acceptable for all actions taken by `rcpond` to be attributed to a single "service user" account? If so is the `research_cmd_user` account suitable for this? Are the limits that can be applied to this to prevent abuse? Particular on the scope of actions it can take.
+- If not, would each user need to generate their own API token? If this acceptable level of hassle to impose on end-users? Would we need to coordinate with IT to ensure that each user has the correct permissions to generate a token and use it with `rcpond` and that it is possible to trace back each token's action to the original user?
+
+- When assigning tickets, `rcpond` can assign them a real user, using that user's email address (as a string).
+  -  If the email address is valid (for the ActiveDirectory), then ServiceNow correctly assigns the ticket to that user (including looking up the user's real name etc and displaying it in the UI).
+  -  If the email address is invalid, then ServiceNow still assigns the ticket, and does not throw an error. This is a potential source of silent errors, As a ticket can be marked as assigned, but not actually be assigned to a real user.
+
+- If, and only if, `rcpond` is running on a Turing owned machine, then it might be reasonable to expect the user's email address to be '`$USER`@turing.ac.uk'. If so, that this could provide a simple way to assign tickets to the user. It would be worth confirming with IT that this assumption is valid, and that there are no edge cases (e.g. users with non-standard email addresses) and if there is a way for `rcpond` to programmatically assert that it is running on a Turing owned machine.
+
+## Other options to review:0
+
+- Make `rcpond` a OAuth client, and have users authenticate via a browser flow. This would be more complex to implement, but would allow actions to be directly attributed to the user.
+- Other options? 
+
+
