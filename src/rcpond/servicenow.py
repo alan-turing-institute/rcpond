@@ -193,7 +193,13 @@ class ServiceNow:
         raw_result = resp.json()["result"]["work_notes"]
         return _parse_comment_display_values(raw_result)
 
-    def get_assignee(self, tkt: Ticket) -> str:
+    def get_assignee(self, tkt: Ticket) -> dict[str, str]:
+        """
+        A convenience method to retrieve the current `assigned_to` field for a Ticket.
+
+        returns:
+            A dict with two keys `display_value` and `value`
+        """
         resp = self.session.get(
             self._base_url + "/" + self._TABLE + "/" + tkt.sys_id,
             params={
@@ -204,7 +210,6 @@ class ServiceNow:
             },
         )
         resp.raise_for_status()
-        print(resp.json())
         return resp.json()["result"]["assigned_to"]
 
     def post_note(self, tkt: Ticket, note: str) -> None:
@@ -221,10 +226,17 @@ class ServiceNow:
         )
         resp.raise_for_status()
 
-    def assign_to(self, ticket: Ticket, assignee: str) -> None:
+    def _attempt_assign_to(self, ticket: Ticket, assignee: str) -> None:
+        resp = self.session.patch(
+            f"{self._base_url}/{self._TABLE}/{ticket.sys_id}",
+            json={"assigned_to": assignee},
+        )
+        resp.raise_for_status()
+
+    def assign_to(self, ticket: Ticket, assignee: str) -> dict[str, str]:
         """Assign the current user to a ticket.
 
-        **No validation is performed that this assignee exists in the ServiceNow instance, or is even a valid email address**
+        **Post-hoc validation is performed that this assignee exists in the ServiceNow instance. If an invalid value for `assignee` is provided. The method will assign the ticket to the invalid user, detect that it is invalid, and then revert the assignment to the original assignee. This interaction will show in the Activity log for the ticket in the ServiceNow WebUI**
 
         Example:
         >>> sn.assign_to(my_tkt, "sam@example.com")
@@ -235,12 +247,38 @@ class ServiceNow:
         Params:
             ticket: The ticket to be assigned
             assignee: The email address (as a str) of the user to assign the ticket to.
+
+        Returns:
+            A dict with two keys `display_value` and `value`
         """
-        resp = self.session.patch(
-            f"{self._base_url}/{self._TABLE}/{ticket.sys_id}",
-            json={"assigned_to": assignee},
-        )
-        resp.raise_for_status()
+        _original_assignee = self.get_assignee(ticket)
+
+        # Attempt assignment
+        self._attempt_assign_to(ticket, assignee)
+
+        # Verify success
+        new_assignee = self.get_assignee(ticket)
+
+        # The required result is to unassign the ticket (eg assignee is "" or None)
+        if not assignee:
+            assert new_assignee["display_value"] == ""
+            assert new_assignee["value"] == ""
+            return new_assignee
+
+        ## If the assign_to value was not recognised by ServiceNow, then the
+        ## display_value will be empty
+        if not new_assignee["display_value"]:
+            # Reset the assignee to the original value
+            # Trust that this works correctly
+            self._attempt_assign_to(ticket, _original_assignee["value"])
+            err_msg = (
+                f"Unable to assign ticket '{ticket.number}' to the user '{assignee}'"
+                " The user was not recognised by ServiceNow."
+                f" The ticket has been re-assigned back to the original assignee '{_original_assignee['display_value']}/{_original_assignee['value']}'"
+            )
+            raise ValueError(err_msg)
+
+        return new_assignee
 
 
 ## --------------------------------------------------------------------------------
