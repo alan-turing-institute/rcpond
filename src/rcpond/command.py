@@ -62,7 +62,7 @@ def display_all_tickets():
     """Display the list of unassigned tickets from ServiceNow to the user."""
     config = Config()
     service_now: ServiceNow = ServiceNow(config)
-    _display_output(service_now.get_unassigned_tickets())
+    _display_output(service_now.get_tickets())
 
 
 def process_next_ticket(dry_run: bool):
@@ -79,7 +79,7 @@ def process_next_ticket(dry_run: bool):
     config = Config()
     service_now: ServiceNow = ServiceNow(config)
     llm: LLM = LLM(config)
-    tickets: list[Ticket] = service_now.get_unassigned_tickets()
+    tickets: list[Ticket] = service_now.get_tickets()
     _process_ticket(tickets.pop(), dry_run, config, service_now, llm)
 
 
@@ -117,5 +117,5 @@ def batch_process_tickets(dry_run: bool):
     config = Config()
     service_now: ServiceNow = ServiceNow(config)
     llm: LLM = LLM(config)
-    for ticket in service_now.get_unassigned_tickets():
+    for ticket in service_now.get_tickets():
         _process_ticket(ticket, dry_run, config, service_now, llm)

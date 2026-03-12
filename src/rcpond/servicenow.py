@@ -3,7 +3,7 @@
 Provides a class, `ServiceNow`, which wraps the ServiceNow
 API. The only methods are:
 
-- `ServiceNow.get_unassigned_tickets()`: Get a list of unassigned tickets;
+- `ServiceNow.get_tickets()`: Get a list of tickets. By default only unassigned tickets are returned, but all tickets can be selected;
 - `ServiceNow.get_full_ticket()`: Get full details of a ticket;
 - `assign_to()` Assigns a ticket to the named user;
 - `get_work_notes()` List the work notes for a specific ticket; and
@@ -23,7 +23,7 @@ Example use
 -----------
 
 >>> the_sn = ServiceNow("ab...def")
->>> the_sn.get_unassigned_tickets()
+>>> the_sn.get_tickets()
 
 """
 

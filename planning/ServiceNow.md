@@ -23,7 +23,7 @@ where `token` is a string containing the user's authentication token.
 Get the unassigned tickets related to "Request access to HPC and
 cloud computing facilities".
 ```python
-the_sn.get_unassigned_tickets()
+the_sn.get_tickets()
 ```
 Returns a list of `Ticket`s.
 

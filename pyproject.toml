@@ -53,7 +53,10 @@ Changelog = "https://github.com/alan-turing-institute/rcpond/releases"
 
 [tool.pytest.ini_options]
 minversion = "6.0"
-addopts = ["-ra", "--showlocals", "--strict-markers", "--strict-config"]
+addopts = ["-ra", "--showlocals", "--strict-markers", "--strict-config", "-m", "not integration"]
+markers = [
+  "integration: marks tests that require interaction with a live (Dev) ServiceNow instance. Running these test will make changes on the ServiceNow instance. (This group is deselected by default)",
+]
 xfail_strict = true
 filterwarnings = [
   "error",

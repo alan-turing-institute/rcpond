@@ -6,7 +6,7 @@ the_config = config.Config(".env")
 
 the_servicenow = servicenow.ServiceNow(the_config)
 
-tickets = the_servicenow.get_unassigned_tickets()
+tickets = the_servicenow.get_tickets()
 
 for tkt in tickets:
     print(tkt)

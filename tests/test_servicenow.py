@@ -1,4 +1,3 @@
-from datetime import datetime
 from pprint import pprint
 from unittest.mock import MagicMock, call, patch
 
@@ -16,29 +15,6 @@ def dev_instance_config() -> config.Config:
 @pytest.fixture()
 def dev_instance_sn(dev_instance_config) -> servicenow.ServiceNow:
     return servicenow.ServiceNow(dev_instance_config)
-
-
-@pytest.mark.integration
-def test_get_tickets(dev_instance_sn):
-    unassigned_tickets = dev_instance_sn.get_tickets()
-    all_tickets = dev_instance_sn.get_tickets(include_assigned_tickets=True)
-
-    assert len(all_tickets) >= len(unassigned_tickets)
-
-
-@pytest.mark.integration
-def test_change_assignee(dev_instance_sn):
-    all_tickets = dev_instance_sn.get_tickets(include_assigned_tickets=True)
-
-    # - From all_tickets, select one assigned and on unassigned ticket
-    # - Get the `assigned_to` field from the assigned ticket and assume that
-    #   this is an valid user
-    # - Assign the unassigned ticket to the identified user
-    # - call `get_tickets` again and check that the number of assigned and unassigned tickets has changed as expected
-    # - reset the ticket to be unassigned
-    # - call `get_tickets` again and check that the number of assigned and unassigned tickets has reverted as expected
-
-    pytest.fail("WIP")
 
 
 @pytest.fixture()
@@ -70,9 +46,11 @@ def test_assign_to_valid_assignee(sn_instance, ticket):
     original = {"display_value": "Alice Smith", "value": "orig-sys-id"}
     new = {"display_value": "Bob Jones", "value": "bob-sys-id"}
 
-    with patch.object(sn_instance, "get_assignee", side_effect=[original, new]):
-        with patch.object(sn_instance, "_attempt_assign_to") as mock_attempt:
-            result = sn_instance.assign_to(ticket, "bob@example.com")
+    with (
+        patch.object(sn_instance, "get_assignee", side_effect=[original, new]),
+        patch.object(sn_instance, "_attempt_assign_to") as mock_attempt,
+    ):
+        result = sn_instance.assign_to(ticket, "bob@example.com")
 
     assert result == new
     mock_attempt.assert_called_once_with(ticket, "bob@example.com")
@@ -85,10 +63,12 @@ def test_assign_to_invalid_assignee_reverts(sn_instance, ticket):
     original = {"display_value": "Alice Smith", "value": "orig-sys-id"}
     not_recognised = {"display_value": "", "value": ""}
 
-    with patch.object(sn_instance, "get_assignee", side_effect=[original, not_recognised]):
-        with patch.object(sn_instance, "_attempt_assign_to") as mock_attempt:
-            with pytest.raises(ValueError, match="nobody@example.com"):
-                sn_instance.assign_to(ticket, "nobody@example.com")
+    with (
+        patch.object(sn_instance, "get_assignee", side_effect=[original, not_recognised]),
+        patch.object(sn_instance, "_attempt_assign_to") as mock_attempt,
+        pytest.raises(ValueError, match="nobody@example.com"),
+    ):
+        sn_instance.assign_to(ticket, "nobody@example.com")
 
     assert mock_attempt.call_args_list == [
         call(ticket, "nobody@example.com"),
@@ -103,57 +83,14 @@ def test_assign_to_empty_string_unassigns(sn_instance, ticket):
     original = {"display_value": "Alice Smith", "value": "orig-sys-id"}
     unassigned = {"display_value": "", "value": ""}
 
-    with patch.object(sn_instance, "get_assignee", side_effect=[original, unassigned]):
-        with patch.object(sn_instance, "_attempt_assign_to") as mock_attempt:
-            result = sn_instance.assign_to(ticket, "")
+    with (
+        patch.object(sn_instance, "get_assignee", side_effect=[original, unassigned]),
+        patch.object(sn_instance, "_attempt_assign_to") as mock_attempt,
+    ):
+        result = sn_instance.assign_to(ticket, "")
 
     assert result == unassigned
     mock_attempt.assert_called_once_with(ticket, "")
-
-@pytest.mark.integration
-def test_assign_to_old(dev_instance_sn):
-    tickets = dev_instance_sn.get_unassigned_tickets()
-
-    [print(t.number) for t in tickets]
-
-    my_tkt = [t for t in tickets if t.number == "RES0001345"].pop()
-    print(my_tkt)
-    print()
-
-    full_tkt = dev_instance_sn.get_full_ticket(my_tkt)
-    print(full_tkt)
-
-    dev_instance_sn.assign_to(my_tkt, "real.person@turing.ac.uk")
-    dev_instance_sn.assign_to(my_tkt, "someone.who.never.existed.fake@turing.ac.uk")
-    dev_instance_sn.assign_to(my_tkt, "someone.who.never.existed.fake@example.com")
-    dev_instance_sn.assign_to(my_tkt, "")
-    dev_instance_sn.assign_to(my_tkt, "sam@example.com")
-    dev_instance_sn.assign_to(my_tkt, "not_a_email_address")
-    dev_instance_sn.assign_to(my_tkt, None)
-
-    pytest.fail("WIP")
-
-
-@pytest.mark.integration
-def test_post_note(dev_instance_sn):
-    tickets = dev_instance_sn.get_tickets()
-
-    # get first alphanumeric ticket number
-    first_num = min([t.number for t in tickets])
-    my_tkt = [t for t in tickets if t.number == first_num].pop()
-    print(my_tkt)
-    print()
-
-    # full_tkt = dev_instance_sn.get_full_ticket(my_tkt)
-    # print(full_tkt)
-    before_work_note_count = len(dev_instance_sn.get_work_notes(my_tkt))
-
-    dev_instance_sn.post_note(my_tkt, "Test Work note A")
-    dev_instance_sn.post_note(my_tkt, "Test Work note B")
-
-    after_work_note_count = len(dev_instance_sn.get_work_notes(my_tkt))
-
-    assert after_work_note_count == before_work_note_count + 2
 
 
 def test_parse_comment_display_values():
@@ -181,3 +118,66 @@ def test_parse_comment_display_values():
 
     assert len(actual_output) == 3
     assert actual_output == expected_output
+
+
+@pytest.mark.integration()
+def test_post_note(dev_instance_sn):
+    tickets = dev_instance_sn.get_tickets()
+
+    # get first alphanumeric ticket number
+    first_num = min([t.number for t in tickets])
+    my_tkt = [t for t in tickets if t.number == first_num].pop()
+    print(my_tkt)
+    print()
+
+    # full_tkt = dev_instance_sn.get_full_ticket(my_tkt)
+    # print(full_tkt)
+    before_work_note_count = len(dev_instance_sn.get_work_notes(my_tkt))
+
+    dev_instance_sn.post_note(my_tkt, "Test Work note A")
+    dev_instance_sn.post_note(my_tkt, "Test Work note B")
+
+    after_work_note_count = len(dev_instance_sn.get_work_notes(my_tkt))
+
+    assert after_work_note_count == before_work_note_count + 2
+
+
+@pytest.mark.integration()
+def test_get_tickets(dev_instance_sn):
+    unassigned_tickets = dev_instance_sn.get_tickets()
+    all_tickets = dev_instance_sn.get_tickets(include_assigned_tickets=True)
+
+    assert len(all_tickets) >= len(unassigned_tickets)
+
+
+@pytest.mark.integration()
+def test_change_assignee(dev_instance_sn):
+    # Attempt to select one assigned and on unassigned ticket
+    unassigned_tickets = dev_instance_sn.get_tickets()
+    all_tickets = dev_instance_sn.get_tickets(include_assigned_tickets=True)
+
+    unassigned_sys_ids = {t.sys_id for t in unassigned_tickets}
+    assigned_tickets = [t for t in all_tickets if t.sys_id not in unassigned_sys_ids]
+
+    # Check that this is at least one of each:
+    assert unassigned_tickets, "No unassigned tickets available to test with"
+    assert assigned_tickets, "No assigned tickets available to identify a valid user"
+
+    unassigned_ticket = unassigned_tickets[0]
+    # Get the assignee of the assigned ticket.
+    ## We explictly assume that this assignee is value, though it is not actually guaranteed by the ServiceNow API
+    assignee_sys_id = dev_instance_sn.get_assignee(assigned_tickets[0])["value"]
+
+    ## Assign the previously unassigned ticket
+    dev_instance_sn.assign_to(unassigned_ticket, assignee_sys_id)
+
+    ## Check that the number of assigned and unassigned tickets has changed as expected
+    after_assignment = dev_instance_sn.get_tickets()
+    assert len(after_assignment) == len(unassigned_tickets) - 1
+
+    ## Reset: unassign the ticket
+    dev_instance_sn.assign_to(unassigned_ticket, "")
+
+    ## Check that the number of assigned and unassigned tickets has reverted as expected
+    after_reset = dev_instance_sn.get_tickets()
+    assert len(after_reset) == len(unassigned_tickets)
