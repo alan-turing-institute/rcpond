@@ -18,7 +18,7 @@ def dev_instance_sn(dev_instance_config) -> servicenow.ServiceNow:
     return servicenow.ServiceNow(dev_instance_config)
 
 
-@pytest.mark.integration()
+@pytest.mark.integration
 def test_get_tickets(dev_instance_sn):
     unassigned_tickets = dev_instance_sn.get_tickets()
     all_tickets = dev_instance_sn.get_tickets(include_assigned_tickets=True)
@@ -26,26 +26,17 @@ def test_get_tickets(dev_instance_sn):
     assert len(all_tickets) >= len(unassigned_tickets)
 
 
-@pytest.mark.integration()
-def test_get_assignee(dev_instance_sn):
-    tickets = dev_instance_sn.get_unassigned_tickets()
+@pytest.mark.integration
+def test_change_assignee(dev_instance_sn):
+    all_tickets = dev_instance_sn.get_tickets(include_assigned_tickets=True)
 
-    my_tkt = [t for t in tickets if t.number == "RES0001345"].pop()
-    print(my_tkt)
-    print()
-
-    dev_instance_sn.assign_to(my_tkt, "my.user.name@turing.ac.uk")
-    print(dev_instance_sn.get_assignee(my_tkt))
-
-    with pytest.raises(ValueError, match="real.person"):
-        dev_instance_sn.assign_to(my_tkt, "real.person@turing.ac.uk")
-        dev_instance_sn.get_assignee(my_tkt)
-
-    dev_instance_sn.assign_to(my_tkt, "")
-    print(dev_instance_sn.get_assignee(my_tkt))
-
-    dev_instance_sn.assign_to(my_tkt, "my_user_sys_id_as_str")
-    print(dev_instance_sn.get_assignee(my_tkt))
+    # - From all_tickets, select one assigned and on unassigned ticket
+    # - Get the `assigned_to` field from the assigned ticket and assume that
+    #   this is an valid user
+    # - Assign the unassigned ticket to the identified user
+    # - call `get_tickets` again and check that the number of assigned and unassigned tickets has changed as expected
+    # - reset the ticket to be unassigned
+    # - call `get_tickets` again and check that the number of assigned and unassigned tickets has reverted as expected
 
     pytest.fail("WIP")
 
@@ -119,8 +110,7 @@ def test_assign_to_empty_string_unassigns(sn_instance, ticket):
     assert result == unassigned
     mock_attempt.assert_called_once_with(ticket, "")
 
-
-@pytest.mark.integration()
+@pytest.mark.integration
 def test_assign_to_old(dev_instance_sn):
     tickets = dev_instance_sn.get_unassigned_tickets()
 
@@ -144,7 +134,7 @@ def test_assign_to_old(dev_instance_sn):
     pytest.fail("WIP")
 
 
-@pytest.mark.integration()
+@pytest.mark.integration
 def test_post_note(dev_instance_sn):
     tickets = dev_instance_sn.get_tickets()
 
