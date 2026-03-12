@@ -1,4 +1,3 @@
-from pprint import pprint
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -114,7 +113,6 @@ def test_parse_comment_display_values():
     ]
 
     actual_output = servicenow._parse_comment_display_values(input)
-    pprint(actual_output)
 
     assert len(actual_output) == 3
     assert actual_output == expected_output
@@ -130,8 +128,6 @@ def test_post_note(dev_instance_sn):
     print(my_tkt)
     print()
 
-    # full_tkt = dev_instance_sn.get_full_ticket(my_tkt)
-    # print(full_tkt)
     before_work_note_count = len(dev_instance_sn.get_work_notes(my_tkt))
 
     dev_instance_sn.post_note(my_tkt, "Test Work note A")

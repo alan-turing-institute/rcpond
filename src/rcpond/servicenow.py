@@ -145,13 +145,13 @@ class ServiceNow:
         _UNASSIGNED_FILTER = "assigned_toISEMPTY^short_description=Request access to HPC and cloud computing facilities"
         _INC_ASSIGNED_FILTER = "short_description=Request access to HPC and cloud computing facilities"
 
-        filter = _INC_ASSIGNED_FILTER if include_assigned_tickets else _UNASSIGNED_FILTER
+        query = _INC_ASSIGNED_FILTER if include_assigned_tickets else _UNASSIGNED_FILTER
 
         ticket_fields = {field.name for field in dataclasses.fields(Ticket)}
 
         ## Get the list of unassigned tickets as JSON
         resp = self.session.get(
-            self._base_url + "/" + self._TABLE, params={"sysparm_query": filter, "sysparm_display_value": "all"}
+            f"{self._base_url}/{self._TABLE}", params={"sysparm_query": query, "sysparm_display_value": "all"}
         )
 
         resp.raise_for_status()
@@ -168,7 +168,7 @@ class ServiceNow:
         }
 
         resp = self.session.get(
-            self._base_url + "/" + self._TABLE + "/" + tkt.sys_id,
+            f"{self._base_url}/{self._TABLE}/{tkt.sys_id}",
             params={"sysparm_fields": ",".join(extra_fields), "sysparm_display_value": "all"},
         )
 
@@ -180,10 +180,8 @@ class ServiceNow:
         return FullTicket.from_Ticket(tkt, **_extract_ticket_fields(result, extra_fields))
 
     def get_work_notes(self, tkt: Ticket) -> list[str]:
-        print(tkt.sys_id)
-
         resp = self.session.get(
-            self._base_url + "/" + self._TABLE + "/" + tkt.sys_id,
+            f"{self._base_url}/{self._TABLE}/{tkt.sys_id}",
             params={
                 "sysparm_display_value": "true",
                 "sysparm_exclude_reference_link": "true",
@@ -204,7 +202,7 @@ class ServiceNow:
             A dict with two keys `display_value` and `value`
         """
         resp = self.session.get(
-            self._base_url + "/" + self._TABLE + "/" + tkt.sys_id,
+            f"{self._base_url}/{self._TABLE}/{tkt.sys_id}",
             params={
                 "sysparm_display_value": "all",
                 "sysparm_exclude_reference_link": "true",
@@ -224,7 +222,7 @@ class ServiceNow:
         """
         ## This will append the `note` param to `work_notes` field
         resp = self.session.patch(
-            self._base_url + "/" + self._TABLE + "/" + tkt.sys_id,
+            f"{self._base_url}/{self._TABLE}/{tkt.sys_id}",
             json={"work_notes": note},
         )
         resp.raise_for_status()
@@ -249,7 +247,7 @@ class ServiceNow:
 
         Params:
             ticket: The ticket to be assigned
-            assignee: The email address (as a str) of the user to assign the ticket to.
+            assignee: The email address or sys_id (as a str) of the user to assign the ticket to.
 
         Returns:
             A dict with two keys `display_value` and `value`
@@ -264,8 +262,9 @@ class ServiceNow:
 
         # The required result is to unassign the ticket (eg assignee is "" or None)
         if not assignee:
-            assert new_assignee["display_value"] == ""
-            assert new_assignee["value"] == ""
+            if new_assignee["display_value"] != "" or new_assignee["value"] != "":
+                err_msg = f"Expected ticket '{ticket.number}' to be unassigned but got: {new_assignee}"
+                raise RuntimeError(err_msg)
             return new_assignee
 
         ## If the assign_to value was not recognised by ServiceNow, then the
