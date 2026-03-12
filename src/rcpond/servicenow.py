@@ -125,8 +125,6 @@ class ServiceNow:
     # ServiceNow configuration
     # _base_url = "https://turing-api.azure-api.net/dev-research/api/now/table"
     _TABLE = "x_tati_resmgt_research"
-    # _FILTER = "assigned_toISEMPTY^short_description=Request access to HPC and cloud computing facilities"
-    _FILTER = "short_description=Request access to HPC and cloud computing facilities"
 
     def __init__(self, config: Config):
         self._base_url = config.servicenow_url
@@ -139,16 +137,21 @@ class ServiceNow:
             }
         )
 
-    def get_unassigned_tickets(self) -> list[Ticket]:
-        """Get unassigned tickets that are applications for HPC/Azure
+    def get_tickets(self, include_assigned_tickets: bool = False) -> list[Ticket]:
+        """Get tickets that are applications for HPC/Azure
         credits.
         """
+
+        _UNASSIGNED_FILTER = "assigned_toISEMPTY^short_description=Request access to HPC and cloud computing facilities"
+        _INC_ASSIGNED_FILTER = "short_description=Request access to HPC and cloud computing facilities"
+
+        filter = _INC_ASSIGNED_FILTER if include_assigned_tickets else _UNASSIGNED_FILTER
 
         ticket_fields = {field.name for field in dataclasses.fields(Ticket)}
 
         ## Get the list of unassigned tickets as JSON
         resp = self.session.get(
-            self._base_url + "/" + self._TABLE, params={"sysparm_query": self._FILTER, "sysparm_display_value": "all"}
+            self._base_url + "/" + self._TABLE, params={"sysparm_query": filter, "sysparm_display_value": "all"}
         )
 
         resp.raise_for_status()
