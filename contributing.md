@@ -34,13 +34,13 @@ Use pytest to run the unit checks:
 pytest
 ```
 
-There are also integration tests. These are disabled by default, but can be run with:
+There are also integration tests. These are disabled by default and are not included in the CI/CD testing, but they can be run with:
 
 ```bash
 pytest -m integration
 ```
 
-The integration tests require a live connection to a ServiceNow (Dev) instance, specificed in a `.env` file. *Running these test will make permanent changes to the tickets on the ServiceNow instance* so they are not suitable for regular unit testing. They are intended to be run manually when making changes to the `ServiceNow` class or related code.
+The integration tests require a live connection to a ServiceNow (Dev) instance, specified in a `.env` file. *Running these test will make permanent changes to the tickets on the ServiceNow instance* so they are not suitable for regular unit testing. They are intended to be run manually when making changes to the `ServiceNow` class or related code.
 
 
 # Coverage
