@@ -18,7 +18,7 @@ def dev_instance_sn(dev_instance_config) -> servicenow.ServiceNow:
     return servicenow.ServiceNow(dev_instance_config)
 
 
-@pytest.mark.integration
+@pytest.mark.integration()
 def test_get_tickets(dev_instance_sn):
     unassigned_tickets = dev_instance_sn.get_tickets()
     all_tickets = dev_instance_sn.get_tickets(include_assigned_tickets=True)
@@ -26,7 +26,7 @@ def test_get_tickets(dev_instance_sn):
     assert len(all_tickets) >= len(unassigned_tickets)
 
 
-@pytest.mark.integration
+@pytest.mark.integration()
 def test_get_assignee(dev_instance_sn):
     tickets = dev_instance_sn.get_unassigned_tickets()
 
@@ -119,7 +119,8 @@ def test_assign_to_empty_string_unassigns(sn_instance, ticket):
     assert result == unassigned
     mock_attempt.assert_called_once_with(ticket, "")
 
-@pytest.mark.integration
+
+@pytest.mark.integration()
 def test_assign_to_old(dev_instance_sn):
     tickets = dev_instance_sn.get_unassigned_tickets()
 
@@ -143,7 +144,7 @@ def test_assign_to_old(dev_instance_sn):
     pytest.fail("WIP")
 
 
-@pytest.mark.integration
+@pytest.mark.integration()
 def test_post_note(dev_instance_sn):
     tickets = dev_instance_sn.get_tickets()
 
