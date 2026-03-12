@@ -5,7 +5,8 @@ API. The only methods are:
 
 - `ServiceNow.get_unassigned_tickets()`: Get a list of unassigned tickets;
 - `ServiceNow.get_full_ticket()`: Get full details of a ticket;
-- `assign_myself()` (Not implemented) Assign oneself to a ticket; and
+- `assign_to()` Assigns a ticket to the named user;
+- `get_work_notes()` List the work notes for a specific ticket; and
 - `post_note()` (Not implemented) Post a “work note” to a ticket.
 
 Tickets are returned as instances of a `Ticket` dataclass which
@@ -181,27 +182,39 @@ class ServiceNow:
         resp = self.session.get(
             self._base_url + "/" + self._TABLE + "/" + tkt.sys_id,
             params={
-                "sysparm_display_value": "all",
+                "sysparm_display_value": "true",
                 "sysparm_exclude_reference_link": "true",
                 "sysparm_fields": "work_notes",
-                "sysparm_query_no_domain": "true",
+                "sysparm_query_no_domain": "false",
             },
         )
         resp.raise_for_status()
 
-        raw_result = resp.json()["result"]["work_notes"]["display_value"]
-
+        raw_result = resp.json()["result"]["work_notes"]
         return _parse_comment_display_values(raw_result)
+
+    def get_assignee(self, tkt: Ticket) -> str:
+        resp = self.session.get(
+            self._base_url + "/" + self._TABLE + "/" + tkt.sys_id,
+            params={
+                "sysparm_display_value": "all",
+                "sysparm_exclude_reference_link": "true",
+                "sysparm_fields": "assigned_to",
+                "sysparm_query_no_domain": "false",
+            },
+        )
+        resp.raise_for_status()
+        print(resp.json())
+        return resp.json()["result"]["assigned_to"]
 
     def post_note(self, tkt: Ticket, note: str) -> None:
         """Post a work note to a ticket.
 
-        Not yet implemented."""
-
-        # msg = "ServiceNow.post_note is not yet implemented."
-        # raise RuntimeError(msg)
-        print(tkt.sys_id)
-
+        Params:
+            tkt: The ticket
+            note: The note to post
+        """
+        ## This will append the `note` param to `work_notes` field
         resp = self.session.patch(
             self._base_url + "/" + self._TABLE + "/" + tkt.sys_id,
             json={"work_notes": note},
@@ -211,46 +224,66 @@ class ServiceNow:
     def assign_to(self, ticket: Ticket, assignee: str) -> None:
         """Assign the current user to a ticket.
 
+        **No validation is performed that this assignee exists in the ServiceNow instance, or is even a valid email address**
+
+        Example:
+        >>> sn.assign_to(my_tkt, "sam@example.com")
+
+        To unassign a ticket, set assignee == "":
+        >>> sn.assign_to(my_tkt, "")
+
         Params:
-            ticket: The toclet to be assigned
+            ticket: The ticket to be assigned
             assignee: The email address (as a str) of the user to assign the ticket to.
         """
-        # msg = "ServiceNow.assign_myself is not yet implemented"
-        # raise RuntimeError(msg)
-
-        #     looks up the current user's sys_id via the sys_user table using
-        #     the same bearer token, then patches the ticket's assigned_to field.
-        #     Note: this assumes the /api/now/table/sys_user endpoint is accessible
-        #     and that the token maps to a user with a 'user_name' field. This may
-        #     need adjustment depending on the ServiceNow instance configuration.
-        #     """
-        # user_sys_id = self.get_current_user_sys_id()
         resp = self.session.patch(
             f"{self._base_url}/{self._TABLE}/{ticket.sys_id}",
             json={"assigned_to": assignee},
         )
         resp.raise_for_status()
 
-    def get_current_user_sys_id(self) -> str:
-        """Get the sys_id of the currently authenticated user.
 
-        Uses the sys_user table with sysparm_limit=1 and a query scoped to
-        the authenticated session. This is a best-effort approach — the exact
-        mechanism may vary by ServiceNow instance configuration.
-        """
+## --------------------------------------------------------------------------------
+## Non-functioning exploration of how to identify the user making the calls
 
-        user_url = "https://turing-api.azure-api.net/dev-research/api/now/account"
-        # user_url = f"{self._base_url}/sys_user"
-        params = {
-            # "sysparm_query": "user_name=javascript:gs.getUserName()",
-            "sysparm_query": "caller_id=javascript:gs.getUserID()^active=true",
-            "sysparm_fields": "sys_id",
-            "sysparm_limit": "1",
-        }
-        resp = self.session.get(user_url, params=params)
-        resp.raise_for_status()
-        results = resp.json()["result"]
-        if not results:
-            err_msg = "Could not determine current user sys_id"
-            raise RuntimeError(err_msg)
-        return results[0]["sys_id"]
+# def get_current_user_sys_id(self) -> str:
+#     """Get the sys_id of the currently authenticated user.
+
+#     Uses the sys_user table with sysparm_limit=1 and a query scoped to
+#     the authenticated session. This is a best-effort approach — the exact
+#     mechanism may vary by ServiceNow instance configuration.
+#     """
+
+#     user_url = "https://turing-api.azure-api.net/dev-research/api/now/account"
+#     # user_url = f"{self._base_url}/sys_user"
+#     params = {
+#         # "sysparm_query": "user_name=javascript:gs.getUserName()",
+#         "sysparm_query": "caller_id=javascript:gs.getUserID()^active=true",
+#         "sysparm_fields": "sys_id",
+#         "sysparm_limit": "1",
+#     }
+#     resp = self.session.get(user_url, params=params)
+#     resp.raise_for_status()
+#     results = resp.json()["result"]
+#     if not results:
+#         err_msg = "Could not determine current user sys_id"
+#         raise RuntimeError(err_msg)
+#     return results[0]["sys_id"]
+
+# def get_user_end_point(self) -> dict:
+#     """Probe the sys_user table for current-user information.
+
+#     Queries ``{_base_url}/sys_user`` (the standard ServiceNow Table API
+#     path).  Returns the parsed JSON response body.
+#     Raises ``requests.HTTPError`` on a non-2xx response (e.g. 404 if the
+#     sys_user table is not exposed through the API gateway).
+#     """
+#     resp = self.session.get(
+#         f"{self._base_url}/sys_user",
+#         params={
+#             "sysparm_fields": "sys_id,name,user_name,email",
+#             "sysparm_limit": "1",
+#         },
+#     )
+#     resp.raise_for_status()
+#     return resp.json()
