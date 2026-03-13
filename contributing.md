@@ -8,9 +8,9 @@ description of best practices for developing scientific packages.
 You can set up a development environment by running:
 
 ```zsh
-python3 -m venv venv          # create a virtualenv called venv
-source ./venv/bin/activate   # now `python` points to the virtualenv python
-pip install -v -e ".[dev]"    # -v for verbose, -e for editable, [dev] for dev dependencies
+uv venv         # create a virtualenv called venv
+source .venv/bin/activate   # now `python` points to the virtualenv python
+uv pip install -v -e . --group dev    # `-v` for verbose, `-e` for editable, `--group dev` for dev dependencies
 ```
 
 # Post setup
@@ -19,7 +19,6 @@ You should prepare pre-commit, which will help you by checking that commits pass
 required checks:
 
 ```bash
-pip install pre-commit # or brew install pre-commit on macOS
 pre-commit install # this will install a pre-commit hook into the git repo
 ```
 
@@ -120,7 +119,7 @@ Install the docs dependencies and start the MkDocs development server:
 
 Ensure that the optional "docs" dependency group is installed, which includes MkDocs and its plugins:
 ```bash
-uv pip install -e ".[docs]"
+uv pip install -e . --group docs
 ```
 
 To verify the documentation builds correctly, you can run:
