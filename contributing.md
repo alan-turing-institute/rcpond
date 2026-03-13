@@ -34,6 +34,15 @@ Use pytest to run the unit checks:
 pytest
 ```
 
+There are also integration tests. These are disabled by default and are not included in the CI/CD testing, but they can be run with:
+
+```bash
+pytest -m integration
+```
+
+The integration tests require a live connection to a ServiceNow (Dev) instance, specified in a `.env` file. *Running these test will make permanent changes to the tickets on the ServiceNow instance* so they are not suitable for regular unit testing. They are intended to be run manually when making changes to the `ServiceNow` class or related code.
+
+
 # Coverage
 
 Use pytest-cov to generate coverage reports:
@@ -51,6 +60,17 @@ pre-commit run -a
 ```
 
 to check all files.
+
+The pre-commit also checks for possible secrets in the code, using the custom script `pre-commit-scripts/check_secrets.py`. Specifically, it look for the strings
+`RCPOND_LLM_API_KEY` and `RCPOND_SERVICENOW_TOKEN` in text files.
+
+There are accepted safe placeholder values, which can be committed. To update the environment variable which are monitored, or the accepted placeholder values, edit the `CHECKED_KEYS` dict within the `check_secrets.py` script.
+
+NOTE: this is not foolproof. For example, it does not detect if the API key is stored on a separate line to the variable name:
+```
+RCPOND_LLM_API_KEY:
+my_secret_api_key_value
+```
 
 # Documentation
 
