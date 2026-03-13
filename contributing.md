@@ -119,7 +119,7 @@ Install the docs dependencies and start the MkDocs development server:
 
 Ensure that the optional "docs" dependency group is installed, which includes MkDocs and its plugins:
 ```bash
-uv pip install -e . --group docs
+uv pip install -e ".[docs]"
 ```
 
 To verify the documentation builds correctly, you can run:
