@@ -83,7 +83,7 @@ def process_next_ticket(dry_run: bool):
     _process_ticket(tickets.pop(), dry_run, config, service_now, llm)
 
 
-def process_specific_ticket(ticket: Ticket, dry_run: bool):
+def process_specific_ticket(ticket_number: str, dry_run: bool):
     """Process the given ServiceNow ticket via the LLM.
 
     The LLM response and reasoning are displayed to the user. If the LLM
@@ -91,15 +91,20 @@ def process_specific_ticket(ticket: Ticket, dry_run: bool):
 
     Parameters
     ----------
-    ticket : Ticket
-        The ticket to process.
+    ticket_number : str
+        The ticket number (e.g. ``"RES0001234"``) to process.
     dry_run : bool
         If True, planned tool calls are not executed.
     """
     config = Config()
     service_now: ServiceNow = ServiceNow(config)
     llm: LLM = LLM(config)
-    _process_ticket(ticket, dry_run, config, service_now, llm)
+    tickets = service_now.get_tickets(include_assigned_tickets=True)
+    matched = [t for t in tickets if t.number == ticket_number]
+    if not matched:
+        msg = f"Ticket '{ticket_number}' not found."
+        raise ValueError(msg)
+    _process_ticket(matched[0], dry_run, config, service_now, llm)
 
 
 def batch_process_tickets(dry_run: bool):

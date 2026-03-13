@@ -31,6 +31,7 @@ classifiers = [
 dependencies = [
     "pytest>=9.0.2",
     "requests>=2.32.5",
+    "typer>=0.24.1",
 ]
 
 
@@ -40,6 +41,10 @@ Homepage = "https://github.com/alan-turing-institute/rcpond"
 "Bug Tracker" = "https://github.com/alan-turing-institute/rcpond/issues"
 Discussions = "https://github.com/alan-turing-institute/rcpond/discussions"
 Changelog = "https://github.com/alan-turing-institute/rcpond/releases"
+
+[project.scripts]
+rcpond = "rcpond.cli:cli"
+
 
 [tool.pytest.ini_options]
 minversion = "6.0"
