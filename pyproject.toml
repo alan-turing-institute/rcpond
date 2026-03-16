@@ -30,6 +30,7 @@ classifiers = [
 ]
 dependencies = [
     "requests>=2.32.5",
+    "xdg-base-dirs>=6.0.2",
 ]
 
 [project.optional-dependencies]

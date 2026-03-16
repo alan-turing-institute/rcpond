@@ -4,9 +4,10 @@ Provides class `Config` to read, parse, and make available
 configuration variables required at runtime.  The constructor loads
 configuration from:
 
-1. A file (if ``env_path`` is supplied)
-2. Environment variables prefixed with ``RCPOND_`` and uppercased (e.g. ``RCPOND_LLM_MODEL``)
-3. Explicit CLI arguments passed as ``cli_args``
+1. The default file at $XDG_CONFIG_HOME/rcpond/default.config
+2. A file (if ``env_path`` is supplied)
+3. Environment variables prefixed with ``RCPOND_`` and uppercased (e.g. ``RCPOND_LLM_MODEL``)
+4. Explicit CLI arguments passed as ``cli_args``
 
 Values from a later sources override earlier ones.  A ``ValueError``
 is raised if any required field is still missing after all sources are
@@ -41,6 +42,8 @@ import os
 import typing
 from dataclasses import InitVar, dataclass, field, fields
 from pathlib import Path
+
+from xdg_base_dirs import xdg_config_home
 
 
 @dataclass
@@ -86,7 +89,16 @@ class Config:
     def __post_init__(self, env_path: str | None, cli_args: dict | None) -> None:
         values: dict[str, str] = {}
 
-        # 1. Load from .env file (lowest precedence)
+        # 1. Load from $XDG_CONFIG_HOME/rcpond/default.config (lowest precedence)
+        xdg_default = xdg_config_home() / "rcpond" / "default.config"
+        if xdg_default.exists():
+            xdg_vars = _parse_dotenv(xdg_default)
+            for f in fields(self):
+                env_key = _env_var_name(f.name)
+                if env_key in xdg_vars:
+                    values[f.name] = xdg_vars[env_key]
+
+        # 2. Load from .env file
         if env_path is not None:
             dotenv_vars = _parse_dotenv(_confirm_path_exists(env_path))
             for f in fields(self):
@@ -94,13 +106,13 @@ class Config:
                 if env_key in dotenv_vars:
                     values[f.name] = dotenv_vars[env_key]
 
-        # 2. Override with actual environment variables
+        # 3. Override with actual environment variables
         for f in fields(self):
             env_key = _env_var_name(f.name)
             if env_key in os.environ:
                 values[f.name] = os.environ[env_key]
 
-        # 3. Override with CLI args (highest precedence)
+        # 4. Override with CLI args (highest precedence)
         if cli_args:
             for f in fields(self):
                 if f.name in cli_args and cli_args[f.name] is not None:
