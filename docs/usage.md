@@ -31,8 +31,4 @@ rcpond --env-file .env display-all
 
 ## Commands
 
-::: mkdocs-typer
-    :module: rcpond.cli
-    :command: cli
-    :prog_name: rcpond
-    :depth: 2
+Placeholder for command reference. To be completed once the CLI is implemented.
