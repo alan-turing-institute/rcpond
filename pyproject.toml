@@ -29,16 +29,10 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
-    "pytest>=9.0.2",
     "requests>=2.32.5",
 ]
 
 [project.optional-dependencies]
-dev = [
-  "pytest >=6",
-  "pytest-cov >=3",
-  "pre-commit",
-]
 docs = [
     "mkdocs>=1.6.1",
     "mkdocs-awesome-pages-plugin>=2.9",
@@ -130,5 +124,7 @@ flake8-unused-arguments.ignore-variadic-names = true  # allow unused *args/**kwa
 [dependency-groups]
 dev = [
     "pdoc>=16.0.0",
-    "types-requests>=2.32.4.20260107",
+    "pytest >=6",
+    "pytest-cov >=3",
+    "pre-commit",
 ]
