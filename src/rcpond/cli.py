@@ -8,7 +8,7 @@ It adds four subcommands
 - `display-all-tickets`
 - `process-next`
 - `process-ticket`
-- `batch-process`
+- `process-all`
 
 Each delegating to the corresponding function in `command.py`.
 
@@ -26,11 +26,12 @@ The `Config` object is constructed via the `_config` helpful func, so that confi
 from typing import Annotated
 
 import typer
+from rich import print
 
 from rcpond import command
 from rcpond.config import Config
 
-cli = typer.Typer(name="rcpond")
+cli = typer.Typer(name="rcpond", no_args_is_help=True)
 
 
 @cli.callback()
@@ -66,7 +67,7 @@ def _config(ctx: typer.Context) -> Config:
 
 
 @cli.command()
-def display_all_tickets(ctx: typer.Context):
+def display_all(ctx: typer.Context):
     """List all unassigned tickets from ServiceNow."""
     command.display_all_tickets(config=_config(ctx))
 
@@ -84,6 +85,19 @@ def process_ticket(ctx: typer.Context, ticket_number: str, dry_run: bool = False
 
 
 @cli.command()
-def batch_process(ctx: typer.Context, dry_run: bool = False):
+def process_all(
+    ctx: typer.Context,
+    dry_run: bool = False,
+    ## Single flag name (no "--flag/--no-flag" form) suppresses Typer's auto-generated
+    ## negative, which would otherwise produce the unreadable `--no-yes-i-am-sure`.
+    yes_i_am_sure: Annotated[
+        bool, typer.Option("--yes-i-am-sure", help="Confirm processing all unassigned tickets.")
+    ] = False,
+):
     """Review all unassigned tickets via the LLM."""
-    command.batch_process_tickets(dry_run=dry_run, config=_config(ctx))
+    if yes_i_am_sure:
+        command.batch_process_tickets(dry_run=dry_run, config=_config(ctx))
+    else:
+        msg = "The [bold cyan]--yes-i-am-sure[/bold cyan] option MUST be specified when using the [bold]process-all[/bold] subcommand."
+        print(msg)
+        typer.echo(ctx.get_help())
