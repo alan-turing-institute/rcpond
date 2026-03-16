@@ -70,23 +70,11 @@ def display_all_tickets(config: Config | None = None):
 
 
 def display_single_ticket(ticket_number: str, config: Config | None = None):
-    """Display the list of unassigned tickets from ServiceNow to the user."""
+    """Display the details of a specific ticket."""
     config = config or Config()
     service_now: ServiceNow = ServiceNow(config)
-    all_tkts = service_now.get_tickets()
-    _tkts = [t for t in all_tkts if t.number == ticket_number]
-
-    if len(_tkts) == 1:
-        # Expected if there is an exact match
-        _display_output(service_now.get_full_ticket(_tkts[0]))
-    elif len(_tkts) == 0:
-        # No match
-        err_msg = f"Unable to find ticket number '{ticket_number}'"
-        raise ValueError(err_msg)
-    else:
-        # Unexpected. ServiceNow should prevent this, but just in case
-        err_msg = f"Multiple tickets match ticket number '{ticket_number}'\n" "\n\n".join([str(t) for t in _tkts])
-        raise ValueError(err_msg)
+    ticket = service_now.get_ticket(ticket_number)
+    _display_output(service_now.get_full_ticket(ticket))
 
 
 def process_next_ticket(dry_run: bool, config: Config | None = None):
@@ -127,12 +115,8 @@ def process_specific_ticket(ticket_number: str, dry_run: bool, config: Config | 
     config = config or Config()
     service_now: ServiceNow = ServiceNow(config)
     llm: LLM = LLM(config)
-    tickets = service_now.get_tickets(include_assigned_tickets=True)
-    matched = [t for t in tickets if t.number == ticket_number]
-    if not matched:
-        msg = f"Ticket '{ticket_number}' not found."
-        raise ValueError(msg)
-    _process_ticket(matched[0], dry_run, config, service_now, llm)
+    ticket = service_now.get_ticket(ticket_number, include_assigned_tickets=True)
+    _process_ticket(ticket, dry_run, config, service_now, llm)
 
 
 def batch_process_tickets(dry_run: bool, config: Config | None = None):
