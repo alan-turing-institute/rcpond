@@ -69,6 +69,26 @@ def display_all_tickets(config: Config | None = None):
     _display_output(service_now.get_tickets())
 
 
+def display_single_ticket(ticket_number: str, config: Config | None = None):
+    """Display the list of unassigned tickets from ServiceNow to the user."""
+    config = config or Config()
+    service_now: ServiceNow = ServiceNow(config)
+    all_tkts = service_now.get_tickets()
+    _tkts = [t for t in all_tkts if t.number == ticket_number]
+
+    if len(_tkts) == 1:
+        # Expected if there is an exact match
+        _display_output(service_now.get_full_ticket(_tkts[0]))
+    elif len(_tkts) == 0:
+        # No match
+        err_msg = f"Unable to find ticket number '{ticket_number}'"
+        raise ValueError(err_msg)
+    else:
+        # Unexpected. ServiceNow should prevent this, but just in case
+        err_msg = f"Multiple tickets match ticket number '{ticket_number}'\n" "\n\n".join([str(t) for t in _tkts])
+        raise ValueError(err_msg)
+
+
 def process_next_ticket(dry_run: bool, config: Config | None = None):
     """Process an arbitrarily selected ServiceNow ticket via the LLM.
 

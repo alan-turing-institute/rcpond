@@ -87,8 +87,14 @@ def _config(ctx: typer.Context) -> Config:
 
 @cli.command()
 def display_all(ctx: typer.Context):
-    """List all unassigned tickets from ServiceNow."""
+    """Display all unassigned tickets from ServiceNow."""
     command.display_all_tickets(config=_config(ctx))
+
+
+@cli.command()
+def display_ticket(ctx: typer.Context, ticket_number: str):
+    """Display the details of a specific ticket (e.g. RES0001234)."""
+    command.display_single_ticket(ticket_number=ticket_number, config=_config(ctx))
 
 
 @cli.command()
