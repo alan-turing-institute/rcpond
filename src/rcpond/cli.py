@@ -23,6 +23,7 @@ variables and/or any `.env` file supplied.
 The `Config` object is constructed via the `_config` helpful func, so that config validation will not be called when using the `--help` option, directly on `rcpond` or one one of the subcommands.
 """
 
+from importlib.metadata import version
 from typing import Annotated
 
 import typer
@@ -34,9 +35,27 @@ from rcpond.config import Config
 cli = typer.Typer(name="rcpond", no_args_is_help=True)
 
 
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(version("rcpond"))
+        raise typer.Exit()
+
+
 @cli.callback()
 def common_options(
     ctx: typer.Context,
+    _version: Annotated[
+        bool,
+        typer.Option(
+            "--version",
+            help="Show the version and exit.",
+            ## is_eager ensures this runs before subcommand processing (and before Config
+            ## validation); expose_value=False keeps it out of ctx.obj.
+            is_eager=True,
+            expose_value=False,
+            callback=_version_callback,
+        ),
+    ] = False,
     env_file: Annotated[str | None, typer.Option(help="Path to a .env config file.")] = None,
     llm_chat_completions_url: Annotated[str | None, typer.Option(help="LLM API endpoint URL.")] = None,
     llm_api_key: Annotated[str | None, typer.Option(help="LLM API key.")] = None,
