@@ -29,11 +29,17 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
-    "pytest>=9.0.2",
     "requests>=2.32.5",
     "typer>=0.24.1",
 ]
 
+[project.optional-dependencies]
+docs = [
+    "mkdocs>=1.6.1",
+    "mkdocs-awesome-pages-plugin>=2.9",
+    "mkdocstrings[python]>=1.0.3",
+    "mkdocs-typer>=0.0.3",
+]
 
 
 [project.urls]
@@ -128,10 +134,4 @@ dev = [
     "pytest >=6",
     "pytest-cov >=3",
     "pre-commit",
-]
-docs = [
-    "mkdocs>=1.6.1",
-    "mkdocs-awesome-pages-plugin>=2.9",
-    "mkdocstrings[python]>=1.0.3",
-    "mkdocs-typer>=0.0.3",
 ]
