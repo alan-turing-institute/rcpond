@@ -160,8 +160,11 @@ class ServiceNow:
         ## Parse the JSON for each ticket
         return [Ticket(**_extract_ticket_fields(tkt, ticket_fields)) for tkt in resp.json()["result"]]
 
-    def get_ticket(self, ticket_number: str, include_assigned_tickets: bool = False) -> Ticket:
-        """Return the unique ticket matching ``ticket_number``, or raise.
+    def get_ticket(self, ticket_number: str) -> Ticket:
+        """Returns the unique ticket matching ``ticket_number``, or raise ValueError if either no match,
+        or multiple matches are found.
+
+        The specified ticket may be assigned or unassigned
 
         Parameters
         ----------
@@ -176,17 +179,15 @@ class ServiceNow:
             If no ticket matches, or if more than one matches (should not happen
             in practice — ServiceNow enforces uniqueness, but guarded defensively).
         """
-        matched = [
-            t for t in self.get_tickets(include_assigned_tickets=include_assigned_tickets) if t.number == ticket_number
-        ]
+        matched = [t for t in self.get_tickets(include_assigned_tickets=True) if t.number == ticket_number]
         if len(matched) == 0:
-            msg = f"Ticket '{ticket_number}' not found."
-            raise ValueError(msg)
+            err_msg = f"Ticket '{ticket_number}' not found."
+            raise ValueError(err_msg)
         if len(matched) > 1:
             ## ServiceNow should prevent duplicate ticket numbers, but guard defensively.
             detail = "\n\n".join(str(t) for t in matched)
-            msg = f"Multiple tickets match '{ticket_number}':\n{detail}"
-            raise ValueError(msg)
+            err_msg = f"Multiple tickets match '{ticket_number}':\n{detail}"
+            raise ValueError(err_msg)
         return matched[0]
 
     def get_full_ticket(self, tkt: Ticket) -> FullTicket:

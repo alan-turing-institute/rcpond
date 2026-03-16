@@ -62,11 +62,11 @@ def _process_ticket(ticket: Ticket, dry_run: bool, config: Config, service_now: 
 ## Interface to this module
 
 
-def display_all_tickets(config: Config | None = None):
+def display_all_tickets(include_assigned_tickets: bool, config: Config | None = None):
     """Display the list of unassigned tickets from ServiceNow to the user."""
     config = config or Config()
     service_now: ServiceNow = ServiceNow(config)
-    _display_output(service_now.get_tickets())
+    _display_output(service_now.get_tickets(include_assigned_tickets=include_assigned_tickets))
 
 
 def display_single_ticket(ticket_number: str, config: Config | None = None):
@@ -115,7 +115,7 @@ def process_specific_ticket(ticket_number: str, dry_run: bool, config: Config | 
     config = config or Config()
     service_now: ServiceNow = ServiceNow(config)
     llm: LLM = LLM(config)
-    ticket = service_now.get_ticket(ticket_number, include_assigned_tickets=True)
+    ticket = service_now.get_ticket(ticket_number)
     _process_ticket(ticket, dry_run, config, service_now, llm)
 
 
