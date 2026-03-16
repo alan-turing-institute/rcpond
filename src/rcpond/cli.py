@@ -1,29 +1,89 @@
+"""
+CLI for rcpond.
+
+This module creates the Typer `cli` object that is the target of the pyproject.scripts directive.
+
+It adds four subcommands
+
+- `display-all-tickets`
+- `process-next`
+- `process-ticket`
+- `batch-process`
+
+Each delegating to the corresponding function in `command.py`.
+
+Configuration is supplied via group-level options (e.g. `--env-file`) that
+must appear *before* the subcommand name:
+
+    rcpond --env-file .env display-all-tickets
+
+All config options default to None and fall back to `RCPOND_*` environment
+variables and/or any `.env` file supplied.
+
+The `Config` object is constructed via the `_config` helpful func, so that config validation will not be called when using the `--help` option, directly on `rcpond` or one one of the subcommands.
+"""
+
+from typing import Annotated
+
 import typer
 
 from rcpond import command
+from rcpond.config import Config
 
 cli = typer.Typer(name="rcpond")
 
 
+@cli.callback()
+def common_options(
+    ctx: typer.Context,
+    env_file: Annotated[str | None, typer.Option(help="Path to a .env config file.")] = None,
+    llm_chat_completions_url: Annotated[str | None, typer.Option(help="LLM API endpoint URL.")] = None,
+    llm_api_key: Annotated[str | None, typer.Option(help="LLM API key.")] = None,
+    llm_model: Annotated[str | None, typer.Option(help="LLM model identifier.")] = None,
+    servicenow_token: Annotated[str | None, typer.Option(help="ServiceNow API token.")] = None,
+    servicenow_url: Annotated[str | None, typer.Option(help="ServiceNow API base URL.")] = None,
+    rules_path: Annotated[str | None, typer.Option(help="Path to the rules file.")] = None,
+    system_prompt_template_path: Annotated[str | None, typer.Option(help="Path to the system prompt template.")] = None,
+) -> None:
+    ## Store raw args — Config is built lazily in each command so that `--help`` never triggers validation.
+    ctx.ensure_object(dict)
+    ctx.obj = {
+        "env_path": env_file,
+        "cli_args": {
+            "llm_chat_completions_url": llm_chat_completions_url,
+            "llm_api_key": llm_api_key,
+            "llm_model": llm_model,
+            "servicenow_token": servicenow_token,
+            "servicenow_url": servicenow_url,
+            "rules_path": rules_path,
+            "system_prompt_template_path": system_prompt_template_path,
+        },
+    }
+
+
+def _config(ctx: typer.Context) -> Config:
+    return Config(env_path=ctx.obj["env_path"], cli_args=ctx.obj["cli_args"])
+
+
 @cli.command()
-def display_all_tickets():
+def display_all_tickets(ctx: typer.Context):
     """List all unassigned tickets from ServiceNow."""
-    command.display_all_tickets()
+    command.display_all_tickets(config=_config(ctx))
 
 
 @cli.command()
-def process_next(dry_run: bool = False):
+def process_next(ctx: typer.Context, dry_run: bool = False):
     """Review an arbitrarily selected unassigned ticket via the LLM."""
-    command.process_next_ticket(dry_run=dry_run)
+    command.process_next_ticket(dry_run=dry_run, config=_config(ctx))
 
 
 @cli.command()
-def process_ticket(ticket_number: str, dry_run: bool = False):
+def process_ticket(ctx: typer.Context, ticket_number: str, dry_run: bool = False):
     """Review a specific ticket (e.g. RES0001234) via the LLM."""
-    command.process_specific_ticket(ticket_number=ticket_number, dry_run=dry_run)
+    command.process_specific_ticket(ticket_number=ticket_number, dry_run=dry_run, config=_config(ctx))
 
 
 @cli.command()
-def batch_process(dry_run: bool = False):
+def batch_process(ctx: typer.Context, dry_run: bool = False):
     """Review all unassigned tickets via the LLM."""
-    command.batch_process_tickets(dry_run=dry_run)
+    command.batch_process_tickets(dry_run=dry_run, config=_config(ctx))

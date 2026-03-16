@@ -133,4 +133,5 @@ docs = [
     "mkdocs>=1.6.1",
     "mkdocs-awesome-pages-plugin>=2.9",
     "mkdocstrings[python]>=1.0.3",
+    "mkdocs-typer>=0.0.3",
 ]
