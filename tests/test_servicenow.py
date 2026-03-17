@@ -7,7 +7,8 @@ from rcpond.servicenow import ServiceNow, Ticket
 
 
 @pytest.fixture()
-def dev_instance_config() -> config.Config:
+def dev_instance_config(monkeypatch, tmp_path) -> config.Config:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     return config.Config(".env")
 
 

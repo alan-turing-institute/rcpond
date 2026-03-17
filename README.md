@@ -21,6 +21,7 @@ uv pip install .
 
 ## Usage
 
+See [docs/usage.md](docs/usage.md) for configuration and command reference.
 
 ## Contributing
 
