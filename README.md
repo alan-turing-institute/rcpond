@@ -8,16 +8,11 @@ A tool to partly automate RCP requests
 
 ## Installation
 
+For most users the recommended installation method is via `uv`:
 ```bash
-uv pip install rcpond
+uv tool install git+ssh://git@github.com/alan-turing-institute/rcpond.git
 ```
-
-From source:
-```bash
-git clone https://github.com/alan-turing-institute/rcpond
-cd rcpond
-uv pip install .
-```
+RCPond will need additional configuration before its first use. See [docs/usage.md](docs/usage.md) for instructions on how to set up the configuration files and obtain a ServiceNow API token.
 
 ## Usage
 
