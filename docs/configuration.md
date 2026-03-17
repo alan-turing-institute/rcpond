@@ -2,8 +2,8 @@
 
 ## Prerequisites
 
-- [`uv`](https://docs.astral.sh/uv/getting-started/installation/) installed (includes `uvx`)
-- git+ssh access to GitHub, including the [rcpond-rules](https://github.com/alan-turing-institute/rcpond-rules) private repo
+- [`uv` installed](https://docs.astral.sh/uv/getting-started/installation/) (includes `uvx`).
+- git+ssh access to GitHub, including the [rcpond-rules](https://github.com/alan-turing-institute/rcpond-rules) private repo.
 
 
 ## Main steps
@@ -21,6 +21,12 @@ Install RCPond using `uv`:
 ```bash
 uv tool install git+ssh://git@github.com/alan-turing-institute/rcpond.git
 rcpond
+```
+
+(Optional) It is also possible to invoke rcpond directly without installing it, using `uvx`:
+
+```bash
+uvx --from git+ssh://git@github.com/alan-turing-institute/rcpond.git
 ```
 
 ## Configuration
@@ -53,9 +59,6 @@ The configuration options can be provided in several different ways. This allow 
 2. A `.env` file passed via `--env-file`
 3. Environment variables prefixed with `RCPOND_`
 4. CLI flags (e.g. `--llm-api-key`)
-
-The recommended setup is to store personal credentials once in the XDG config file
-so they are available to all invocations without needing a `.env` file:
 
 ### Configuration file example
 
