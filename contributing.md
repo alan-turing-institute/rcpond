@@ -41,6 +41,10 @@ pytest -m integration
 
 The integration tests require a live connection to a ServiceNow (Dev) instance, specified in a `.env` file. *Running these test will make permanent changes to the tickets on the ServiceNow instance* so they are not suitable for regular unit testing. They are intended to be run manually when making changes to the `ServiceNow` class or related code.
 
+Integration test will not load any credentials from the XDG config file (`~/.config/rcpond/default.config`). This is prevented to avoid accidentally running integration tests with real credentials, causing unwanted changes to a production ServiceNow instance. If you want to run integration tests, you must explicitly provide test credentials via a `.env` file or environment variables.
+
+```
+
 
 # Coverage
 

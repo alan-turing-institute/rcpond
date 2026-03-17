@@ -49,3 +49,4 @@ repos:
         additional_dependencies:
           - pytest
           - types-requests
+          - xdg_base_dirs

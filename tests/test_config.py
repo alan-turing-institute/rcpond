@@ -1,3 +1,18 @@
+"""Tests for Config loading, precedence, and validation.
+
+XDG isolation
+-------------
+Config loads from ``$XDG_CONFIG_HOME/rcpond/default.config`` as its lowest-precedence
+source.  Any test that expects a ``ValueError`` for missing fields — or that makes a
+precise assertion about which value wins — must redirect ``XDG_CONFIG_HOME`` to an
+empty ``tmp_path``, otherwise the developer's own ``~/.config/rcpond/default.config``
+will silently supply the missing values and the test result will depend on the local
+machine's state. This line is used in the setup for many tests:
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+
+"""
+
 from dataclasses import fields
 
 import pytest
@@ -38,6 +53,16 @@ def write_dotenv(directory, values):
     lines = [f"RCPOND_{k.upper()}={v}" for k, v in values.items()]
     env_file.write_text("\n".join(lines))
     return env_file
+
+
+def write_xdg_config(xdg_dir, values):
+    """Write a config file at $XDG_CONFIG_HOME/rcpond/default.config."""
+    config_dir = xdg_dir / "rcpond"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    config_file = config_dir / "default.config"
+    lines = [f"RCPOND_{k.upper()}={v}" for k, v in values.items()]
+    config_file.write_text("\n".join(lines))
+    return config_file
 
 
 # --- Loading from a single source ---
@@ -130,10 +155,11 @@ def test_cli_args_none_does_not_override_dotenv(tmp_path, all_values):
     assert config.llm_model == "gpt-4"
 
 
-def test_both_params_none_raises_when_no_env_vars_set(monkeypatch):
+def test_both_params_none_raises_when_no_env_vars_set(tmp_path, monkeypatch):
     """With no sources at all, Config() should raise."""
     from rcpond.config import _env_var_name
 
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))  ## empty — no xdg config
     for field in fields(Config):
         monkeypatch.delenv(_env_var_name(field.name), raising=False)
 
@@ -141,10 +167,76 @@ def test_both_params_none_raises_when_no_env_vars_set(monkeypatch):
         Config(env_path=None, cli_args=None)
 
 
+# --- XDG config loading ---
+
+
+def test_load_from_xdg_config_only(tmp_path, monkeypatch, all_values):
+    """Config loads from the XDG default.config file when present."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    write_xdg_config(tmp_path, all_values)
+
+    config = Config()
+
+    assert config.llm_model == "gpt-4"
+    assert config.llm_chat_completions_url == "https://api.example.com"
+
+
+def test_xdg_config_absent_does_not_raise(tmp_path, monkeypatch, all_values):
+    """Missing XDG config is silently ignored; other sources still work."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))  ## empty — no rcpond/default.config
+    env_file = write_dotenv(tmp_path, all_values)
+
+    config = Config(env_path=env_file)
+
+    assert config.llm_model == "gpt-4"
+
+
+def test_dotenv_overrides_xdg_config(tmp_path, monkeypatch, all_values):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    write_xdg_config(tmp_path, all_values)
+    env_file = write_dotenv(tmp_path, {**all_values, "llm_model": "dotenv-model"})
+
+    config = Config(env_path=env_file)
+
+    assert config.llm_model == "dotenv-model"
+
+
+def test_env_vars_override_xdg_config(tmp_path, monkeypatch, all_values):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    write_xdg_config(tmp_path, all_values)
+    monkeypatch.setenv("RCPOND_LLM_MODEL", "env-var-model")
+
+    config = Config()
+
+    assert config.llm_model == "env-var-model"
+
+
+def test_cli_args_override_xdg_config(tmp_path, monkeypatch, all_values):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    write_xdg_config(tmp_path, all_values)
+
+    config = Config(cli_args={"llm_model": "cli-model"})
+
+    assert config.llm_model == "cli-model"
+
+
+def test_all_four_sources_precedence(tmp_path, monkeypatch, all_values):
+    """Full precedence chain: xdg < dotenv < env vars < cli args."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    write_xdg_config(tmp_path, all_values)
+    env_file = write_dotenv(tmp_path, {**all_values, "llm_model": "dotenv-model"})
+    monkeypatch.setenv("RCPOND_LLM_MODEL", "env-var-model")
+
+    config = Config(env_path=env_file, cli_args={"llm_model": "cli-model"})
+
+    assert config.llm_model == "cli-model"
+
+
 # --- Missing fields ---
 
 
-def test_missing_single_field_raises(tmp_path, all_values):
+def test_missing_single_field_raises(tmp_path, monkeypatch, all_values):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     partial = {k: v for k, v in all_values.items() if k != "llm_api_key"}
     env_file = write_dotenv(tmp_path, partial)
 
@@ -152,7 +244,8 @@ def test_missing_single_field_raises(tmp_path, all_values):
         Config(env_path=env_file)
 
 
-def test_missing_multiple_fields_raises(tmp_path, all_values):
+def test_missing_multiple_fields_raises(tmp_path, monkeypatch, all_values):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     partial = {k: v for k, v in all_values.items() if k in ("llm_base_url", "llm_model")}
     env_file = write_dotenv(tmp_path, partial)
 
