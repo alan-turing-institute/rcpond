@@ -1,4 +1,4 @@
-# Getting started with RCPond
+# Configuring RCPond for first use
 
 ## Prerequisites
 
@@ -12,21 +12,26 @@ There are three main steps to get up and running:
 
 - Installing RCPond.
 - Create the configuration files.
-- Obtain an ServiceNow API token and add it to the configuration.
+- Obtain a ServiceNow API token and add it to the configuration.
 
 ## Installing RCPond
 
 Install RCPond using `uv`:
 
 ```bash
-uv tool install git+ssh://git@github.com/alan-turing-institute/rcpond.git
-rcpond
+$ uv tool install git+ssh://git@github.com/alan-turing-institute/rcpond.git
+```
+
+This will install the `rcpond` command, add it your path and should now be available in your terminal. You can test that it is working by running:
+
+```bash
+$ rcpond
 ```
 
 (Optional) It is also possible to invoke rcpond directly without installing it, using `uvx`:
 
 ```bash
-uvx --from git+ssh://git@github.com/alan-turing-institute/rcpond.git
+$ uvx git+ssh://git@github.com/alan-turing-institute/rcpond.git --help
 ```
 
 ## Configuration
@@ -38,7 +43,7 @@ RCPond requires several credentials and paths to be configured. These can be con
 The recommended setup is to store personal credentials in the XDG config file. There is a helper command to create a default configuration file with most required keys:
 
 ```bash
-uvx --from git+ssh://git@github.com/alan-turing-institute/rcpond-rules.git rcpond-install
+$ uvx --from git+ssh://git@github.com/alan-turing-institute/rcpond-rules.git rcpond-install
 ```
 
 This will install a default configuration file at `~/.config/rcpond/default.config` .
@@ -48,7 +53,7 @@ If there are existing configuration files, these will not be overwritten.
 If you need to overwrite existing config files, this is possible using the `--force` option:
 
 ```bash
-uvx --from git+ssh://git@github.com/alan-turing-institute/rcpond-rules.git rcpond-install --force
+$ uvx --from git+ssh://git@github.com/alan-turing-institute/rcpond-rules.git rcpond-install --force
 ```
 
 ### Other configuration options
@@ -76,7 +81,7 @@ RCPOND_SYSTEM_PROMPT_TEMPLATE_PATH=/path/to/system_prompt_template.txt
 A project-specific `.env` file can then override individual values where needed:
 
 ```bash
-rcpond --env-file .env display-all
+$ rcpond --env-file .env display-all
 ```
 
 ## Obtaining a ServiceNow API token
