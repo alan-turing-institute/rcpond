@@ -30,6 +30,7 @@ classifiers = [
 ]
 dependencies = [
     "requests>=2.32.5",
+    "typer>=0.24.1",
     "xdg-base-dirs>=6.0.2",
 ]
 
@@ -38,13 +39,19 @@ docs = [
     "mkdocs>=1.6.1",
     "mkdocs-awesome-pages-plugin>=2.9",
     "mkdocstrings[python]>=1.0.3",
+    "mkdocs-typer>=0.0.3",
 ]
+
 
 [project.urls]
 Homepage = "https://github.com/alan-turing-institute/rcpond"
 "Bug Tracker" = "https://github.com/alan-turing-institute/rcpond/issues"
 Discussions = "https://github.com/alan-turing-institute/rcpond/discussions"
 Changelog = "https://github.com/alan-turing-institute/rcpond/releases"
+
+[project.scripts]
+rcpond = "rcpond.cli:cli"
+
 
 [tool.pytest.ini_options]
 minversion = "6.0"

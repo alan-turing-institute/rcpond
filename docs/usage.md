@@ -1,5 +1,6 @@
 # Using RCPond
 
+
 ## Configuration
 
 RCPond requires several credentials and paths to be configured. These can be configured in several different ways. Values are loaded from the following sources, in order of increasing precedence:
@@ -31,4 +32,17 @@ rcpond --env-file .env display-all
 
 ## Commands
 
-Placeholder for command reference. To be completed once the CLI is implemented.
+<!--
+Insert the module-level docstring from `rcpond.cli` here.
+ ::: rcpond.cli
+    options:
+      show_root_heading: false
+      show_source: false
+      members: false
+ -->
+
+::: mkdocs-typer
+    :module: rcpond.cli
+    :command: cli
+    :prog_name: rcpond
+    :depth: 2

@@ -1,12 +1,14 @@
 """High-level commands for rcpond: listing, processing, and batch-processing tickets.
 
-The three main entry points are:
+The four main entry points are:
 
 - `display_all_tickets`: List unassigned tickets from ServiceNow.
 - `process_next_ticket`: Review one arbitrarily chosen ticket via the LLM.
 - `process_specific_ticket`: Review a given ticket via the LLM.
 - `batch_process_tickets`: Review all unassigned tickets via the LLM.
 """
+
+from pprint import pprint
 
 from rcpond.config import Config
 from rcpond.llm import LLM, LLMResponse
@@ -22,6 +24,8 @@ def _display_output(*stuff):
     Params:
         stuff: undefined things to display to the user. Precise syntax and structure TBD.
     """
+
+    pprint(stuff)
 
 
 def _process_ticket(ticket: Ticket, dry_run: bool, config: Config, service_now: ServiceNow, llm: LLM) -> None:
@@ -58,14 +62,22 @@ def _process_ticket(ticket: Ticket, dry_run: bool, config: Config, service_now: 
 ## Interface to this module
 
 
-def display_all_tickets():
+def display_all_tickets(include_assigned_tickets: bool, config: Config | None = None):
     """Display the list of unassigned tickets from ServiceNow to the user."""
-    config = Config()
+    config = config or Config()
     service_now: ServiceNow = ServiceNow(config)
-    _display_output(service_now.get_tickets())
+    _display_output(service_now.get_tickets(include_assigned_tickets=include_assigned_tickets))
 
 
-def process_next_ticket(dry_run: bool):
+def display_single_ticket(ticket_number: str, config: Config | None = None):
+    """Display the details of a specific ticket."""
+    config = config or Config()
+    service_now: ServiceNow = ServiceNow(config)
+    ticket = service_now.get_ticket(ticket_number)
+    _display_output(service_now.get_full_ticket(ticket))
+
+
+def process_next_ticket(dry_run: bool, config: Config | None = None):
     """Process an arbitrarily selected ServiceNow ticket via the LLM.
 
     The LLM response and reasoning are displayed to the user. If the LLM
@@ -75,15 +87,17 @@ def process_next_ticket(dry_run: bool):
     ----------
     dry_run : bool
         If True, planned tool calls are not executed.
+    config : Config | None
+        Configuration to use. If None, Config() is constructed from the environment.
     """
-    config = Config()
+    config = config or Config()
     service_now: ServiceNow = ServiceNow(config)
     llm: LLM = LLM(config)
     tickets: list[Ticket] = service_now.get_tickets()
     _process_ticket(tickets.pop(), dry_run, config, service_now, llm)
 
 
-def process_specific_ticket(ticket: Ticket, dry_run: bool):
+def process_specific_ticket(ticket_number: str, dry_run: bool, config: Config | None = None):
     """Process the given ServiceNow ticket via the LLM.
 
     The LLM response and reasoning are displayed to the user. If the LLM
@@ -91,18 +105,21 @@ def process_specific_ticket(ticket: Ticket, dry_run: bool):
 
     Parameters
     ----------
-    ticket : Ticket
-        The ticket to process.
+    ticket_number : str
+        The ticket number (e.g. ``"RES0001234"``) to process.
     dry_run : bool
         If True, planned tool calls are not executed.
+    config : Config | None
+        Configuration to use. If None, Config() is constructed from the environment.
     """
-    config = Config()
+    config = config or Config()
     service_now: ServiceNow = ServiceNow(config)
     llm: LLM = LLM(config)
+    ticket = service_now.get_ticket(ticket_number)
     _process_ticket(ticket, dry_run, config, service_now, llm)
 
 
-def batch_process_tickets(dry_run: bool):
+def batch_process_tickets(dry_run: bool, config: Config | None = None):
     """Process all unassigned ServiceNow tickets via the LLM.
 
     Each ticket is reviewed individually. The LLM response and reasoning are
@@ -113,8 +130,10 @@ def batch_process_tickets(dry_run: bool):
     ----------
     dry_run : bool
         If True, planned tool calls are not executed.
+    config : Config | None
+        Configuration to use. If None, Config() is constructed from the environment.
     """
-    config = Config()
+    config = config or Config()
     service_now: ServiceNow = ServiceNow(config)
     llm: LLM = LLM(config)
     for ticket in service_now.get_tickets():

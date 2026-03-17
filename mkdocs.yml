@@ -14,3 +14,4 @@ plugins:
             show_submodules: true
 markdown_extensions:
   - admonition
+  - mkdocs-typer

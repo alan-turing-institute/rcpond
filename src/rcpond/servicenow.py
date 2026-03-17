@@ -4,6 +4,7 @@ Provides a class, `ServiceNow`, which wraps the ServiceNow
 API. The only methods are:
 
 - `ServiceNow.get_tickets()`: Get a list of tickets. By default only unassigned tickets are returned, but all tickets can be selected;
+- `ServiceNow.get_ticket()`: Get a single ticket by its ticket number (e.g. ``"RES0001234"``);
 - `ServiceNow.get_full_ticket()`: Get full details of a ticket;
 - `assign_to()` Assigns a ticket to the named user;
 - `get_work_notes()` List the work notes for a specific ticket; and
@@ -158,6 +159,36 @@ class ServiceNow:
 
         ## Parse the JSON for each ticket
         return [Ticket(**_extract_ticket_fields(tkt, ticket_fields)) for tkt in resp.json()["result"]]
+
+    def get_ticket(self, ticket_number: str) -> Ticket:
+        """Returns the unique ticket matching ``ticket_number``, or raise ValueError if either no match,
+        or multiple matches are found.
+
+        The specified ticket may be assigned or unassigned
+
+        Parameters
+        ----------
+        ticket_number : str
+            The ticket number to look up (e.g. ``"RES0001234"``).
+        include_assigned_tickets : bool
+            If True, search assigned tickets as well as unassigned ones.
+
+        Raises
+        ------
+        ValueError
+            If no ticket matches, or if more than one matches (should not happen
+            in practice — ServiceNow enforces uniqueness, but guarded defensively).
+        """
+        matched = [t for t in self.get_tickets(include_assigned_tickets=True) if t.number == ticket_number]
+        if len(matched) == 0:
+            err_msg = f"Ticket '{ticket_number}' not found."
+            raise ValueError(err_msg)
+        if len(matched) > 1:
+            ## ServiceNow should prevent duplicate ticket numbers, but guard defensively.
+            detail = "\n\n".join(str(t) for t in matched)
+            err_msg = f"Multiple tickets match '{ticket_number}':\n{detail}"
+            raise ValueError(err_msg)
+        return matched[0]
 
     def get_full_ticket(self, tkt: Ticket) -> FullTicket:
         """Get full ticket details."""
