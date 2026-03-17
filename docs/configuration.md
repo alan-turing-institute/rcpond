@@ -1,4 +1,4 @@
-# Using RCPond
+# Getting started with RCPond
 
 ## Prerequisites
 
@@ -6,13 +6,22 @@
 - git+ssh access to GitHub, including the [rcpond-rules](https://github.com/alan-turing-institute/rcpond-rules) private repo
 
 
-## Getting started
+## Main steps
 
 There are three main steps to get up and running:
 
+- Installing RCPond.
 - Create the configuration files.
 - Obtain an ServiceNow API token and add it to the configuration.
-- Installing RCPond.
+
+## Installing RCPond
+
+Install RCPond using `uv`:
+
+```bash
+uv tool install git+ssh://git@github.com/alan-turing-institute/rcpond.git
+rcpond
+```
 
 ## Configuration
 
@@ -72,29 +81,3 @@ rcpond --env-file .env display-all
 For instructions on how to obtain a ServiceNow API token, see the [rcpond-rules repo](https://github.com/alan-turing-institute/rcpond-rules)
 
 You will need to add the token to your configuration (e.g. in the XDG config file or a `.env` file) under the key `RCPOND_SERVICENOW_TOKEN` for RCPond to be able to access the ServiceNow API.
-
-## Installing RCPond
-
-Install RCPond using `uv`:
-
-```bash
-uv tool install git+ssh://git@github.com/alan-turing-institute/rcpond.git
-rcpond
-```
-
-## RCPond Commands
-
-<!--
-Insert the module-level docstring from `rcpond.cli` here.
- ::: rcpond.cli
-    options:
-      show_root_heading: false
-      show_source: false
-      members: false
- -->
-
-::: mkdocs-typer
-    :module: rcpond.cli
-    :command: cli
-    :prog_name: rcpond
-    :depth: 2

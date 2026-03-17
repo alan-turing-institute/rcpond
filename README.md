@@ -4,7 +4,7 @@
 [![PyPI version][pypi-version]][pypi-link]
 [![PyPI platforms][pypi-platforms]][pypi-link]
 
-A tool to partly automate RCP requests
+A tool to partly automate RCP requests.
 
 ## Installation
 
@@ -12,11 +12,15 @@ For most users the recommended installation method is via `uv`:
 ```bash
 uv tool install git+ssh://git@github.com/alan-turing-institute/rcpond.git
 ```
-RCPond will need additional configuration before its first use. See [docs/usage.md](docs/usage.md) for instructions on how to set up the configuration files and obtain a ServiceNow API token.
+RCPond will need additional configuration before its first use. See [docs/getting_started.md](docs/getting_started.md) for instructions on how to set up the configuration files and obtain a ServiceNow API token.
 
 ## Usage
 
-See [docs/usage.md](docs/usage.md) for configuration and command reference.
+See:
+
+* [docs/index.md](docs/index.md) for Quickstart instructions.
+* [docs/configuration.md](docs/configuration.md) for configuration
+* [docs/command_reference.md](docs/command_reference.md) for command reference.
 
 ## Contributing
 
