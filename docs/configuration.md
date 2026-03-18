@@ -19,7 +19,7 @@ There are three main steps to get up and running:
 Install RCPond using `uv`:
 
 ```bash
-$ uv tool install git+ssh://git@github.com/alan-turing-institute/rcpond.git
+$ uv tool install git+https://github.com/alan-turing-institute/rcpond.git
 ```
 
 This will install the `rcpond` command, add it your path and should now be available in your terminal. You can test that it is working by running:
@@ -31,7 +31,7 @@ $ rcpond
 (Optional) It is also possible to invoke rcpond directly without installing it, using `uvx`:
 
 ```bash
-$ uvx git+ssh://git@github.com/alan-turing-institute/rcpond.git --help
+$ uvx git+https://github.com/alan-turing-institute/rcpond.git --help
 ```
 
 ## Configuration
@@ -43,17 +43,22 @@ RCPond requires several credentials and paths to be configured. These can be con
 The recommended setup is to store personal credentials in the XDG config file. There is a helper command to create a default configuration file with most required keys:
 
 ```bash
-$ uvx --from git+ssh://git@github.com/alan-turing-institute/rcpond-rules.git rcpond-install
+$ uvx git+ssh://git@github.com/alan-turing-institute/rcpond-rules.git
 ```
 
 This will install a default configuration file at `~/.config/rcpond/default.config` .
 
-If there are existing configuration files, these will not be overwritten.
-
-If you need to overwrite existing config files, this is possible using the `--force` option:
+If the command above fails, try cloning the repo and running the command locally:
 
 ```bash
-$ uvx --from git+ssh://git@github.com/alan-turing-institute/rcpond-rules.git rcpond-install --force
+$ git clone git@github.com:alan-turing-institute/rcpond-rules.git
+$ uvx ./rcpond-rules
+```
+
+By default existing configuration files will not be overwritten. If you need to overwrite existing config files, this is possible using the `--force` option:
+
+```bash
+$ uvx git+ssh://git@github.com/alan-turing-institute/rcpond-rules.git --force
 ```
 
 ### Other configuration options
