@@ -35,6 +35,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+html = [
+    "beautifulsoup4>=4.12",
+    "pandas>=2.0",
+]
 docs = [
     "mkdocs>=1.6.1",
     "mkdocs-awesome-pages-plugin>=2.9",
@@ -131,8 +135,10 @@ flake8-unused-arguments.ignore-variadic-names = true  # allow unused *args/**kwa
 
 [dependency-groups]
 dev = [
+    "pandas-stubs>=2.0",
     "pdoc>=16.0.0",
+    "pre-commit",
     "pytest >=6",
     "pytest-cov >=3",
-    "pre-commit",
+    "types-beautifulsoup4>=4.12",
 ]

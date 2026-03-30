@@ -47,7 +47,9 @@ repos:
         files: src
         args: []
         additional_dependencies:
+          - pandas-stubs
           - pytest
+          - types-beautifulsoup4
           - types-requests
           - typer
           - xdg_base_dirs
