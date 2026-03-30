@@ -3,12 +3,13 @@ CLI for rcpond.
 
 This module creates the Typer `cli` object that is the target of the pyproject.scripts directive.
 
-It adds four subcommands
+It adds five subcommands
 
 - `display-all-tickets`
 - `process-next`
 - `process-ticket`
 - `process-all`
+- `evaluate-all`
 
 Each delegating to the corresponding function in `command.py`.
 
@@ -24,6 +25,7 @@ The `Config` object is constructed via the `_config` helpful func, so that confi
 """
 
 from importlib.metadata import version
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -107,6 +109,18 @@ def process_next(ctx: typer.Context, dry_run: bool = False):
 def process_ticket(ctx: typer.Context, ticket_number: str, dry_run: bool = False):
     """Review a specific ticket (e.g. RES0001234) via the LLM."""
     command.process_specific_ticket(ticket_number=ticket_number, dry_run=dry_run, config=_config(ctx))
+
+
+try:
+    import rcpond.html_servicenow as _  # noqa: F401
+
+    @cli.command()
+    def evaluate_all(ctx: typer.Context, in_dir: Path, out_file: Path):
+        """Evaluate LLM performance against a directory of pre-downloaded HTML tickets."""
+        command.batch_evaluate_tickets(in_dir=in_dir, out_file=out_file, config=_config(ctx))
+
+except ImportError:
+    pass
 
 
 @cli.command()
