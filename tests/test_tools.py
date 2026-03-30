@@ -45,7 +45,7 @@ def test_tool_to_openai_dict():
 def test_get_available_tools_returns_one_tool():
     tools = get_available_tools()
     assert len(tools) == 1
-    assert tools[0].name == "_post_note"
+    assert tools[0].name == "post_freeform_note"
 
 
 def test_get_available_tools_post_note_schema():
@@ -72,7 +72,7 @@ def test_call_tool_dispatches_post_note():
     )
     planned_tool_call = {
         "function": {
-            "name": "_post_note",
+            "name": "post_freeform_note",
             "arguments": {"note": "Please provide more information."},
         }
     }

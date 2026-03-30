@@ -27,14 +27,18 @@ from rcpond.tool import Tool
 ## Tool definitions (LLM-visible schema only; execution is handled by _IMPLEMENTATIONS)
 
 
-def _post_note(note: str) -> None:  # noqa: ARG001
-    """Post a work note to the ServiceNow ticket."""
+def post_freeform_note(note: str) -> None:  # noqa: ARG001
+    """Post a work note to the ServiceNow ticket. The note is freeform and written by the LLM"""
+
+
+def post_templated_note(template_name: str, **kwargs) -> None:  # noqa: ARG001
+    """Post a work note to the ServiceNow ticket. The note uses a predefined JINJA template, and the LLM provides the parameters."""
 
 
 ## Maps each tool name to a callable that accepts (service_now, ticket, **tool_args).
 ## Add a new entry here when adding a new tool.
 _IMPLEMENTATIONS: dict[str, typing.Callable] = {
-    _post_note.__name__: lambda service_now, ticket, **kwargs: service_now.post_note(ticket, **kwargs),
+    post_freeform_note.__name__: lambda service_now, ticket, **kwargs: service_now.post_note(ticket, **kwargs),
 }
 
 
@@ -50,7 +54,7 @@ def get_available_tools() -> list[Tool]:
     list[Tool]
         The tools the LLM may call.
     """
-    return [Tool(_post_note)]
+    return [Tool(post_freeform_note)]
 
 
 def call_tool(planned_tool_call: dict, service_now: ServiceNow, ticket: Ticket) -> None:
