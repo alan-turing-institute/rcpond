@@ -54,9 +54,7 @@ def _process_ticket(ticket: Ticket, dry_run: bool, config: Config, service_now: 
     full_ticket: FullTicket = service_now.get_full_ticket(ticket)
     tools = get_available_tools()
     system_prompt, user_prompt = construct_prompt(full_ticket, config)
-    llm_response: LLMResponse = llm.generate(
-        system_prompt, user_prompt, config.llm_model, tools=[t.to_openai_dict() for t in tools]
-    )
+    llm_response: LLMResponse = llm.generate(system_prompt, user_prompt, config.llm_model, tools=tools)
     if not dry_run and llm_response.planned_tool_call is not None:
         call_tool(llm_response.planned_tool_call, service_now, full_ticket)
 

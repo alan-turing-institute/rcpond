@@ -7,6 +7,7 @@ import requests
 
 from rcpond.config import Config
 from rcpond.llm import LLM, LLMResponse
+from rcpond.tool import Tool
 
 # Realistic mock responses based on actual API output from gpt-oss-120b
 
@@ -217,7 +218,10 @@ class TestGenerateEndToEnd:
         mock_response.json.return_value = TOOL_CALL_RESPONSE
         mock_post.return_value = mock_response
 
-        tools = [{"type": "function", "function": {"name": "get_weather"}}]
+        def get_weather(location: str) -> None:  # noqa: ARG001
+            "Get the weather for a location."
+
+        tools = [Tool(get_weather)]
         result = llm.generate(
             system_prompt="You are a helpful assistant.",
             user_prompt="What is the weather in London?",

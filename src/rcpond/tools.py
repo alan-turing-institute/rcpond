@@ -11,8 +11,7 @@ Example use
 -----------
 
 >>> tools = get_available_tools()
->>> tool_dicts = [t.to_openai_dict() for t in tools]
->>> response = llm.generate(system, user, model, tools=tool_dicts)
+>>> response = llm.generate(system, user, model, tools=tools)
 >>> if response.planned_tool_call:
 ...     call_tool(response.planned_tool_call, service_now, ticket)
 
