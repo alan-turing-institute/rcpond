@@ -1,98 +1,75 @@
-"""Generic LLM tool wrapper.
+"""Generic LLM tool interface.
 
 Provides:
 
-- `Tool`: Wraps a callable, extracting its name, docstring, and LLM-visible
-  parameter types for use in LLM tool schemas.
+- `Tool`: Abstract base class for LLM tools. Each tool exposes its schema via
+  ``to_openai_dict()`` and runs its action via ``execute()``.
 
-The callable passed to `Tool` is the tool's implementation. Parameters typed as
-`ServiceNow` or `Ticket` are treated as runtime context and excluded from the
-OpenAI schema; all other parameters are exposed to the LLM.
+Concrete implementations live in ``rcpond.tools``.
 
 Example use
 -----------
 
->>> from rcpond.servicenow import ServiceNow, Ticket
->>> def my_tool(service_now: ServiceNow, ticket: Ticket, note: str) -> None:
-...     "Post a note."
-...     service_now.post_note(ticket, note=note)
->>> t = Tool(my_tool)
->>> t.to_openai_dict()
-{'type': 'function', 'function': {'name': 'my_tool', ...}}
+>>> class MyTool(Tool):
+...     @property
+...     def name(self) -> str:
+...         return "my_tool"
+...
+...     @property
+...     def description(self) -> str:
+...         return "Does something."
+...
+...     def to_openai_dict(self) -> dict: ...
+...     def execute(self, service_now, ticket, **kwargs) -> None: ...
 
 """
 
-import inspect
-import typing
+from abc import ABC, abstractmethod
 
-from rcpond.servicenow import ServiceNow, Ticket
-
-## Maps Python types to JSON Schema type strings for OpenAI tool definitions.
-_TYPE_MAP = {str: "string", int: "integer", float: "number", bool: "boolean"}
-
-## Parameters of these types are runtime context, not LLM-provided arguments.
-_CONTEXT_TYPES = {ServiceNow, Ticket}
-
+from rcpond.servicenow import FullTicket, ServiceNow
 
 ## --------------------------------------------------------------------------------
-## Tool class
+## Tool ABC
 
 
-class Tool:
-    """Wraps a callable as an LLM tool, exposing its schema and implementation.
+class Tool(ABC):
+    """Abstract base class for an LLM tool.
 
-    Example:
-    >>> def my_tool(service_now: ServiceNow, ticket: Ticket, x: str) -> None:
-    ...     "Does something"
-    >>> t = Tool(my_tool)
-
+    Subclasses define their own schema (``to_openai_dict``) and execution logic
+    (``execute``). The ``name`` and ``description`` properties drive both the
+    schema and tool-call dispatch in ``command.py``.
     """
 
-    def __init__(self, func: typing.Callable) -> None:
-        self.name = func.__name__
-        self.description = func.__doc__
-        self.impl = func
-        self.parameters = self._get_param_list()
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """The function name exposed to the LLM."""
 
-    def _get_param_list(self) -> dict:
-        sig = inspect.signature(self.impl)
-        return {
-            name: param.annotation for name, param in sig.parameters.items() if param.annotation not in _CONTEXT_TYPES
-        }
+    @property
+    @abstractmethod
+    def description(self) -> str:
+        """The human-readable description exposed to the LLM."""
 
+    @abstractmethod
     def to_openai_dict(self) -> dict:
-        """Convert this tool to an OpenAI function-calling schema dict.
+        """Return this tool's schema in OpenAI function-calling format.
 
         Returns
         -------
         dict
-            A dict in the OpenAI tool format, suitable for passing to the
-            chat completions API.
+            A dict suitable for the ``tools`` parameter of the chat completions API.
         """
-        properties = {name: {"type": _TYPE_MAP.get(ann, "string")} for name, ann in self.parameters.items()}
-        return {
-            "type": "function",
-            "function": {
-                "name": self.name,
-                "description": self.description,
-                "parameters": {
-                    "type": "object",
-                    "properties": properties,
-                    "required": list(self.parameters.keys()),
-                },
-            },
-        }
 
-    def execute(self, service_now: ServiceNow, ticket: Ticket, **kwargs) -> None:
-        """Execute this tool's implementation.
+    @abstractmethod
+    def execute(self, service_now: ServiceNow, ticket: FullTicket, **kwargs) -> None:
+        """Execute this tool's action.
 
         Parameters
         ----------
         service_now : ServiceNow
             The ServiceNow client used to perform the action.
-        ticket : Ticket
+        ticket : FullTicket
             The ticket the action should be applied to.
         **kwargs
-            Arguments from the LLM's tool call.
+            Arguments supplied by the LLM.
         """
-        self.impl(service_now, ticket, **kwargs)

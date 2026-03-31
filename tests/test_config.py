@@ -20,8 +20,9 @@ import pytest
 
 from rcpond.config import Config
 
-_WORKING_TEMPLATE = Path("tests/fixtures/mock_templates/mock_working_template.yaml.j2")
-_MALFORMED_TEMPLATE = Path("tests/fixtures/mock_templates/mock_malformed_template.yaml.j2")
+_WORKING_TEMPLATES_DIR = Path("tests/fixtures/working_templates")
+_FAILING_TEMPLATES_DIR = Path("tests/fixtures/failing_templates")
+_SYSTEM_PROMPT_TEMPLATE = Path("tests/fixtures/system_prompt_template.txt")
 
 # --- Fixtures ---
 
@@ -31,18 +32,16 @@ def path_files(tmp_path):
     """Create placeholder files/dirs for the three Path config fields."""
     rules = tmp_path / "RULES.md"
     rules.touch()
-    template = tmp_path / "system_prompt_template.txt"
-    template.write_text(_WORKING_TEMPLATE.read_text())
-    email_templates = tmp_path / "email_templates"
-    email_templates.mkdir()
-    (email_templates / "mock_working_template.yaml.j2").write_text(_WORKING_TEMPLATE.read_text())
-    return rules, template, email_templates
+    sys_prompt_template = tmp_path / "system_prompt_template.txt"
+    sys_prompt_template.write_text(_SYSTEM_PROMPT_TEMPLATE.read_text())
+    email_templates = _WORKING_TEMPLATES_DIR
+    return rules, sys_prompt_template, email_templates
 
 
 @pytest.fixture()
 def all_values(path_files):
     """A complete set of config values with valid paths."""
-    rules, template, email_templates = path_files
+    rules, sys_prompt_template, email_templates = path_files
     return {
         "llm_chat_completions_url": "https://api.example.com",
         "llm_api_key": "test-api-key",
@@ -50,7 +49,7 @@ def all_values(path_files):
         "servicenow_token": "sn-token",
         "servicenow_url": "https://snow.example.com",
         "rules_path": str(rules),
-        "system_prompt_template_path": str(template),
+        "system_prompt_template_path": str(sys_prompt_template),
         "email_templates_dir": str(email_templates),
     }
 
@@ -77,7 +76,7 @@ def write_xdg_config(xdg_dir, values):
 
 
 def test_load_from_dotenv_only(tmp_path, all_values, path_files):
-    rules, template, email_templates = path_files
+    rules, sys_prompt_template, email_templates = path_files
     env_file = write_dotenv(tmp_path, all_values)
 
     config = Config(env_path=env_file)
@@ -86,7 +85,7 @@ def test_load_from_dotenv_only(tmp_path, all_values, path_files):
     assert config.llm_api_key == "test-api-key"
     assert config.llm_model == "gpt-4"
     assert config.rules_path == rules.resolve()
-    assert config.system_prompt_template_path == template.resolve()
+    assert config.system_prompt_template_path == sys_prompt_template.resolve()
     assert config.email_templates_dir == email_templates.resolve()
 
 
@@ -301,19 +300,21 @@ def test_email_templates_dir_no_j2_files_raises(all_values, tmp_path):
 
 
 def test_email_templates_dir_invalid_jinja_raises(all_values, tmp_path):
+    malformed_content = next(_FAILING_TEMPLATES_DIR.glob("*.j2")).read_text()
     bad_dir = tmp_path / "bad_templates"
     bad_dir.mkdir()
-    (bad_dir / "bad.yaml.j2").write_text(_MALFORMED_TEMPLATE.read_text())
+    (bad_dir / "bad.yaml.j2").write_text(malformed_content)
     invalid = dict(all_values, email_templates_dir=str(bad_dir))
     with pytest.raises(ValueError, match="bad.yaml.j2"):
         Config(cli_args=invalid)
 
 
 def test_email_templates_dir_multiple_invalid_jinja_lists_all(all_values, tmp_path):
+    malformed_content = next(_FAILING_TEMPLATES_DIR.glob("*.j2")).read_text()
     bad_dir = tmp_path / "bad_templates"
     bad_dir.mkdir()
-    (bad_dir / "bad_one.yaml.j2").write_text(_MALFORMED_TEMPLATE.read_text())
-    (bad_dir / "bad_two.yaml.j2").write_text(_MALFORMED_TEMPLATE.read_text())
+    (bad_dir / "bad_one.yaml.j2").write_text(malformed_content)
+    (bad_dir / "bad_two.yaml.j2").write_text(malformed_content)
     invalid = dict(all_values, email_templates_dir=str(bad_dir))
     with pytest.raises(ValueError) as exc_info:  # noqa: PT011
         Config(cli_args=invalid)
@@ -323,8 +324,9 @@ def test_email_templates_dir_multiple_invalid_jinja_lists_all(all_values, tmp_pa
 
 
 def test_system_prompt_template_invalid_jinja_raises(all_values, tmp_path):
+    malformed_content = next(_FAILING_TEMPLATES_DIR.glob("*.j2")).read_text()
     bad_template = tmp_path / "bad_template.txt"
-    bad_template.write_text(_MALFORMED_TEMPLATE.read_text())
+    bad_template.write_text(malformed_content)
     invalid = dict(all_values, system_prompt_template_path=str(bad_template))
     with pytest.raises(ValueError, match="bad_template.txt"):
         Config(cli_args=invalid)

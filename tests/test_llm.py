@@ -8,9 +8,10 @@ import requests
 
 from rcpond.config import Config
 from rcpond.llm import LLM, LLMResponse
-from rcpond.tool import Tool
+from rcpond.tools import PostFreeformNoteTool
 
-_WORKING_TEMPLATE = Path("tests/fixtures/mock_templates/mock_working_template.yaml.j2")
+_WORKING_TEMPLATES_DIR = Path("tests/fixtures/working_templates")
+_SYSTEM_PROMPT_TEMPLATE = Path("tests/fixtures/system_prompt_template.txt")
 
 # Realistic mock responses based on actual API output from gpt-oss-120b
 
@@ -61,13 +62,7 @@ NO_REASONING_RESPONSE = {
 @pytest.fixture()
 def make_config(tmp_path):
     rules_file = tmp_path / "rules.txt"
-    prompt_file = tmp_path / "prompt.txt"
-    email_templates_dir = tmp_path / "email_templates"
-
     rules_file.touch()
-    prompt_file.write_text(_WORKING_TEMPLATE.read_text())
-    email_templates_dir.mkdir()
-    (email_templates_dir / "mock_working_template.yaml.j2").write_text(_WORKING_TEMPLATE.read_text())
 
     def _make_config(**overrides):
         defaults = {
@@ -77,8 +72,8 @@ def make_config(tmp_path):
             "servicenow_token": "fake-token",
             "servicenow_url": "https://example.com/servicenow",
             "rules_path": str(rules_file),
-            "system_prompt_template_path": str(prompt_file),
-            "email_templates_dir": str(email_templates_dir),
+            "system_prompt_template_path": str(_SYSTEM_PROMPT_TEMPLATE),
+            "email_templates_dir": str(_WORKING_TEMPLATES_DIR),
         }
         defaults.update(overrides)
         return Config(cli_args=defaults)
@@ -225,10 +220,7 @@ class TestGenerateEndToEnd:
         mock_response.json.return_value = TOOL_CALL_RESPONSE
         mock_post.return_value = mock_response
 
-        def get_weather(location: str) -> None:  # noqa: ARG001
-            "Get the weather for a location."
-
-        tools = [Tool(get_weather)]
+        tools = [PostFreeformNoteTool()]
         result = llm.generate(
             system_prompt="You are a helpful assistant.",
             user_prompt="What is the weather in London?",
