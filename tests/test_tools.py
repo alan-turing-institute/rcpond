@@ -2,15 +2,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from rcpond.servicenow import Ticket
+from rcpond.servicenow import ServiceNow, Ticket
 from rcpond.tool import Tool
-from rcpond.tools import _IMPLEMENTATIONS, call_tool, get_available_tools
+from rcpond.tools import get_available_tools
 
 # --- Tool class ---
 
 
 def test_tool_init():
-    def demo_func(a: int, b: str) -> tuple[int, str]:
+    def demo_func(service_now: ServiceNow, ticket: Ticket, a: int, b: str) -> tuple[int, str]:  # noqa: ARG001
         """A demo function for testing"""
         return (a, b)
 
@@ -18,12 +18,12 @@ def test_tool_init():
 
     assert tool.name == "demo_func"
     assert tool.description == "A demo function for testing"
-
+    ## ServiceNow and Ticket params are context, not LLM-visible
     assert tool.parameters == {"a": int, "b": str}
 
 
 def test_tool_to_openai_dict():
-    def my_tool(note: str, count: int) -> None:  # noqa: ARG001
+    def my_tool(service_now: ServiceNow, ticket: Ticket, note: str, count: int) -> None:  # noqa: ARG001
         """Does a thing."""
 
     tool = Tool(my_tool)
@@ -37,6 +37,22 @@ def test_tool_to_openai_dict():
     assert params["properties"]["note"] == {"type": "string"}
     assert params["properties"]["count"] == {"type": "integer"}
     assert set(params["required"]) == {"note", "count"}
+
+
+def test_tool_execute():
+    impl = MagicMock()
+
+    def my_tool(service_now: ServiceNow, ticket: Ticket, note: str) -> None:
+        """Does a thing."""
+        impl(service_now, ticket, note=note)
+
+    tool = Tool(my_tool)
+    service_now = MagicMock()
+    ticket = MagicMock()
+
+    tool.execute(service_now, ticket, note="hello")
+
+    impl.assert_called_once_with(service_now, ticket, note="hello")
 
 
 # --- get_available_tools ---
@@ -56,10 +72,7 @@ def test_get_available_tools_post_note_schema():
     assert params["properties"]["note"] == {"type": "string"}
 
 
-# --- call_tool ---
-
-
-def test_call_tool_dispatches_post_note():
+def test_post_freeform_note_execute():
     service_now = MagicMock()
     ticket = Ticket(
         sys_id="abc",
@@ -70,34 +83,58 @@ def test_call_tool_dispatches_post_note():
         u_sub_category="Azure",
         short_description="Request access",
     )
-    planned_tool_call = {
-        "function": {
-            "name": "post_freeform_note",
-            "arguments": {"note": "Please provide more information."},
-        }
-    }
-
-    call_tool(planned_tool_call, service_now, ticket)
-
+    tools = get_available_tools()
+    tools[0].execute(service_now, ticket, note="Please provide more information.")
     service_now.post_note.assert_called_once_with(ticket, note="Please provide more information.")
 
 
-def test_all_tools_have_implementations():
-    # Every schema stub in get_available_tools must have a matching entry in _IMPLEMENTATIONS.
-    tools = get_available_tools()
-    for tool in tools:
-        assert tool.name in _IMPLEMENTATIONS, f"No implementation for tool {tool.name!r}"
-
-
 def test_call_tool_unknown_tool_raises():
-    service_now = MagicMock()
+    from rcpond.command import _process_ticket
+    from rcpond.llm import LLM, LLMResponse
+    from rcpond.servicenow import FullTicket
+
     ticket = MagicMock()
-    planned_tool_call = {
-        "function": {
-            "name": "nonexistent_tool",
-            "arguments": {},
-        }
-    }
+    service_now = MagicMock()
+    config = MagicMock()
+    llm = MagicMock(spec=LLM)
+    llm.generate.return_value = LLMResponse(
+        response_text="ok",
+        planned_tool_call={"function": {"name": "nonexistent_tool", "arguments": {}}},
+    )
+    service_now.get_full_ticket.return_value = FullTicket(
+        sys_id="abc",
+        number="RES001",
+        opened_at="01/01/2025 09:00:00",
+        requested_for="Alice",
+        u_category="RC",
+        u_sub_category="Azure",
+        short_description="Request access",
+        work_notes="",
+        project_title="",
+        research_area_programme="",
+        if_other_please_specify="",
+        pi_supervisor_name="",
+        pi_supervisor_email="",
+        which_service="",
+        subscription_type="",
+        which_finance_code="",
+        pmu_contact_email="",
+        credits_requested="",
+        which_facility="",
+        if_other_please_specify_facility="",
+        cpu_hours_required="",
+        gpu_hours_required="",
+        new_or_existing_allocation="",
+        azure_subscription_id_or_hpc_group_project_id="",
+        start_date="",
+        end_date="",
+        data_sensitivity="",
+        platform_justification="",
+        research_justification="",
+        computational_requirements="",
+        users_who_require_access_names_and_emails="",
+        cost_compute_time_breakdown="",
+    )
 
     with pytest.raises(ValueError, match="nonexistent_tool"):
-        call_tool(planned_tool_call, service_now, ticket)
+        _process_ticket(ticket, dry_run=False, config=config, service_now=service_now, llm=llm)

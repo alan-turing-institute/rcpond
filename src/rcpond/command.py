@@ -18,7 +18,7 @@ from rcpond.config import Config
 from rcpond.llm import LLM, LLMResponse
 from rcpond.prompt import construct_prompt
 from rcpond.servicenow import FullTicket, ServiceNow, Ticket
-from rcpond.tools import call_tool, get_available_tools
+from rcpond.tools import get_available_tools
 
 
 def _display_output(*stuff):
@@ -56,7 +56,13 @@ def _process_ticket(ticket: Ticket, dry_run: bool, config: Config, service_now: 
     system_prompt, user_prompt = construct_prompt(full_ticket, config)
     llm_response: LLMResponse = llm.generate(system_prompt, user_prompt, config.llm_model, tools=tools)
     if not dry_run and llm_response.planned_tool_call is not None:
-        call_tool(llm_response.planned_tool_call, service_now, full_ticket)
+        name = llm_response.planned_tool_call["function"]["name"]
+        args = llm_response.planned_tool_call["function"]["arguments"]
+        matched = [t for t in tools if t.name == name]
+        if not matched:
+            msg = f"Unknown tool: {name!r}"
+            raise ValueError(msg)
+        matched[0].execute(service_now, full_ticket, **args)
 
     return llm_response
 
