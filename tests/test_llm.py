@@ -59,9 +59,11 @@ NO_REASONING_RESPONSE = {
 def make_config(tmp_path):
     rules_file = tmp_path / "rules.txt"
     prompt_file = tmp_path / "prompt.txt"
+    email_templates_dir = tmp_path / "email_templates"
 
     rules_file.touch()
     prompt_file.touch()
+    email_templates_dir.mkdir()
 
     def _make_config(**overrides):
         defaults = {
@@ -72,6 +74,7 @@ def make_config(tmp_path):
             "servicenow_url": "https://example.com/servicenow",
             "rules_path": str(rules_file),
             "system_prompt_template_path": str(prompt_file),
+            "email_templates_dir": str(email_templates_dir),
         }
         defaults.update(overrides)
         return Config(cli_args=defaults)

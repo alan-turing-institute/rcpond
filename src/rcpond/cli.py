@@ -66,6 +66,7 @@ def common_options(
     servicenow_url: Annotated[str | None, typer.Option(help="ServiceNow API base URL.")] = None,
     rules_path: Annotated[str | None, typer.Option(help="Path to the rules file.")] = None,
     system_prompt_template_path: Annotated[str | None, typer.Option(help="Path to the system prompt template.")] = None,
+    email_templates_dir: Annotated[str | None, typer.Option(help="Path to the email templates directory.")] = None,
 ) -> None:
     ## Store raw args — Config is built lazily in each command so that `--help`` never triggers validation.
     ctx.ensure_object(dict)
@@ -79,6 +80,7 @@ def common_options(
             "servicenow_url": servicenow_url,
             "rules_path": rules_path,
             "system_prompt_template_path": system_prompt_template_path,
+            "email_templates_dir": email_templates_dir,
         },
     }
 

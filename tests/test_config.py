@@ -24,18 +24,20 @@ from rcpond.config import Config
 
 @pytest.fixture()
 def path_files(tmp_path):
-    """Create placeholder files for the two Path config fields."""
+    """Create placeholder files/dirs for the three Path config fields."""
     rules = tmp_path / "RULES.md"
     rules.touch()
     template = tmp_path / "system_prompt_template.txt"
     template.touch()
-    return rules, template
+    email_templates = tmp_path / "email_templates"
+    email_templates.mkdir()
+    return rules, template, email_templates
 
 
 @pytest.fixture()
 def all_values(path_files):
     """A complete set of config values with valid paths."""
-    rules, template = path_files
+    rules, template, email_templates = path_files
     return {
         "llm_chat_completions_url": "https://api.example.com",
         "llm_api_key": "test-api-key",
@@ -44,6 +46,7 @@ def all_values(path_files):
         "servicenow_url": "https://snow.example.com",
         "rules_path": str(rules),
         "system_prompt_template_path": str(template),
+        "email_templates_dir": str(email_templates),
     }
 
 
@@ -69,7 +72,7 @@ def write_xdg_config(xdg_dir, values):
 
 
 def test_load_from_dotenv_only(tmp_path, all_values, path_files):
-    rules, template = path_files
+    rules, template, email_templates = path_files
     env_file = write_dotenv(tmp_path, all_values)
 
     config = Config(env_path=env_file)
@@ -79,6 +82,7 @@ def test_load_from_dotenv_only(tmp_path, all_values, path_files):
     assert config.llm_model == "gpt-4"
     assert config.rules_path == rules.resolve()
     assert config.system_prompt_template_path == template.resolve()
+    assert config.email_templates_dir == email_templates.resolve()
 
 
 def test_load_from_env_vars_only(monkeypatch, all_values):
@@ -272,6 +276,14 @@ def test_invalid_template_path_raises(all_values):
         Config(cli_args=invalid_values)
 
 
+def test_invalid_email_templates_dir_raises(all_values):
+    invalid_values = dict(all_values)
+    invalid_values["email_templates_dir"] = "/nonexistent/email_templates"
+
+    with pytest.raises(ValueError, match="/nonexistent/email_templates"):
+        Config(cli_args=invalid_values)
+
+
 # --- dotenv format ---
 
 
@@ -321,4 +333,5 @@ def test_fields_are_config_values_only():
         "servicenow_url",
         "rules_path",
         "system_prompt_template_path",
+        "email_templates_dir",
     ]

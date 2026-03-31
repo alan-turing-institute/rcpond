@@ -73,6 +73,8 @@ class Config:
         Path to the RULES.md file used to construct the system prompt.
     system_prompt_template_path : Path
         Path to the Jinja2 template used to render the system prompt.
+    email_templates_path : Path
+        Path of the directory of Jinja2 templates used to render messages to end users
     """
 
     env_path: InitVar[str | None] = None
@@ -85,6 +87,7 @@ class Config:
     servicenow_url: str = field(init=False)
     rules_path: Path = field(init=False)
     system_prompt_template_path: Path = field(init=False)
+    email_templates_dir: Path = field(init=False)
 
     def __post_init__(self, env_path: str | None, cli_args: dict | None) -> None:
         values: dict[str, str] = {}

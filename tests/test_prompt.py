@@ -25,6 +25,8 @@ def config(tmp_path, rules_text, template_text):
     rules.write_text(rules_text)
     template = tmp_path / "system_prompt_template.txt"
     template.write_text(template_text)
+    email_templates = tmp_path / "email_templates"
+    email_templates.mkdir()
     return Config(
         cli_args={
             "llm_chat_completions_url": "https://api.example.com",
@@ -34,6 +36,7 @@ def config(tmp_path, rules_text, template_text):
             "servicenow_url": "https://snow.example.com",
             "rules_path": str(rules),
             "system_prompt_template_path": str(template),
+            "email_templates_dir": str(email_templates),
         }
     )
 
