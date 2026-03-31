@@ -43,6 +43,7 @@ import typing
 from dataclasses import InitVar, dataclass, field, fields
 from pathlib import Path
 
+import jinja2
 from xdg_base_dirs import xdg_config_home
 
 
@@ -134,6 +135,10 @@ class Config:
             value = _confirm_path_exists(values[f.name]) if hints[f.name] is Path else values[f.name]
             setattr(self, f.name, value)
 
+        # Validate Jinja2 templates
+        _validate_jinja_template(self.system_prompt_template_path)
+        _validate_email_templates_dir(self.email_templates_dir)
+
 
 def _env_var_name(field_name: str) -> str:
     return f"RCPOND_{field_name.upper()}"
@@ -173,3 +178,29 @@ def _confirm_path_exists(path_as_str: str) -> Path:
 
     err_msg = f"Path {path_as_str} cannot be found"
     raise ValueError(err_msg)
+
+
+def _validate_jinja_template(path: Path) -> None:
+    """Raise ValueError if the file at ``path`` is not a valid Jinja2 template."""
+    try:
+        jinja2.Environment().parse(path.read_text())
+    except jinja2.TemplateSyntaxError as e:
+        msg = f"Invalid Jinja2 template {path}: {e}"
+        raise ValueError(msg) from e
+
+
+def _validate_email_templates_dir(dir_path: Path) -> None:
+    """Raise ValueError if ``dir_path`` has no ``*.j2`` files or any are invalid Jinja2."""
+    j2_files = list(dir_path.glob("*.j2"))
+    if not j2_files:
+        msg = f"No .j2 files found in email_templates_dir: {dir_path}"
+        raise ValueError(msg)
+    errors = []
+    for f in j2_files:
+        try:
+            _validate_jinja_template(f)
+        except ValueError as e:
+            errors.append(str(e))
+    if errors:
+        msg = "Invalid Jinja2 templates in email_templates_dir:\n" + "\n".join(errors)
+        raise ValueError(msg)

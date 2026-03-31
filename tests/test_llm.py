@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -8,6 +9,8 @@ import requests
 from rcpond.config import Config
 from rcpond.llm import LLM, LLMResponse
 from rcpond.tool import Tool
+
+_WORKING_TEMPLATE = Path("tests/fixtures/mock_templates/mock_working_template.yaml.j2")
 
 # Realistic mock responses based on actual API output from gpt-oss-120b
 
@@ -62,8 +65,9 @@ def make_config(tmp_path):
     email_templates_dir = tmp_path / "email_templates"
 
     rules_file.touch()
-    prompt_file.touch()
+    prompt_file.write_text(_WORKING_TEMPLATE.read_text())
     email_templates_dir.mkdir()
+    (email_templates_dir / "mock_working_template.yaml.j2").write_text(_WORKING_TEMPLATE.read_text())
 
     def _make_config(**overrides):
         defaults = {

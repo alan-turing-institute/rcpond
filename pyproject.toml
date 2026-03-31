@@ -29,6 +29,7 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
+    "jinja2>=3.0",
     "requests>=2.32.5",
     "typer>=0.24.1",
     "xdg-base-dirs>=6.0.2",

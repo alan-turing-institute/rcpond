@@ -14,10 +14,14 @@ machine's state. This line is used in the setup for many tests:
 """
 
 from dataclasses import fields
+from pathlib import Path
 
 import pytest
 
 from rcpond.config import Config
+
+_WORKING_TEMPLATE = Path("tests/fixtures/mock_templates/mock_working_template.yaml.j2")
+_MALFORMED_TEMPLATE = Path("tests/fixtures/mock_templates/mock_malformed_template.yaml.j2")
 
 # --- Fixtures ---
 
@@ -28,9 +32,10 @@ def path_files(tmp_path):
     rules = tmp_path / "RULES.md"
     rules.touch()
     template = tmp_path / "system_prompt_template.txt"
-    template.touch()
+    template.write_text(_WORKING_TEMPLATE.read_text())
     email_templates = tmp_path / "email_templates"
     email_templates.mkdir()
+    (email_templates / "mock_working_template.yaml.j2").write_text(_WORKING_TEMPLATE.read_text())
     return rules, template, email_templates
 
 
@@ -282,6 +287,52 @@ def test_invalid_email_templates_dir_raises(all_values):
 
     with pytest.raises(ValueError, match="/nonexistent/email_templates"):
         Config(cli_args=invalid_values)
+
+
+# --- Jinja2 template validation ---
+
+
+def test_email_templates_dir_no_j2_files_raises(all_values, tmp_path):
+    empty_dir = tmp_path / "empty_templates"
+    empty_dir.mkdir()
+    invalid = dict(all_values, email_templates_dir=str(empty_dir))
+    with pytest.raises(ValueError, match=r"[Nn]o.*\.j2"):
+        Config(cli_args=invalid)
+
+
+def test_email_templates_dir_invalid_jinja_raises(all_values, tmp_path):
+    bad_dir = tmp_path / "bad_templates"
+    bad_dir.mkdir()
+    (bad_dir / "bad.yaml.j2").write_text(_MALFORMED_TEMPLATE.read_text())
+    invalid = dict(all_values, email_templates_dir=str(bad_dir))
+    with pytest.raises(ValueError, match="bad.yaml.j2"):
+        Config(cli_args=invalid)
+
+
+def test_email_templates_dir_multiple_invalid_jinja_lists_all(all_values, tmp_path):
+    bad_dir = tmp_path / "bad_templates"
+    bad_dir.mkdir()
+    (bad_dir / "bad_one.yaml.j2").write_text(_MALFORMED_TEMPLATE.read_text())
+    (bad_dir / "bad_two.yaml.j2").write_text(_MALFORMED_TEMPLATE.read_text())
+    invalid = dict(all_values, email_templates_dir=str(bad_dir))
+    with pytest.raises(ValueError) as exc_info:  # noqa: PT011
+        Config(cli_args=invalid)
+    msg = str(exc_info.value)
+    assert "bad_one.yaml.j2" in msg
+    assert "bad_two.yaml.j2" in msg
+
+
+def test_system_prompt_template_invalid_jinja_raises(all_values, tmp_path):
+    bad_template = tmp_path / "bad_template.txt"
+    bad_template.write_text(_MALFORMED_TEMPLATE.read_text())
+    invalid = dict(all_values, system_prompt_template_path=str(bad_template))
+    with pytest.raises(ValueError, match="bad_template.txt"):
+        Config(cli_args=invalid)
+
+
+def test_email_templates_dir_valid_j2_passes(all_values):
+    config = Config(cli_args=all_values)
+    assert config.email_templates_dir.exists()
 
 
 # --- dotenv format ---

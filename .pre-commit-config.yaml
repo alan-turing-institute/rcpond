@@ -47,6 +47,7 @@ repos:
         files: src
         args: []
         additional_dependencies:
+          - jinja2
           - pandas-stubs
           - pytest
           - types-beautifulsoup4
