@@ -337,6 +337,44 @@ def test_email_templates_dir_valid_j2_passes(all_values):
     assert config.email_templates_dir.exists()
 
 
+## ticket field validation — templates may reference ticket.<field>, but only
+## fields that actually exist on FullTicket are permitted
+
+
+def test_email_templates_dir_unknown_ticket_field_raises(all_values, tmp_path):
+    ## A template referencing a non-existent ticket field should be rejected
+    bad_dir = tmp_path / "bad_templates"
+    bad_dir.mkdir()
+    (bad_dir / "bad.yaml.j2").write_text("subject: {{ ticket.fake_field }}")
+    invalid = dict(all_values, email_templates_dir=str(bad_dir))
+    with pytest.raises(ValueError, match="fake_field"):
+        Config(cli_args=invalid)
+
+
+def test_email_templates_dir_unknown_ticket_field_lists_all(all_values, tmp_path):
+    ## All bad field names across all templates should appear in the error message
+    bad_dir = tmp_path / "bad_templates"
+    bad_dir.mkdir()
+    (bad_dir / "one.yaml.j2").write_text("subject: {{ ticket.bad_one }}")
+    (bad_dir / "two.yaml.j2").write_text("subject: {{ ticket.bad_two }}")
+    invalid = dict(all_values, email_templates_dir=str(bad_dir))
+    with pytest.raises(ValueError) as exc_info:  # noqa: PT011
+        Config(cli_args=invalid)
+    msg = str(exc_info.value)
+    assert "bad_one" in msg
+    assert "bad_two" in msg
+
+
+def test_email_templates_dir_valid_ticket_fields_pass(all_values, tmp_path):
+    ## Templates using real FullTicket fields should pass validation
+    good_dir = tmp_path / "good_templates"
+    good_dir.mkdir()
+    (good_dir / "good.yaml.j2").write_text("subject: {{ ticket.number }} - {{ ticket.project_title }}")
+    valid = dict(all_values, email_templates_dir=str(good_dir))
+    config = Config(cli_args=valid)
+    assert config.email_templates_dir.exists()
+
+
 # --- dotenv format ---
 
 

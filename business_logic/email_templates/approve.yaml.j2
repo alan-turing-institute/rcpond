@@ -1,0 +1,14 @@
+email_template:
+  {# Use quotes to prevent a string like '01234' being interpreted as an octal #}
+  ticket_no : "{{ ticket.number }}"
+  to : "rcp@example.com"
+  cc : null
+  subject : Credit request approval for '{{ ticket.project_title }}'
+  body : |
+   "Dear RCP team,
+
+    I have a {{ ticket.which_service }} request for £{{ ticket.credits_requested }} of core funds for {{ ticket.pi_supervisor_name }}'s project "{{ ticket.project_title }}".
+    I believe this request can be approved directly for the following reason: {{ reason }}.
+
+    Please find the request attached for more details. Let me know if you require any additional information from the applicants to make a decision.
+    "

@@ -38,12 +38,14 @@ Example use
 
 """
 
+import dataclasses
 import os
 import typing
 from dataclasses import InitVar, dataclass, field, fields
 from pathlib import Path
 
 import jinja2
+import jinja2.nodes
 from xdg_base_dirs import xdg_config_home
 
 
@@ -189,8 +191,24 @@ def _validate_jinja_template(path: Path) -> None:
         raise ValueError(msg) from e
 
 
+def _unknown_ticket_attrs(path: Path) -> list[str]:
+    """Return any ``ticket.<attr>`` references in the template that are not fields on FullTicket."""
+    ## Import here to avoid a circular dependency (config <- servicenow <- config)
+    from rcpond.servicenow import FullTicket
+
+    valid_fields = {f.name for f in dataclasses.fields(FullTicket)}
+    env = jinja2.Environment()
+    parsed = env.parse(path.read_text())
+    bad = []
+    for node in parsed.find_all(jinja2.nodes.Getattr):
+        if isinstance(node.node, jinja2.nodes.Name) and node.node.name == "ticket" and node.attr not in valid_fields:
+            bad.append(node.attr)
+    return bad
+
+
 def _validate_email_templates_dir(dir_path: Path) -> None:
-    """Raise ValueError if ``dir_path`` has no ``*.j2`` files or any are invalid Jinja2."""
+    """Raise ValueError if ``dir_path`` has no ``*.j2`` files, any are invalid Jinja2,
+    or any reference non-existent fields on FullTicket via ``ticket.<attr>``."""
     j2_files = list(dir_path.glob("*.j2"))
     if not j2_files:
         msg = f"No .j2 files found in email_templates_dir: {dir_path}"
@@ -201,6 +219,10 @@ def _validate_email_templates_dir(dir_path: Path) -> None:
             _validate_jinja_template(f)
         except ValueError as e:
             errors.append(str(e))
+            continue  ## skip attr check — template can't be parsed
+        bad_attrs = _unknown_ticket_attrs(f)
+        for attr in bad_attrs:
+            errors.append(f"{f.name}: unknown ticket field '{attr}'")
     if errors:
         msg = "Invalid Jinja2 templates in email_templates_dir:\n" + "\n".join(errors)
         raise ValueError(msg)
