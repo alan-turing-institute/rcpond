@@ -119,6 +119,14 @@ try:
     @cli.command()
     def evaluate_all(ctx: typer.Context, in_dir: Path, out_file: Path):
         """Evaluate LLM performance against a directory of pre-downloaded HTML tickets."""
+        if not out_file.parent.exists():
+            msg = f"Output directory does not exist: {out_file.parent}"
+            raise typer.BadParameter(msg, param_hint="out_file")
+
+        if out_file.exists():
+            msg = f"Output file already exists: {out_file}"
+            raise typer.BadParameter(msg, param_hint="out_file")
+
         command.batch_evaluate_tickets(in_dir=in_dir, out_file=out_file, config=_config(ctx))
 
 except ImportError:

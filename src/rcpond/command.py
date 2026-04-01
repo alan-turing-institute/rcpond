@@ -170,22 +170,6 @@ def batch_evaluate_tickets(in_dir: Path, out_file: Path, config: Config | None =
         msg = "The 'html' optional dependencies are required for this command. Install them with: pip install rcpond[html]"
         raise ImportError(msg) from e
 
-    if not in_dir.exists():
-        msg = f"Input directory does not exist: {in_dir}"
-        raise FileNotFoundError(msg)
-    if not in_dir.is_dir():
-        msg = f"Input path is not a directory: {in_dir}"
-        raise NotADirectoryError(msg)
-    if not any(in_dir.glob("*.html")):
-        msg = f"No .html files found in: {in_dir}"
-        raise ValueError(msg)
-    if not out_file.parent.exists():
-        msg = f"Output directory does not exist: {out_file.parent}"
-        raise FileNotFoundError(msg)
-    if out_file.exists():
-        msg = f"Output file already exists: {out_file}"
-        raise FileExistsError(msg)
-
     config = config or Config()
     service_now: HtmlServiceNow = HtmlServiceNow(in_dir)
     llm: LLM = LLM(config)
@@ -194,10 +178,6 @@ def batch_evaluate_tickets(in_dir: Path, out_file: Path, config: Config | None =
     all_tickets = service_now.get_tickets(include_assigned_tickets=True)
     for ticket in all_tickets:
         resp = _process_ticket(ticket=ticket, dry_run=True, config=config, service_now=service_now, llm=llm)
-        pprint(f"TICKET: {ticket.number}")
-        pprint(resp)
-        print()
-
         all_responses.append(resp)
 
     with open(out_file, "w") as f:

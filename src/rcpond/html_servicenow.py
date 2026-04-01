@@ -143,7 +143,17 @@ class HtmlServiceNow(ServiceNow):
 
     def __init__(self, html_dir: Path) -> None:
         ## Do NOT call super().__init__() — no Config or HTTP session is needed
-        self._html_dir = Path(html_dir)
+        html_dir = Path(html_dir)
+        if not html_dir.exists():
+            msg = f"Input directory does not exist: {html_dir}"
+            raise FileNotFoundError(msg)
+        if not html_dir.is_dir():
+            msg = f"Input path is not a directory: {html_dir}"
+            raise NotADirectoryError(msg)
+        if not any(html_dir.glob("*.html")):
+            msg = f"No .html files found in: {html_dir}"
+            raise ValueError(msg)
+        self._html_dir = html_dir
 
     def _find_html_for_ticket(self, tkt: Ticket) -> Path:
         """Locate the HTML file for ``tkt``.
