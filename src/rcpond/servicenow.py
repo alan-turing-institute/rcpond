@@ -170,8 +170,6 @@ class ServiceNow:
         ----------
         ticket_number : str
             The ticket number to look up (e.g. ``"RES0001234"``).
-        include_assigned_tickets : bool
-            If True, search assigned tickets as well as unassigned ones.
 
         Raises
         ------
