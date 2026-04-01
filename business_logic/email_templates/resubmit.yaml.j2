@@ -1,0 +1,12 @@
+email_template:
+  ticket_no : "{{ ticket.number }}"
+  to : "rcp@example.com"
+  cc : null
+  subject : Credit request rejection for '{{ ticket.project_title }}'
+  body : |
+    "Dear {{ ticket.requested_for }},
+
+    Your Azure request has been reviewed by the 'rcpond' bot and cannot be approved for the following reason: {{ reason }}.
+
+    If possible, please amend your request and resubmit it for further consideration, otherwise please contact the Research Computing team for further assistance.
+    "

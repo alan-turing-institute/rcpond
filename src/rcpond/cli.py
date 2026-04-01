@@ -3,12 +3,13 @@ CLI for rcpond.
 
 This module creates the Typer `cli` object that is the target of the pyproject.scripts directive.
 
-It adds four subcommands
+It adds five subcommands
 
 - `display-all-tickets`
 - `process-next`
 - `process-ticket`
 - `process-all`
+- `evaluate-all`
 
 Each delegating to the corresponding function in `command.py`.
 
@@ -24,6 +25,7 @@ The `Config` object is constructed via the `_config` helpful func, so that confi
 """
 
 from importlib.metadata import version
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -64,6 +66,7 @@ def common_options(
     servicenow_url: Annotated[str | None, typer.Option(help="ServiceNow API base URL.")] = None,
     rules_path: Annotated[str | None, typer.Option(help="Path to the rules file.")] = None,
     system_prompt_template_path: Annotated[str | None, typer.Option(help="Path to the system prompt template.")] = None,
+    email_templates_dir: Annotated[str | None, typer.Option(help="Path to the email templates directory.")] = None,
 ) -> None:
     ## Store raw args — Config is built lazily in each command so that `--help`` never triggers validation.
     ctx.ensure_object(dict)
@@ -77,6 +80,7 @@ def common_options(
             "servicenow_url": servicenow_url,
             "rules_path": rules_path,
             "system_prompt_template_path": system_prompt_template_path,
+            "email_templates_dir": email_templates_dir,
         },
     }
 
@@ -107,6 +111,26 @@ def process_next(ctx: typer.Context, dry_run: bool = False):
 def process_ticket(ctx: typer.Context, ticket_number: str, dry_run: bool = False):
     """Review a specific ticket (e.g. RES0001234) via the LLM."""
     command.process_specific_ticket(ticket_number=ticket_number, dry_run=dry_run, config=_config(ctx))
+
+
+try:
+    import rcpond.html_servicenow as _  # noqa: F401
+
+    @cli.command()
+    def evaluate_all(ctx: typer.Context, in_dir: Path, out_file: Path):
+        """Evaluate LLM performance against a directory of pre-downloaded HTML tickets."""
+        if not out_file.parent.exists():
+            msg = f"Output directory does not exist: {out_file.parent}"
+            raise typer.BadParameter(msg, param_hint="out_file")
+
+        if out_file.exists():
+            msg = f"Output file already exists: {out_file}"
+            raise typer.BadParameter(msg, param_hint="out_file")
+
+        command.batch_evaluate_tickets(in_dir=in_dir, out_file=out_file, config=_config(ctx))
+
+except ImportError:
+    pass
 
 
 @cli.command()

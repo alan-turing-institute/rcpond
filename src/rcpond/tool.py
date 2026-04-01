@@ -1,70 +1,75 @@
-"""Generic LLM tool wrapper.
+"""Generic LLM tool interface.
 
 Provides:
 
-- `Tool`: Wraps a callable, extracting its name, docstring, and parameter types for use in LLM tool schemas.
+- `Tool`: Abstract base class for LLM tools. Each tool exposes its schema via
+  ``to_openai_dict()`` and runs its action via ``execute()``.
+
+Concrete implementations live in ``rcpond.tools``.
 
 Example use
 -----------
 
->>> def my_tool(x: str) -> None:
-...     "Does something"
->>> t = Tool(my_tool)
->>> t.to_openai_dict()
-{'type': 'function', 'function': {'name': 'my_tool', ...}}
+>>> class MyTool(Tool):
+...     @property
+...     def name(self) -> str:
+...         return "my_tool"
+...
+...     @property
+...     def description(self) -> str:
+...         return "Does something."
+...
+...     def to_openai_dict(self) -> dict: ...
+...     def execute(self, service_now, ticket, **kwargs) -> None: ...
 
 """
 
-import inspect
-import typing
+from abc import ABC, abstractmethod
 
-## Maps Python types to JSON Schema type strings for OpenAI tool definitions.
-_TYPE_MAP = {str: "string", int: "integer", float: "number", bool: "boolean"}
-
+from rcpond.servicenow import FullTicket, ServiceNow
 
 ## --------------------------------------------------------------------------------
-## Tool class
+## Tool ABC
 
 
-class Tool:
-    """Wraps a callable as an LLM tool, exposing its schema.
+class Tool(ABC):
+    """Abstract base class for an LLM tool.
 
-    Example:
-    >>> def my_tool(x: str) -> None:
-    ...     "Does something"
-    >>> t = Tool(my_tool)
-
+    Subclasses define their own schema (``to_openai_dict``) and execution logic
+    (``execute``). The ``name`` and ``description`` properties drive both the
+    schema and tool-call dispatch in ``command.py``.
     """
 
-    def __init__(self, func: typing.Callable):
-        self.function = func
-        self.name = func.__name__
-        self.description = func.__doc__
-        self.parameters = self._get_param_list()
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """The function name exposed to the LLM."""
 
-    def _get_param_list(self) -> dict:
-        sig = inspect.signature(self.function)
-        return {name: param.annotation for name, param in sig.parameters.items()}
+    @property
+    @abstractmethod
+    def description(self) -> str:
+        """The human-readable description exposed to the LLM."""
 
+    @abstractmethod
     def to_openai_dict(self) -> dict:
-        """Convert this tool to an OpenAI function-calling schema dict.
+        """Return this tool's schema in OpenAI function-calling format.
 
         Returns
         -------
         dict
-            A dict in the OpenAI tool format, suitable for passing to the
-            chat completions API.
+            A dict suitable for the ``tools`` parameter of the chat completions API.
         """
-        properties = {name: {"type": _TYPE_MAP.get(ann, "string")} for name, ann in self.parameters.items()}
-        return {
-            "type": "function",
-            "function": {
-                "name": self.name,
-                "description": self.description,
-                "parameters": {
-                    "type": "object",
-                    "properties": properties,
-                    "required": list(self.parameters.keys()),
-                },
-            },
-        }
+
+    @abstractmethod
+    def execute(self, service_now: ServiceNow, ticket: FullTicket, **kwargs) -> None:
+        """Execute this tool's action.
+
+        Parameters
+        ----------
+        service_now : ServiceNow
+            The ServiceNow client used to perform the action.
+        ticket : FullTicket
+            The ticket the action should be applied to.
+        **kwargs
+            Arguments supplied by the LLM.
+        """

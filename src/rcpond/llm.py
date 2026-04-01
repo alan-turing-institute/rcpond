@@ -21,6 +21,7 @@ from typing import Any
 import requests
 
 from rcpond.config import Config
+from rcpond.tool import Tool
 
 
 @dataclass
@@ -126,7 +127,7 @@ class LLM:
         )
 
     def generate(
-        self, system_prompt: str, user_prompt: str, model: str, tools: list[dict] | None = None
+        self, system_prompt: str, user_prompt: str, model: str, tools: list[Tool] | None = None
     ) -> LLMResponse:
         """Generate an LLM response given a system prompt and a user prompt.
         Formats the system and user prompt into a single prompt and calls the `_generate` method to get the response from the LLM.
@@ -140,8 +141,8 @@ class LLM:
             The user prompt to generate a response for.
         model: str
             The model to use for generation.
-        tools : list[dict] | None
-            Optional list of tool definitions in OpenAI format.
+        tools : list[Tool] | None
+            Optional list of tools to make available to the model.
 
         Returns
         -------
@@ -152,5 +153,6 @@ class LLM:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
-        response = self._generate(messages, model=model, tools=tools)
+        tool_dicts = [t.to_openai_dict() for t in tools] if tools else None
+        response = self._generate(messages, model=model, tools=tool_dicts)
         return self._parse_response(response)

@@ -29,12 +29,17 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
+    "jinja2>=3.0",
     "requests>=2.32.5",
     "typer>=0.24.1",
     "xdg-base-dirs>=6.0.2",
 ]
 
 [project.optional-dependencies]
+html = [
+    "beautifulsoup4>=4.12",
+    "pandas>=2.0",
+]
 docs = [
     "mkdocs>=1.6.1",
     "mkdocs-awesome-pages-plugin>=2.9",
@@ -131,8 +136,10 @@ flake8-unused-arguments.ignore-variadic-names = true  # allow unused *args/**kwa
 
 [dependency-groups]
 dev = [
+    "pandas-stubs>=2.0",
     "pdoc>=16.0.0",
+    "pre-commit",
     "pytest >=6",
     "pytest-cov >=3",
-    "pre-commit",
+    "types-beautifulsoup4>=4.12",
 ]

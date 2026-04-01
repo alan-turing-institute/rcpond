@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -7,6 +8,10 @@ import requests
 
 from rcpond.config import Config
 from rcpond.llm import LLM, LLMResponse
+from rcpond.tools import PostFreeformNoteTool
+
+_WORKING_TEMPLATES_DIR = Path("tests/fixtures/working_templates")
+_SYSTEM_PROMPT_TEMPLATE = Path("tests/fixtures/system_prompt_template.txt")
 
 # Realistic mock responses based on actual API output from gpt-oss-120b
 
@@ -57,10 +62,7 @@ NO_REASONING_RESPONSE = {
 @pytest.fixture()
 def make_config(tmp_path):
     rules_file = tmp_path / "rules.txt"
-    prompt_file = tmp_path / "prompt.txt"
-
     rules_file.touch()
-    prompt_file.touch()
 
     def _make_config(**overrides):
         defaults = {
@@ -70,7 +72,8 @@ def make_config(tmp_path):
             "servicenow_token": "fake-token",
             "servicenow_url": "https://example.com/servicenow",
             "rules_path": str(rules_file),
-            "system_prompt_template_path": str(prompt_file),
+            "system_prompt_template_path": str(_SYSTEM_PROMPT_TEMPLATE),
+            "email_templates_dir": str(_WORKING_TEMPLATES_DIR),
         }
         defaults.update(overrides)
         return Config(cli_args=defaults)
@@ -217,7 +220,7 @@ class TestGenerateEndToEnd:
         mock_response.json.return_value = TOOL_CALL_RESPONSE
         mock_post.return_value = mock_response
 
-        tools = [{"type": "function", "function": {"name": "get_weather"}}]
+        tools = [PostFreeformNoteTool()]
         result = llm.generate(
             system_prompt="You are a helpful assistant.",
             user_prompt="What is the weather in London?",

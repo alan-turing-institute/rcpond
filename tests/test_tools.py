@@ -1,65 +1,35 @@
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
-from rcpond.servicenow import Ticket
-from rcpond.tool import Tool
-from rcpond.tools import _IMPLEMENTATIONS, call_tool, get_available_tools
+from rcpond.servicenow import FullTicket, ServiceNow, Ticket
+from rcpond.tools import PostFreeformNoteTool, PostTemplatedNoteTool, get_available_tools
 
-# --- Tool class ---
-
-
-def test_tool_init():
-    def demo_func(a: int, b: str) -> tuple[int, str]:
-        """A demo function for testing"""
-        return (a, b)
-
-    tool = Tool(demo_func)
-
-    assert tool.name == "demo_func"
-    assert tool.description == "A demo function for testing"
-
-    assert tool.parameters == {"a": int, "b": str}
+_WORKING_TEMPLATES_DIR = Path("tests/fixtures/working_templates")
 
 
-def test_tool_to_openai_dict():
-    def my_tool(note: str, count: int) -> None:  # noqa: ARG001
-        """Does a thing."""
+def _make_config(email_templates_dir=_WORKING_TEMPLATES_DIR):
+    config = MagicMock()
+    config.email_templates_dir = email_templates_dir
+    return config
 
-    tool = Tool(my_tool)
+
+# --- PostFreeformNoteTool ---
+
+
+def test_post_freeform_note_schema():
+    tool = PostFreeformNoteTool()
     result = tool.to_openai_dict()
 
     assert result["type"] == "function"
-    assert result["function"]["name"] == "my_tool"
-    assert result["function"]["description"] == "Does a thing."
+    assert result["function"]["name"] == "post_freeform_note"
     params = result["function"]["parameters"]
-    assert params["type"] == "object"
     assert params["properties"]["note"] == {"type": "string"}
-    assert params["properties"]["count"] == {"type": "integer"}
-    assert set(params["required"]) == {"note", "count"}
+    assert params["required"] == ["note"]
 
 
-# --- get_available_tools ---
-
-
-def test_get_available_tools_returns_one_tool():
-    tools = get_available_tools()
-    assert len(tools) == 1
-    assert tools[0].name == "_post_note"
-
-
-def test_get_available_tools_post_note_schema():
-    tools = get_available_tools()
-    openai_dict = tools[0].to_openai_dict()
-    params = openai_dict["function"]["parameters"]
-    assert "note" in params["properties"]
-    assert params["properties"]["note"] == {"type": "string"}
-
-
-# --- call_tool ---
-
-
-def test_call_tool_dispatches_post_note():
+def test_post_freeform_note_execute():
     service_now = MagicMock()
     ticket = Ticket(
         sys_id="abc",
@@ -70,34 +40,147 @@ def test_call_tool_dispatches_post_note():
         u_sub_category="Azure",
         short_description="Request access",
     )
-    planned_tool_call = {
-        "function": {
-            "name": "_post_note",
-            "arguments": {"note": "Please provide more information."},
-        }
-    }
-
-    call_tool(planned_tool_call, service_now, ticket)
-
+    PostFreeformNoteTool().execute(service_now, ticket, note="Please provide more information.")
     service_now.post_note.assert_called_once_with(ticket, note="Please provide more information.")
 
 
-def test_all_tools_have_implementations():
-    # Every schema stub in get_available_tools must have a matching entry in _IMPLEMENTATIONS.
-    tools = get_available_tools()
-    for tool in tools:
-        assert tool.name in _IMPLEMENTATIONS, f"No implementation for tool {tool.name!r}"
+# --- PostTemplatedNoteTool ---
+
+
+def test_post_templated_note_schema_includes_template_enum():
+    tool = PostTemplatedNoteTool(_make_config())
+    result = tool.to_openai_dict()
+
+    template_name_param = result["function"]["parameters"]["properties"]["template_name"]
+    assert template_name_param["type"] == "string"
+    assert "mock_working_template.yaml.j2" in template_name_param["enum"]
+
+
+def test_post_templated_note_schema_includes_llm_vars():
+    tool = PostTemplatedNoteTool(_make_config())
+    result = tool.to_openai_dict()
+
+    properties = result["function"]["parameters"]["properties"]
+    ## working template has working_email_subject and working_email_body as LLM vars
+    assert "working_email_subject" in properties
+    assert "working_email_body" in properties
+    ## ticket is context, not LLM-supplied
+    assert "ticket" not in properties
+    assert "template_name" in result["function"]["parameters"]["required"]
+
+
+def test_post_templated_note_execute_renders_and_posts():
+    service_now = MagicMock(spec=ServiceNow)
+    ticket = FullTicket(
+        sys_id="abc",
+        number="RES001",
+        opened_at="01/01/2025 09:00:00",
+        requested_for="Alice",
+        u_category="RC",
+        u_sub_category="Azure",
+        short_description="Request access",
+        work_notes="",
+        project_title="",
+        research_area_programme="",
+        if_other_please_specify="",
+        pi_supervisor_name="",
+        pi_supervisor_email="",
+        which_service="",
+        subscription_type="",
+        which_finance_code="",
+        pmu_contact_email="",
+        credits_requested="",
+        which_facility="",
+        if_other_please_specify_facility="",
+        cpu_hours_required="",
+        gpu_hours_required="",
+        new_or_existing_allocation="",
+        azure_subscription_id_or_hpc_group_project_id="",
+        start_date="",
+        end_date="",
+        data_sensitivity="",
+        platform_justification="",
+        research_justification="",
+        computational_requirements="",
+        users_who_require_access_names_and_emails="",
+        cost_compute_time_breakdown="",
+    )
+
+    PostTemplatedNoteTool(_make_config()).execute(
+        service_now,
+        ticket,
+        template_name="mock_working_template.yaml.j2",
+        working_email_subject="HPC access",
+        working_email_body="been waiting",
+    )
+
+    service_now.post_note.assert_called_once()
+    rendered = service_now.post_note.call_args[1]["note"]
+    assert "HPC access" in rendered
+    assert "been waiting" in rendered
+
+
+# --- get_available_tools ---
+
+
+def test_get_available_tools_returns_two_tools():
+    tools = get_available_tools(_make_config())
+    assert len(tools) == 2
+    names = [t.name for t in tools]
+    assert "post_freeform_note" in names
+    assert "post_templated_note" in names
+
+
+# --- unknown tool raises ---
 
 
 def test_call_tool_unknown_tool_raises():
-    service_now = MagicMock()
+    from rcpond.command import _process_ticket
+    from rcpond.llm import LLM, LLMResponse
+
     ticket = MagicMock()
-    planned_tool_call = {
-        "function": {
-            "name": "nonexistent_tool",
-            "arguments": {},
-        }
-    }
+    service_now = MagicMock()
+    config = MagicMock()
+    config.email_templates_dir = _WORKING_TEMPLATES_DIR
+    llm = MagicMock(spec=LLM)
+    llm.generate.return_value = LLMResponse(
+        response_text="ok",
+        planned_tool_call={"function": {"name": "nonexistent_tool", "arguments": {}}},
+    )
+    service_now.get_full_ticket.return_value = FullTicket(
+        sys_id="abc",
+        number="RES001",
+        opened_at="01/01/2025 09:00:00",
+        requested_for="Alice",
+        u_category="RC",
+        u_sub_category="Azure",
+        short_description="Request access",
+        work_notes="",
+        project_title="",
+        research_area_programme="",
+        if_other_please_specify="",
+        pi_supervisor_name="",
+        pi_supervisor_email="",
+        which_service="",
+        subscription_type="",
+        which_finance_code="",
+        pmu_contact_email="",
+        credits_requested="",
+        which_facility="",
+        if_other_please_specify_facility="",
+        cpu_hours_required="",
+        gpu_hours_required="",
+        new_or_existing_allocation="",
+        azure_subscription_id_or_hpc_group_project_id="",
+        start_date="",
+        end_date="",
+        data_sensitivity="",
+        platform_justification="",
+        research_justification="",
+        computational_requirements="",
+        users_who_require_access_names_and_emails="",
+        cost_compute_time_breakdown="",
+    )
 
     with pytest.raises(ValueError, match="nonexistent_tool"):
-        call_tool(planned_tool_call, service_now, ticket)
+        _process_ticket(ticket, dry_run=False, config=config, service_now=service_now, llm=llm)

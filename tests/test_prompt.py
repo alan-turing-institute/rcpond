@@ -1,10 +1,13 @@
 import json
+from pathlib import Path
 
 import pytest
 
 from rcpond.config import Config
 from rcpond.prompt import construct_prompt
 from rcpond.servicenow import FullTicket
+
+_WORKING_TEMPLATES_DIR = Path("tests/fixtures/working_templates")
 
 # --- Fixtures ---
 
@@ -25,6 +28,7 @@ def config(tmp_path, rules_text, template_text):
     rules.write_text(rules_text)
     template = tmp_path / "system_prompt_template.txt"
     template.write_text(template_text)
+    email_templates = _WORKING_TEMPLATES_DIR
     return Config(
         cli_args={
             "llm_chat_completions_url": "https://api.example.com",
@@ -34,6 +38,7 @@ def config(tmp_path, rules_text, template_text):
             "servicenow_url": "https://snow.example.com",
             "rules_path": str(rules),
             "system_prompt_template_path": str(template),
+            "email_templates_dir": str(email_templates),
         }
     )
 

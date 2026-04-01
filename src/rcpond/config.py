@@ -38,11 +38,14 @@ Example use
 
 """
 
+import dataclasses
 import os
 import typing
 from dataclasses import InitVar, dataclass, field, fields
 from pathlib import Path
 
+import jinja2
+import jinja2.nodes
 from xdg_base_dirs import xdg_config_home
 
 
@@ -73,6 +76,8 @@ class Config:
         Path to the RULES.md file used to construct the system prompt.
     system_prompt_template_path : Path
         Path to the Jinja2 template used to render the system prompt.
+    email_templates_path : Path
+        Path of the directory of Jinja2 templates used to render messages to end users
     """
 
     env_path: InitVar[str | None] = None
@@ -85,6 +90,7 @@ class Config:
     servicenow_url: str = field(init=False)
     rules_path: Path = field(init=False)
     system_prompt_template_path: Path = field(init=False)
+    email_templates_dir: Path = field(init=False)
 
     def __post_init__(self, env_path: str | None, cli_args: dict | None) -> None:
         values: dict[str, str] = {}
@@ -131,6 +137,10 @@ class Config:
             value = _confirm_path_exists(values[f.name]) if hints[f.name] is Path else values[f.name]
             setattr(self, f.name, value)
 
+        # Validate Jinja2 templates
+        _validate_jinja_template(self.system_prompt_template_path)
+        _validate_email_templates_dir(self.email_templates_dir)
+
 
 def _env_var_name(field_name: str) -> str:
     return f"RCPOND_{field_name.upper()}"
@@ -170,3 +180,49 @@ def _confirm_path_exists(path_as_str: str) -> Path:
 
     err_msg = f"Path {path_as_str} cannot be found"
     raise ValueError(err_msg)
+
+
+def _validate_jinja_template(path: Path) -> None:
+    """Raise ValueError if the file at ``path`` is not a valid Jinja2 template."""
+    try:
+        jinja2.Environment().parse(path.read_text())
+    except jinja2.TemplateSyntaxError as e:
+        msg = f"Invalid Jinja2 template {path}: {e}"
+        raise ValueError(msg) from e
+
+
+def _unknown_ticket_attrs(path: Path) -> list[str]:
+    """Return any ``ticket.<attr>`` references in the template that are not fields on FullTicket."""
+    ## Import here to avoid a circular dependency (config <- servicenow <- config)
+    from rcpond.servicenow import FullTicket
+
+    valid_fields = {f.name for f in dataclasses.fields(FullTicket)}
+    env = jinja2.Environment()
+    parsed = env.parse(path.read_text())
+    bad = []
+    for node in parsed.find_all(jinja2.nodes.Getattr):
+        if isinstance(node.node, jinja2.nodes.Name) and node.node.name == "ticket" and node.attr not in valid_fields:
+            bad.append(node.attr)
+    return bad
+
+
+def _validate_email_templates_dir(dir_path: Path) -> None:
+    """Raise ValueError if ``dir_path`` has no ``*.j2`` files, any are invalid Jinja2,
+    or any reference non-existent fields on FullTicket via ``ticket.<attr>``."""
+    j2_files = list(dir_path.glob("*.j2"))
+    if not j2_files:
+        msg = f"No .j2 files found in email_templates_dir: {dir_path}"
+        raise ValueError(msg)
+    errors = []
+    for f in j2_files:
+        try:
+            _validate_jinja_template(f)
+        except ValueError as e:
+            errors.append(str(e))
+            continue  ## skip attr check — template can't be parsed
+        bad_attrs = _unknown_ticket_attrs(f)
+        for attr in bad_attrs:
+            errors.append(f"{f.name}: unknown ticket field '{attr}'")
+    if errors:
+        msg = "Invalid Jinja2 templates in email_templates_dir:\n" + "\n".join(errors)
+        raise ValueError(msg)

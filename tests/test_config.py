@@ -14,28 +14,34 @@ machine's state. This line is used in the setup for many tests:
 """
 
 from dataclasses import fields
+from pathlib import Path
 
 import pytest
 
 from rcpond.config import Config
+
+_WORKING_TEMPLATES_DIR = Path("tests/fixtures/working_templates")
+_FAILING_TEMPLATES_DIR = Path("tests/fixtures/failing_templates")
+_SYSTEM_PROMPT_TEMPLATE = Path("tests/fixtures/system_prompt_template.txt")
 
 # --- Fixtures ---
 
 
 @pytest.fixture()
 def path_files(tmp_path):
-    """Create placeholder files for the two Path config fields."""
+    """Create placeholder files/dirs for the three Path config fields."""
     rules = tmp_path / "RULES.md"
     rules.touch()
-    template = tmp_path / "system_prompt_template.txt"
-    template.touch()
-    return rules, template
+    sys_prompt_template = tmp_path / "system_prompt_template.txt"
+    sys_prompt_template.write_text(_SYSTEM_PROMPT_TEMPLATE.read_text())
+    email_templates = _WORKING_TEMPLATES_DIR
+    return rules, sys_prompt_template, email_templates
 
 
 @pytest.fixture()
 def all_values(path_files):
     """A complete set of config values with valid paths."""
-    rules, template = path_files
+    rules, sys_prompt_template, email_templates = path_files
     return {
         "llm_chat_completions_url": "https://api.example.com",
         "llm_api_key": "test-api-key",
@@ -43,7 +49,8 @@ def all_values(path_files):
         "servicenow_token": "sn-token",
         "servicenow_url": "https://snow.example.com",
         "rules_path": str(rules),
-        "system_prompt_template_path": str(template),
+        "system_prompt_template_path": str(sys_prompt_template),
+        "email_templates_dir": str(email_templates),
     }
 
 
@@ -69,7 +76,7 @@ def write_xdg_config(xdg_dir, values):
 
 
 def test_load_from_dotenv_only(tmp_path, all_values, path_files):
-    rules, template = path_files
+    rules, sys_prompt_template, email_templates = path_files
     env_file = write_dotenv(tmp_path, all_values)
 
     config = Config(env_path=env_file)
@@ -78,7 +85,8 @@ def test_load_from_dotenv_only(tmp_path, all_values, path_files):
     assert config.llm_api_key == "test-api-key"
     assert config.llm_model == "gpt-4"
     assert config.rules_path == rules.resolve()
-    assert config.system_prompt_template_path == template.resolve()
+    assert config.system_prompt_template_path == sys_prompt_template.resolve()
+    assert config.email_templates_dir == email_templates.resolve()
 
 
 def test_load_from_env_vars_only(monkeypatch, all_values):
@@ -272,6 +280,101 @@ def test_invalid_template_path_raises(all_values):
         Config(cli_args=invalid_values)
 
 
+def test_invalid_email_templates_dir_raises(all_values):
+    invalid_values = dict(all_values)
+    invalid_values["email_templates_dir"] = "/nonexistent/email_templates"
+
+    with pytest.raises(ValueError, match="/nonexistent/email_templates"):
+        Config(cli_args=invalid_values)
+
+
+# --- Jinja2 template validation ---
+
+
+def test_email_templates_dir_no_j2_files_raises(all_values, tmp_path):
+    empty_dir = tmp_path / "empty_templates"
+    empty_dir.mkdir()
+    invalid = dict(all_values, email_templates_dir=str(empty_dir))
+    with pytest.raises(ValueError, match=r"[Nn]o.*\.j2"):
+        Config(cli_args=invalid)
+
+
+def test_email_templates_dir_invalid_jinja_raises(all_values, tmp_path):
+    malformed_content = next(_FAILING_TEMPLATES_DIR.glob("*.j2")).read_text()
+    bad_dir = tmp_path / "bad_templates"
+    bad_dir.mkdir()
+    (bad_dir / "bad.yaml.j2").write_text(malformed_content)
+    invalid = dict(all_values, email_templates_dir=str(bad_dir))
+    with pytest.raises(ValueError, match="bad.yaml.j2"):
+        Config(cli_args=invalid)
+
+
+def test_email_templates_dir_multiple_invalid_jinja_lists_all(all_values, tmp_path):
+    malformed_content = next(_FAILING_TEMPLATES_DIR.glob("*.j2")).read_text()
+    bad_dir = tmp_path / "bad_templates"
+    bad_dir.mkdir()
+    (bad_dir / "bad_one.yaml.j2").write_text(malformed_content)
+    (bad_dir / "bad_two.yaml.j2").write_text(malformed_content)
+    invalid = dict(all_values, email_templates_dir=str(bad_dir))
+    with pytest.raises(ValueError) as exc_info:  # noqa: PT011
+        Config(cli_args=invalid)
+    msg = str(exc_info.value)
+    assert "bad_one.yaml.j2" in msg
+    assert "bad_two.yaml.j2" in msg
+
+
+def test_system_prompt_template_invalid_jinja_raises(all_values, tmp_path):
+    malformed_content = next(_FAILING_TEMPLATES_DIR.glob("*.j2")).read_text()
+    bad_template = tmp_path / "bad_template.txt"
+    bad_template.write_text(malformed_content)
+    invalid = dict(all_values, system_prompt_template_path=str(bad_template))
+    with pytest.raises(ValueError, match="bad_template.txt"):
+        Config(cli_args=invalid)
+
+
+def test_email_templates_dir_valid_j2_passes(all_values):
+    config = Config(cli_args=all_values)
+    assert config.email_templates_dir.exists()
+
+
+## ticket field validation — templates may reference ticket.<field>, but only
+## fields that actually exist on FullTicket are permitted
+
+
+def test_email_templates_dir_unknown_ticket_field_raises(all_values, tmp_path):
+    ## A template referencing a non-existent ticket field should be rejected
+    bad_dir = tmp_path / "bad_templates"
+    bad_dir.mkdir()
+    (bad_dir / "bad.yaml.j2").write_text("subject: {{ ticket.fake_field }}")
+    invalid = dict(all_values, email_templates_dir=str(bad_dir))
+    with pytest.raises(ValueError, match="fake_field"):
+        Config(cli_args=invalid)
+
+
+def test_email_templates_dir_unknown_ticket_field_lists_all(all_values, tmp_path):
+    ## All bad field names across all templates should appear in the error message
+    bad_dir = tmp_path / "bad_templates"
+    bad_dir.mkdir()
+    (bad_dir / "one.yaml.j2").write_text("subject: {{ ticket.bad_one }}")
+    (bad_dir / "two.yaml.j2").write_text("subject: {{ ticket.bad_two }}")
+    invalid = dict(all_values, email_templates_dir=str(bad_dir))
+    with pytest.raises(ValueError) as exc_info:  # noqa: PT011
+        Config(cli_args=invalid)
+    msg = str(exc_info.value)
+    assert "bad_one" in msg
+    assert "bad_two" in msg
+
+
+def test_email_templates_dir_valid_ticket_fields_pass(all_values, tmp_path):
+    ## Templates using real FullTicket fields should pass validation
+    good_dir = tmp_path / "good_templates"
+    good_dir.mkdir()
+    (good_dir / "good.yaml.j2").write_text("subject: {{ ticket.number }} - {{ ticket.project_title }}")
+    valid = dict(all_values, email_templates_dir=str(good_dir))
+    config = Config(cli_args=valid)
+    assert config.email_templates_dir.exists()
+
+
 # --- dotenv format ---
 
 
@@ -321,4 +424,5 @@ def test_fields_are_config_values_only():
         "servicenow_url",
         "rules_path",
         "system_prompt_template_path",
+        "email_templates_dir",
     ]
