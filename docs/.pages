@@ -1,6 +1,8 @@
 nav:
-  - Home: index.md
-  - ...
+  - Home:
+    - index.md
+    - configuration.md
+    - command_reference.md
   - Development:
     - contributing.md
     - licence.md
