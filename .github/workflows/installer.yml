@@ -1,0 +1,28 @@
+name: Test Installer
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
+        uv-version: ["0.8", "0.9", "0.10"]
+        os: ["macos-15", "macos-14", "ubuntu-24.04", "ubuntu-22.04", "windows-2025", "windows-2022"]
+    steps:
+      - name: Install the latest version of uv and set the python version
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ matrix.uv-version }}
+          python-version: ${{ matrix.python-version }}
+      - name: Test installation with python ${{ matrix.python-version }}
+        run: uv tool install git+https://github.com/alan-turing-institute/rcpond.git
+      - name: Verify the tool can be run
+        run: rcpond --help | grep "Show this message and exit"
