@@ -292,6 +292,9 @@ def extract_key_facts(filename: Path) -> dict:
 
     activities = _extract_activities_as_table(soup)
 
+    comments = _extract_comments(activities)
+    work_notes = "\n\n".join(comments["text"].dropna())
+
     return {
         "sys_id": _extract_sys_id(soup),
         "ticket_number": _extract_ticket_number(soup),
@@ -301,6 +304,7 @@ def extract_key_facts(filename: Path) -> dict:
         "sub_category": _extract_sub_category(soup),
         "activity_count": str(len(activities)),
         "comment_count": str(_extract_comment_count(activities)),
+        "work_notes": work_notes,
         "activities": activities,
         "platform_choice": _extract_platform_choice(soup),
         "requested_for": _extract_question_answer_pair_table(soup, "requested for", "Variables"),

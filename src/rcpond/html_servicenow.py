@@ -85,15 +85,9 @@ def _facts_to_full_ticket(tkt: Ticket, facts: dict) -> FullTicket:
     -------
     FullTicket
     """
-    activities = facts["activities"]
-
-    ## Join all work note texts with double-newline to match the API format
-    work_note_rows = activities[activities["field_name"] == "work_notes"]["text"].dropna()
-    work_notes = "\n\n".join(work_note_rows)
-
     extra_fields = {f.name for f in dataclasses.fields(FullTicket)} - {f.name for f in dataclasses.fields(Ticket)}
     extra_values = {
-        "work_notes": work_notes,
+        "work_notes": facts.get("work_notes", ""),
         "project_title": _or_empty(facts.get("project_title")),
         "research_area_programme": _or_empty(facts.get("research_area_or_programme")),
         "if_other_please_specify": "",  ## handled by parse_html's fallback logic
