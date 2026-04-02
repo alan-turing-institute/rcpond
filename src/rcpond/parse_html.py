@@ -376,31 +376,5 @@ def parse_ticket_html(filename: Path) -> FullTicket:
         u_sub_category=facts.get("sub_category") or "",
         short_description=_SHORT_DESCRIPTION,
     )
-    return FullTicket.from_Ticket(
-        ticket,
-        work_notes=facts["work_notes"],
-        project_title=facts["project_title"],
-        research_area_programme=facts["research_area_programme"],
-        if_other_please_specify=facts["if_other_please_specify"],
-        pi_supervisor_name=facts["pi_supervisor_name"],
-        pi_supervisor_email=facts["pi_supervisor_email"],
-        which_service=facts["which_service"],
-        subscription_type=facts["subscription_type"],
-        which_finance_code=facts["which_finance_code"],
-        pmu_contact_email=facts["pmu_contact_email"],
-        credits_requested=facts["credits_requested"],
-        which_facility=facts["which_facility"],
-        if_other_please_specify_facility=facts["if_other_please_specify_facility"],
-        cpu_hours_required=facts["cpu_hours_required"],
-        gpu_hours_required=facts["gpu_hours_required"],
-        new_or_existing_allocation=facts["new_or_existing_allocation"],
-        azure_subscription_id_or_hpc_group_project_id=facts["azure_subscription_id_or_hpc_group_project_id"],
-        start_date=facts["start_date"],
-        end_date=facts["end_date"],
-        data_sensitivity=facts["data_sensitivity"],
-        platform_justification=facts["platform_justification"],
-        research_justification=facts["research_justification"],
-        computational_requirements=facts["computational_requirements"],
-        users_who_require_access_names_and_emails=facts["users_who_require_access_names_and_emails"],
-        cost_compute_time_breakdown=facts["cost_compute_time_breakdown"],
-    )
+
+    return FullTicket.from_Ticket(ticket, **facts)
