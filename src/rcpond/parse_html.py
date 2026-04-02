@@ -295,7 +295,11 @@ def extract_key_facts(filename: Path) -> dict:
     comments = _extract_comments(activities)
     work_notes = "\n\n".join(comments["text"].dropna())
 
+    def _q(question: str, starting_point: str | None = None) -> str:
+        return _extract_question_answer_pair_table(soup, question, starting_point) or ""
+
     return {
+        ## Internal keys (not FullTicket fields)
         "sys_id": _extract_sys_id(soup),
         "ticket_number": _extract_ticket_number(soup),
         "assigned_to": _extract_assigned_to(soup),
@@ -304,33 +308,32 @@ def extract_key_facts(filename: Path) -> dict:
         "sub_category": _extract_sub_category(soup),
         "activity_count": str(len(activities)),
         "comment_count": str(_extract_comment_count(activities)),
-        "work_notes": work_notes,
         "activities": activities,
-        "platform_choice": _extract_platform_choice(soup),
-        "requested_for": _extract_question_answer_pair_table(soup, "requested for", "Variables"),
-        "project_title": _extract_question_answer_pair_table(soup, "project title"),
-        "research_area_or_programme": _extract_research_area_or_programme(soup),
-        "pi_or_supervisor": _extract_question_answer_pair_table(soup, "PI/Supervisor name"),
-        "pi_or_supervisor_email": _extract_question_answer_pair_table(soup, "PI/Supervisor email"),
-        "subscription_type": _extract_question_answer_pair_table(soup, "Subscription type"),
-        "finance_code": _extract_question_answer_pair_table(soup, "Which finance code"),
-        "pmu_contact_email": _extract_question_answer_pair_table(soup, "PMU Contact email"),
-        "credits_requested": _extract_question_answer_pair_table(soup, "Credits requested"),
-        "which_facility": _extract_question_answer_pair_table(soup, "Which facility"),
-        "cpu_hours_required": _extract_question_answer_pair_table(soup, "CPU hours required?"),
-        "gpu_hours_required": _extract_question_answer_pair_table(soup, "GPU hours required?"),
-        "new_or_existing_allocation": _extract_question_answer_pair_table(soup, "New or existing allocation"),
-        "azure_subscription_id_or_hpc_group_project_id": _extract_question_answer_pair_table(
-            soup, "Azure subscription ID or HPC Group/Project ID"
-        ),
-        "start_date": _extract_question_answer_pair_table(soup, "Start date"),
-        "end_date": _extract_question_answer_pair_table(soup, "End date"),
-        "data_sensitivity": _extract_question_answer_pair_table(soup, "Data sensitivity"),
-        "platform_justification": _extract_question_answer_pair_table(soup, "Platform justification"),
-        "research_justification": _extract_question_answer_pair_table(soup, "Research justification"),
-        "computational_requirements": _extract_question_answer_pair_table(soup, "Computational requirements"),
-        "users_who_require_access_names_and_emails": _extract_question_answer_pair_table(
-            soup, "Users who require access (names and emails)"
-        ),
-        "cost_compute_time_breakdown": _extract_question_answer_pair_table(soup, "Cost/compute time breakdown"),
+        ## FullTicket fields — keys match FullTicket field names exactly
+        "work_notes": work_notes,
+        "which_service": _extract_platform_choice(soup) or "",
+        "requested_for": _q("requested for", "Variables"),
+        "project_title": _q("project title"),
+        "research_area_programme": _extract_research_area_or_programme(soup) or "",
+        "pi_supervisor_name": _q("PI/Supervisor name"),
+        "pi_supervisor_email": _q("PI/Supervisor email"),
+        "subscription_type": _q("Subscription type"),
+        "which_finance_code": _q("Which finance code"),
+        "pmu_contact_email": _q("PMU Contact email"),
+        "credits_requested": _q("Credits requested"),
+        "which_facility": _q("Which facility"),
+        "if_other_please_specify": "",  ## handled by fallback logic in _extract_research_area_or_programme
+        "if_other_please_specify_facility": "",
+        "cpu_hours_required": _q("CPU hours required?"),
+        "gpu_hours_required": _q("GPU hours required?"),
+        "new_or_existing_allocation": _q("New or existing allocation"),
+        "azure_subscription_id_or_hpc_group_project_id": _q("Azure subscription ID or HPC Group/Project ID"),
+        "start_date": _q("Start date"),
+        "end_date": _q("End date"),
+        "data_sensitivity": _q("Data sensitivity"),
+        "platform_justification": _q("Platform justification"),
+        "research_justification": _q("Research justification"),
+        "computational_requirements": _q("Computational requirements"),
+        "users_who_require_access_names_and_emails": _q("Users who require access (names and emails)"),
+        "cost_compute_time_breakdown": _q("Cost/compute time breakdown"),
     }
