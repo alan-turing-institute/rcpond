@@ -52,9 +52,12 @@ def _process_ticket(ticket: Ticket, dry_run: bool, config: Config, service_now: 
         The LLM client.
     """
     full_ticket: FullTicket = service_now.get_full_ticket(ticket)
+    print(f"{full_ticket=}")
     tools = get_available_tools(config)
     system_prompt, user_prompt = construct_prompt(full_ticket, config)
     llm_response: LLMResponse = llm.generate(system_prompt, user_prompt, config.llm_model, tools=tools)
+    print(f"{llm_response=}")
+
     if not dry_run and llm_response.planned_tool_call is not None:
         name = llm_response.planned_tool_call["function"]["name"]
         args = llm_response.planned_tool_call["function"]["arguments"]
@@ -177,8 +180,20 @@ def batch_evaluate_tickets(in_dir: Path, out_file: Path, config: Config | None =
     print("DEBUG: service_now.get_tickets(include_assigned_tickets=True)")
     all_tickets = service_now.get_tickets(include_assigned_tickets=True)
     for ticket in all_tickets:
+        # print(f"{ticket=}")
+
+        # TODO: Temporary, an messy way to limit tickets to only those related to Azure
+        # Find a better solution
+        full_ticket = service_now.get_full_ticket(ticket)
+        if full_ticket.which_service != "Azure":
+            print(f"skipping non-Azure ticket: {ticket.number}")
+            print()
+            continue
+
         resp = _process_ticket(ticket=ticket, dry_run=True, config=config, service_now=service_now, llm=llm)
         all_responses.append(resp)
+        # print(f"{resp=}")
+        print()
 
     with open(out_file, "w") as f:
         json.dump([vars(r) for r in all_responses], f, indent=2)
