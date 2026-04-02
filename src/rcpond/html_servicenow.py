@@ -22,49 +22,10 @@ Configuration
 No ``Config`` object is needed. Pass the directory path directly.
 """
 
-import dataclasses
 from pathlib import Path
 
-from rcpond.parse_html import extract_key_facts
+from rcpond.parse_html import extract_key_facts, parse_ticket_html
 from rcpond.servicenow import FullTicket, ServiceNow, Ticket
-
-_SHORT_DESCRIPTION = "Request access to HPC and cloud computing facilities"
-
-
-## ---- Internal helpers ----
-
-
-def _facts_to_ticket(facts: dict, html_file: Path) -> Ticket:
-    """Build a ``Ticket`` from the result of ``extract_key_facts``.
-
-    Parameters
-    ----------
-    facts : dict
-        Output of ``extract_key_facts``.
-    html_file : Path
-        Source file; its stem is used as a stand-in for ``sys_id``.
-
-    Returns
-    -------
-    Ticket
-    """
-    activities = facts["activities"]
-
-    ## Use the earliest activity date as a best-effort stand-in for opened_at
-    opened_at = ""
-    if not activities.empty and activities["date"].notna().any():
-        opened_at = activities["date"].dropna().min() or ""
-
-    return Ticket(
-        sys_id=facts.get("sys_id") or html_file.stem,
-        number=facts.get("ticket_number") or "",
-        opened_at=opened_at,
-        requested_for=facts.get("requested_for") or "",
-        u_category=facts.get("category") or "",
-        u_sub_category=facts.get("sub_category") or "",
-        short_description=_SHORT_DESCRIPTION,
-    )
-
 
 ## ---- Interface to this module ----
 
@@ -125,7 +86,7 @@ class HtmlServiceNow(ServiceNow):
     ## ---- Read methods ----
 
     def get_tickets(self, include_assigned_tickets: bool = False) -> list[Ticket]:
-        """Return a ``Ticket`` for each HTML file in ``html_dir``.
+        """Return a ``FullTicket`` for each HTML file in ``html_dir``.
 
         Parameters
         ----------
@@ -136,18 +97,22 @@ class HtmlServiceNow(ServiceNow):
         Returns
         -------
         list[Ticket]
+            Each element is actually a ``FullTicket``.
         """
-        tickets = []
+        tickets: list[Ticket] = []
         for f in sorted(self._html_dir.glob("*.html")):
             facts = extract_key_facts(f)
             is_assigned = bool(facts["assigned_to"]["display_value"])
             if is_assigned and not include_assigned_tickets:
                 continue
-            tickets.append(_facts_to_ticket(facts, f))
+            tickets.append(parse_ticket_html(f))
         return tickets
 
     def get_full_ticket(self, tkt: Ticket) -> FullTicket:
-        """Parse the HTML file for ``tkt`` and return a ``FullTicket``.
+        """Return a ``FullTicket`` for ``tkt``.
+
+        If ``tkt`` is already a ``FullTicket`` (as returned by ``get_tickets``),
+        it is returned directly. Otherwise the HTML file is parsed.
 
         Parameters
         ----------
@@ -158,15 +123,10 @@ class HtmlServiceNow(ServiceNow):
         -------
         FullTicket
         """
+        if isinstance(tkt, FullTicket):
+            return tkt
         html_file = self._find_html_for_ticket(tkt)
-        facts = extract_key_facts(html_file)
-        extra_fields = {f.name for f in dataclasses.fields(FullTicket)} - {f.name for f in dataclasses.fields(Ticket)}
-        ## Guard against FullTicket gaining new fields not mapped in extract_key_facts
-        unmapped = extra_fields - set(facts)
-        if unmapped:
-            err_msg = f"FullTicket has unmapped fields: {unmapped}"
-            raise NotImplementedError(err_msg)
-        return FullTicket.from_Ticket(tkt, **{k: facts[k] for k in extra_fields})
+        return parse_ticket_html(html_file)
 
     def get_work_notes(self, tkt: Ticket) -> list[str]:
         """Return the work notes for ``tkt`` extracted from the HTML activity log.
