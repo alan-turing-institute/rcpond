@@ -29,6 +29,7 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
+    "authlib>=1.3",
     "jinja2>=3.0",
     "requests>=2.32.5",
     "typer>=0.24.1",
@@ -142,4 +143,5 @@ dev = [
     "pytest >=6",
     "pytest-cov >=3",
     "types-beautifulsoup4>=4.12",
+    "types-requests>=2.32",
 ]

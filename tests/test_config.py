@@ -39,7 +39,7 @@ def path_files(tmp_path):
 
 
 @pytest.fixture()
-def all_values(path_files):
+def common_config_values(path_files):
     """A complete set of config values with valid paths."""
     rules, sys_prompt_template, email_templates = path_files
     return {
@@ -48,6 +48,10 @@ def all_values(path_files):
         "llm_model": "gpt-4",
         "servicenow_token": "sn-token",
         "servicenow_url": "https://snow.example.com",
+        "servicenow_oauth_scope": "useraccount",
+        "servicenow_oauth_redirect_port": "8765",
+        "servicenow_oauth_auth_url": "https://alanturingdev.service-now.com/oauth_auth.do",
+        "servicenow_oauth_token_url": "https://alanturingdev.service-now.com/oauth_token.do",
         "rules_path": str(rules),
         "system_prompt_template_path": str(sys_prompt_template),
         "email_templates_dir": str(email_templates),
@@ -75,9 +79,9 @@ def write_xdg_config(xdg_dir, values):
 # --- Loading from a single source ---
 
 
-def test_load_from_dotenv_only(tmp_path, all_values, path_files):
+def test_load_from_dotenv_only(tmp_path, common_config_values, path_files):
     rules, sys_prompt_template, email_templates = path_files
-    env_file = write_dotenv(tmp_path, all_values)
+    env_file = write_dotenv(tmp_path, common_config_values)
 
     config = Config(env_path=env_file)
 
@@ -89,8 +93,8 @@ def test_load_from_dotenv_only(tmp_path, all_values, path_files):
     assert config.email_templates_dir == email_templates.resolve()
 
 
-def test_load_from_env_vars_only(monkeypatch, all_values):
-    for key, value in all_values.items():
+def test_load_from_env_vars_only(monkeypatch, common_config_values):
+    for key, value in common_config_values.items():
         monkeypatch.setenv(f"RCPOND_{key.upper()}", value)
 
     config = Config()
@@ -99,8 +103,8 @@ def test_load_from_env_vars_only(monkeypatch, all_values):
     assert config.llm_model == "gpt-4"
 
 
-def test_load_from_cli_args_only(all_values):
-    config = Config(cli_args=all_values)
+def test_load_from_cli_args_only(common_config_values):
+    config = Config(cli_args=common_config_values)
 
     assert config.llm_chat_completions_url == "https://api.example.com"
     assert config.llm_model == "gpt-4"
@@ -109,44 +113,44 @@ def test_load_from_cli_args_only(all_values):
 # --- Precedence ---
 
 
-def test_env_vars_override_dotenv(tmp_path, monkeypatch, all_values):
-    env_file = write_dotenv(tmp_path, all_values)
+def test_env_vars_override_dotenv(tmp_path, monkeypatch, common_config_values):
+    env_file = write_dotenv(tmp_path, common_config_values)
     monkeypatch.setenv("RCPOND_LLM_MODEL", "env-var-model")
 
     config = Config(env_path=env_file)
 
-    assert config.llm_model != all_values["llm_model"]
+    assert config.llm_model != common_config_values["llm_model"]
     assert config.llm_model == "env-var-model"
 
 
-def test_cli_args_override_env_vars(monkeypatch, all_values):
-    for key, value in all_values.items():
+def test_cli_args_override_env_vars(monkeypatch, common_config_values):
+    for key, value in common_config_values.items():
         monkeypatch.setenv(f"RCPOND_{key.upper()}", value)
 
-    cli_args = dict(all_values)
+    cli_args = dict(common_config_values)
     cli_args["llm_model"] = "cli-model"
     config = Config(cli_args=cli_args)
 
-    assert config.llm_model != all_values["llm_model"]
+    assert config.llm_model != common_config_values["llm_model"]
     assert config.llm_model == "cli-model"
 
 
-def test_cli_args_override_dotenv(tmp_path, all_values):
-    env_file = write_dotenv(tmp_path, all_values)
+def test_cli_args_override_dotenv(tmp_path, common_config_values):
+    env_file = write_dotenv(tmp_path, common_config_values)
 
     config = Config(env_path=env_file, cli_args={"llm_model": "cli-model"})
 
-    assert config.llm_model != all_values["llm_model"]
+    assert config.llm_model != common_config_values["llm_model"]
     assert config.llm_model == "cli-model"
 
 
-def test_all_three_sources_cli_args_wins(tmp_path, monkeypatch, all_values):
-    env_file = write_dotenv(tmp_path, all_values)
+def test_all_three_sources_cli_args_wins(tmp_path, monkeypatch, common_config_values):
+    env_file = write_dotenv(tmp_path, common_config_values)
     monkeypatch.setenv("RCPOND_LLM_MODEL", "env-var-model")
 
     config = Config(env_path=env_file, cli_args={"llm_model": "cli-model"})
 
-    assert config.llm_model != all_values["llm_model"]
+    assert config.llm_model != common_config_values["llm_model"]
     assert config.llm_model != "env-var-model"
     assert config.llm_model == "cli-model"
 
@@ -154,9 +158,9 @@ def test_all_three_sources_cli_args_wins(tmp_path, monkeypatch, all_values):
 # --- None handling ---
 
 
-def test_cli_args_none_does_not_override_dotenv(tmp_path, all_values):
+def test_cli_args_none_does_not_override_dotenv(tmp_path, common_config_values):
     """A None value in cli_args should be ignored, not used to override."""
-    env_file = write_dotenv(tmp_path, all_values)
+    env_file = write_dotenv(tmp_path, common_config_values)
 
     config = Config(env_path=env_file, cli_args={"llm_model": None})
 
@@ -178,10 +182,10 @@ def test_both_params_none_raises_when_no_env_vars_set(tmp_path, monkeypatch):
 # --- XDG config loading ---
 
 
-def test_load_from_xdg_config_only(tmp_path, monkeypatch, all_values):
+def test_load_from_xdg_config_only(tmp_path, monkeypatch, common_config_values):
     """Config loads from the XDG default.config file when present."""
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    write_xdg_config(tmp_path, all_values)
+    write_xdg_config(tmp_path, common_config_values)
 
     config = Config()
 
@@ -189,29 +193,29 @@ def test_load_from_xdg_config_only(tmp_path, monkeypatch, all_values):
     assert config.llm_chat_completions_url == "https://api.example.com"
 
 
-def test_xdg_config_absent_does_not_raise(tmp_path, monkeypatch, all_values):
+def test_xdg_config_absent_does_not_raise(tmp_path, monkeypatch, common_config_values):
     """Missing XDG config is silently ignored; other sources still work."""
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))  ## empty — no rcpond/default.config
-    env_file = write_dotenv(tmp_path, all_values)
+    env_file = write_dotenv(tmp_path, common_config_values)
 
     config = Config(env_path=env_file)
 
     assert config.llm_model == "gpt-4"
 
 
-def test_dotenv_overrides_xdg_config(tmp_path, monkeypatch, all_values):
+def test_dotenv_overrides_xdg_config(tmp_path, monkeypatch, common_config_values):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    write_xdg_config(tmp_path, all_values)
-    env_file = write_dotenv(tmp_path, {**all_values, "llm_model": "dotenv-model"})
+    write_xdg_config(tmp_path, common_config_values)
+    env_file = write_dotenv(tmp_path, {**common_config_values, "llm_model": "dotenv-model"})
 
     config = Config(env_path=env_file)
 
     assert config.llm_model == "dotenv-model"
 
 
-def test_env_vars_override_xdg_config(tmp_path, monkeypatch, all_values):
+def test_env_vars_override_xdg_config(tmp_path, monkeypatch, common_config_values):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    write_xdg_config(tmp_path, all_values)
+    write_xdg_config(tmp_path, common_config_values)
     monkeypatch.setenv("RCPOND_LLM_MODEL", "env-var-model")
 
     config = Config()
@@ -219,20 +223,20 @@ def test_env_vars_override_xdg_config(tmp_path, monkeypatch, all_values):
     assert config.llm_model == "env-var-model"
 
 
-def test_cli_args_override_xdg_config(tmp_path, monkeypatch, all_values):
+def test_cli_args_override_xdg_config(tmp_path, monkeypatch, common_config_values):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    write_xdg_config(tmp_path, all_values)
+    write_xdg_config(tmp_path, common_config_values)
 
     config = Config(cli_args={"llm_model": "cli-model"})
 
     assert config.llm_model == "cli-model"
 
 
-def test_all_four_sources_precedence(tmp_path, monkeypatch, all_values):
+def test_all_four_sources_precedence(tmp_path, monkeypatch, common_config_values):
     """Full precedence chain: xdg < dotenv < env vars < cli args."""
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    write_xdg_config(tmp_path, all_values)
-    env_file = write_dotenv(tmp_path, {**all_values, "llm_model": "dotenv-model"})
+    write_xdg_config(tmp_path, common_config_values)
+    env_file = write_dotenv(tmp_path, {**common_config_values, "llm_model": "dotenv-model"})
     monkeypatch.setenv("RCPOND_LLM_MODEL", "env-var-model")
 
     config = Config(env_path=env_file, cli_args={"llm_model": "cli-model"})
@@ -243,18 +247,18 @@ def test_all_four_sources_precedence(tmp_path, monkeypatch, all_values):
 # --- Missing fields ---
 
 
-def test_missing_single_field_raises(tmp_path, monkeypatch, all_values):
+def test_missing_single_field_raises(tmp_path, monkeypatch, common_config_values):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    partial = {k: v for k, v in all_values.items() if k != "llm_api_key"}
+    partial = {k: v for k, v in common_config_values.items() if k != "llm_api_key"}
     env_file = write_dotenv(tmp_path, partial)
 
     with pytest.raises(ValueError, match="llm_api_key"):
         Config(env_path=env_file)
 
 
-def test_missing_multiple_fields_raises(tmp_path, monkeypatch, all_values):
+def test_missing_multiple_fields_raises(tmp_path, monkeypatch, common_config_values):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    partial = {k: v for k, v in all_values.items() if k in ("llm_base_url", "llm_model")}
+    partial = {k: v for k, v in common_config_values.items() if k in ("llm_base_url", "llm_model")}
     env_file = write_dotenv(tmp_path, partial)
 
     with pytest.raises(ValueError, match="Missing required configuration"):
@@ -264,24 +268,24 @@ def test_missing_multiple_fields_raises(tmp_path, monkeypatch, all_values):
 # --- Invalid paths ---
 
 
-def test_invalid_rules_path_raises(all_values):
-    invalid_values = dict(all_values)
+def test_invalid_rules_path_raises(common_config_values):
+    invalid_values = dict(common_config_values)
     invalid_values["rules_path"] = "/nonexistent/RULES.md"
 
     with pytest.raises(ValueError, match="/nonexistent/RULES.md"):
         Config(cli_args=invalid_values)
 
 
-def test_invalid_template_path_raises(all_values):
-    invalid_values = dict(all_values)
+def test_invalid_template_path_raises(common_config_values):
+    invalid_values = dict(common_config_values)
     invalid_values["system_prompt_template_path"] = "/nonexistent/template.txt"
 
     with pytest.raises(ValueError, match="/nonexistent/template.txt"):
         Config(cli_args=invalid_values)
 
 
-def test_invalid_email_templates_dir_raises(all_values):
-    invalid_values = dict(all_values)
+def test_invalid_email_templates_dir_raises(common_config_values):
+    invalid_values = dict(common_config_values)
     invalid_values["email_templates_dir"] = "/nonexistent/email_templates"
 
     with pytest.raises(ValueError, match="/nonexistent/email_templates"):
@@ -291,31 +295,31 @@ def test_invalid_email_templates_dir_raises(all_values):
 # --- Jinja2 template validation ---
 
 
-def test_email_templates_dir_no_j2_files_raises(all_values, tmp_path):
+def test_email_templates_dir_no_j2_files_raises(common_config_values, tmp_path):
     empty_dir = tmp_path / "empty_templates"
     empty_dir.mkdir()
-    invalid = dict(all_values, email_templates_dir=str(empty_dir))
+    invalid = dict(common_config_values, email_templates_dir=str(empty_dir))
     with pytest.raises(ValueError, match=r"[Nn]o.*\.j2"):
         Config(cli_args=invalid)
 
 
-def test_email_templates_dir_invalid_jinja_raises(all_values, tmp_path):
+def test_email_templates_dir_invalid_jinja_raises(common_config_values, tmp_path):
     malformed_content = next(_FAILING_TEMPLATES_DIR.glob("*.j2")).read_text()
     bad_dir = tmp_path / "bad_templates"
     bad_dir.mkdir()
     (bad_dir / "bad.yaml.j2").write_text(malformed_content)
-    invalid = dict(all_values, email_templates_dir=str(bad_dir))
+    invalid = dict(common_config_values, email_templates_dir=str(bad_dir))
     with pytest.raises(ValueError, match="bad.yaml.j2"):
         Config(cli_args=invalid)
 
 
-def test_email_templates_dir_multiple_invalid_jinja_lists_all(all_values, tmp_path):
+def test_email_templates_dir_multiple_invalid_jinja_lists_all(common_config_values, tmp_path):
     malformed_content = next(_FAILING_TEMPLATES_DIR.glob("*.j2")).read_text()
     bad_dir = tmp_path / "bad_templates"
     bad_dir.mkdir()
     (bad_dir / "bad_one.yaml.j2").write_text(malformed_content)
     (bad_dir / "bad_two.yaml.j2").write_text(malformed_content)
-    invalid = dict(all_values, email_templates_dir=str(bad_dir))
+    invalid = dict(common_config_values, email_templates_dir=str(bad_dir))
     with pytest.raises(ValueError) as exc_info:  # noqa: PT011
         Config(cli_args=invalid)
     msg = str(exc_info.value)
@@ -323,17 +327,17 @@ def test_email_templates_dir_multiple_invalid_jinja_lists_all(all_values, tmp_pa
     assert "bad_two.yaml.j2" in msg
 
 
-def test_system_prompt_template_invalid_jinja_raises(all_values, tmp_path):
+def test_system_prompt_template_invalid_jinja_raises(common_config_values, tmp_path):
     malformed_content = next(_FAILING_TEMPLATES_DIR.glob("*.j2")).read_text()
     bad_template = tmp_path / "bad_template.txt"
     bad_template.write_text(malformed_content)
-    invalid = dict(all_values, system_prompt_template_path=str(bad_template))
+    invalid = dict(common_config_values, system_prompt_template_path=str(bad_template))
     with pytest.raises(ValueError, match="bad_template.txt"):
         Config(cli_args=invalid)
 
 
-def test_email_templates_dir_valid_j2_passes(all_values):
-    config = Config(cli_args=all_values)
+def test_email_templates_dir_valid_j2_passes(common_config_values):
+    config = Config(cli_args=common_config_values)
     assert config.email_templates_dir.exists()
 
 
@@ -341,23 +345,23 @@ def test_email_templates_dir_valid_j2_passes(all_values):
 ## fields that actually exist on FullTicket are permitted
 
 
-def test_email_templates_dir_unknown_ticket_field_raises(all_values, tmp_path):
+def test_email_templates_dir_unknown_ticket_field_raises(common_config_values, tmp_path):
     ## A template referencing a non-existent ticket field should be rejected
     bad_dir = tmp_path / "bad_templates"
     bad_dir.mkdir()
     (bad_dir / "bad.yaml.j2").write_text("subject: {{ ticket.fake_field }}")
-    invalid = dict(all_values, email_templates_dir=str(bad_dir))
+    invalid = dict(common_config_values, email_templates_dir=str(bad_dir))
     with pytest.raises(ValueError, match="fake_field"):
         Config(cli_args=invalid)
 
 
-def test_email_templates_dir_unknown_ticket_field_lists_all(all_values, tmp_path):
+def test_email_templates_dir_unknown_ticket_field_lists_all(common_config_values, tmp_path):
     ## All bad field names across all templates should appear in the error message
     bad_dir = tmp_path / "bad_templates"
     bad_dir.mkdir()
     (bad_dir / "one.yaml.j2").write_text("subject: {{ ticket.bad_one }}")
     (bad_dir / "two.yaml.j2").write_text("subject: {{ ticket.bad_two }}")
-    invalid = dict(all_values, email_templates_dir=str(bad_dir))
+    invalid = dict(common_config_values, email_templates_dir=str(bad_dir))
     with pytest.raises(ValueError) as exc_info:  # noqa: PT011
         Config(cli_args=invalid)
     msg = str(exc_info.value)
@@ -365,12 +369,12 @@ def test_email_templates_dir_unknown_ticket_field_lists_all(all_values, tmp_path
     assert "bad_two" in msg
 
 
-def test_email_templates_dir_valid_ticket_fields_pass(all_values, tmp_path):
+def test_email_templates_dir_valid_ticket_fields_pass(common_config_values, tmp_path):
     ## Templates using real FullTicket fields should pass validation
     good_dir = tmp_path / "good_templates"
     good_dir.mkdir()
     (good_dir / "good.yaml.j2").write_text("subject: {{ ticket.number }} - {{ ticket.project_title }}")
-    valid = dict(all_values, email_templates_dir=str(good_dir))
+    valid = dict(common_config_values, email_templates_dir=str(good_dir))
     config = Config(cli_args=valid)
     assert config.email_templates_dir.exists()
 
@@ -378,10 +382,10 @@ def test_email_templates_dir_valid_ticket_fields_pass(all_values, tmp_path):
 # --- dotenv format ---
 
 
-def test_dotenv_malformed_line_raises(tmp_path, all_values):
+def test_dotenv_malformed_line_raises(tmp_path, common_config_values):
     env_file = tmp_path / ".env"
     lines = ["# comment", ""]
-    lines += [f"RCPOND_{k.upper()}={v}" for k, v in all_values.items()]
+    lines += [f"RCPOND_{k.upper()}={v}" for k, v in common_config_values.items()]
     lines.insert(4, "RCPOND_LLM_MODEL gpt-4")  # line 3 (after comment + blank): missing '='
     env_file.write_text("\n".join(lines))
 
@@ -389,9 +393,9 @@ def test_dotenv_malformed_line_raises(tmp_path, all_values):
         Config(env_path=env_file)
 
 
-def test_dotenv_duplicate_key_raises(tmp_path, all_values):
+def test_dotenv_duplicate_key_raises(tmp_path, common_config_values):
     env_file = tmp_path / ".env"
-    lines = [f"RCPOND_{k.upper()}={v}" for k, v in all_values.items()]
+    lines = [f"RCPOND_{k.upper()}={v}" for k, v in common_config_values.items()]
     lines.append("RCPOND_LLM_MODEL=gpt-3.5")  # duplicate of an earlier line
     env_file.write_text("\n".join(lines))
 
@@ -399,10 +403,10 @@ def test_dotenv_duplicate_key_raises(tmp_path, all_values):
         Config(env_path=env_file)
 
 
-def test_dotenv_ignores_comments_and_blank_lines(tmp_path, all_values):
+def test_dotenv_ignores_comments_and_blank_lines(tmp_path, common_config_values):
     env_file = tmp_path / ".env"
     lines = ["# This is a comment", ""]
-    lines += [f"RCPOND_{k.upper()}={v}" for k, v in all_values.items()]
+    lines += [f"RCPOND_{k.upper()}={v}" for k, v in common_config_values.items()]
     env_file.write_text("\n".join(lines))
 
     config = Config(env_path=env_file)
@@ -422,7 +426,86 @@ def test_fields_are_config_values_only():
         "llm_model",
         "servicenow_token",
         "servicenow_url",
+        "servicenow_client_id",
+        "servicenow_client_secret",
+        "servicenow_oauth_scope",
+        "servicenow_oauth_redirect_port",
+        "servicenow_oauth_auth_url",
+        "servicenow_oauth_token_url",
         "rules_path",
         "system_prompt_template_path",
         "email_templates_dir",
     ]
+
+
+# --- OAuth / servicenow_token conditional requirement ---
+
+
+def test_servicenow_token_required_without_oauth(tmp_path, monkeypatch, common_config_values):
+    ## servicenow_token must be supplied when no OAuth credentials are set
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    servicenow_auth_keys = ["servicenow_token", "servicenow_client_id", "servicenow_client_secret"]
+    partial = {k: v for k, v in common_config_values.items() if k not in servicenow_auth_keys}
+    env_file = write_dotenv(tmp_path, partial)
+    with pytest.raises(ValueError, match="servicenow_token"):
+        Config(env_path=env_file)
+
+
+def test_servicenow_token_optional_when_oauth_present(tmp_path, monkeypatch, common_config_values):
+    ## servicenow_token may be omitted when OAuth credentials are provided
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    oauth_values = {k: v for k, v in common_config_values.items() if k != "servicenow_token"}
+    oauth_values["servicenow_client_id"] = "my-client-id"
+    oauth_values["servicenow_client_secret"] = "my-client-secret"
+    env_file = write_dotenv(tmp_path, oauth_values)
+    config = Config(env_path=env_file)
+    assert config.servicenow_token is None
+    assert config.servicenow_client_id == "my-client-id"
+    assert config.servicenow_client_secret == "my-client-secret"
+
+
+def test_oauth_fields_absent_when_not_configured(common_config_values):
+    ## OAuth fields default to None when not supplied
+    assert "servicenow_client_id" not in common_config_values
+    assert "servicenow_client_secret" not in common_config_values
+    config = Config(cli_args=common_config_values)
+    assert config.servicenow_client_id is None
+    assert config.servicenow_client_secret is None
+
+
+def test_oauth_scope_missing_is_error(common_config_values, tmp_path, monkeypatch):
+    ## servicenow_oauth_scope has no built-in default — omitting it is an error
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    del common_config_values["servicenow_oauth_scope"]
+    with pytest.raises(ValueError, match="servicenow_oauth_scope"):
+        Config(cli_args=common_config_values)
+
+
+def test_oauth_redirect_port_missing_is_error(common_config_values, tmp_path, monkeypatch):
+    ## servicenow_oauth_redirect_port has no built-in default — omitting it is an error
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    del common_config_values["servicenow_oauth_redirect_port"]
+    with pytest.raises(ValueError, match="servicenow_oauth_redirect_port"):
+        Config(cli_args=common_config_values)
+
+
+def test_oauth_scope_and_port_configurable(common_config_values):
+    config = Config(
+        cli_args={
+            **common_config_values,
+            "servicenow_oauth_scope": "custom_scope",
+            "servicenow_oauth_redirect_port": "9000",
+        }
+    )
+    assert config.servicenow_oauth_scope == "custom_scope"
+    assert config.servicenow_oauth_redirect_port == 9000
+
+
+def test_oauth_wins_when_both_configured(common_config_values):
+    ## When all three are set, both token and OAuth fields are present; servicenow.py decides which to use
+    config = Config(
+        cli_args={**common_config_values, "servicenow_client_id": "cid", "servicenow_client_secret": "csecret"}
+    )
+    assert config.servicenow_token is not None
+    assert config.servicenow_client_id == "cid"
+    assert config.servicenow_client_secret == "csecret"

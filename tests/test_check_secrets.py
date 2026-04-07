@@ -56,6 +56,8 @@ def test_commented_out_secret_is_flagged(tmp_path, line):
     [
         "RCPOND_LLM_API_KEY=your-api-key-here",
         "RCPOND_SERVICENOW_TOKEN=your-servicenow-token",
+        "RCPOND_SERVICENOW_CLIENT_ID=your-client-id",
+        "RCPOND_SERVICENOW_CLIENT_SECRET=your-client-secret",
         "RCPOND_LLM_API_KEY=",
     ],
 )
@@ -64,16 +66,20 @@ def test_safe_placeholder_not_flagged(tmp_path, line):
     assert check_file(path) == []
 
 
-# --- Both keys are checked ---
+# --- All secret keys are checked ---
 
 
-def test_llm_api_key_flagged(tmp_path):
-    path = write_file(tmp_path, "RCPOND_LLM_API_KEY=real-secret\n")
-    assert check_file(path) != []
-
-
-def test_servicenow_token_flagged(tmp_path):
-    path = write_file(tmp_path, "RCPOND_SERVICENOW_TOKEN=real-secret\n")
+@pytest.mark.parametrize(
+    "line",
+    [
+        "RCPOND_LLM_API_KEY=real-secret",
+        "RCPOND_SERVICENOW_TOKEN=real-secret",
+        "RCPOND_SERVICENOW_CLIENT_ID=abc123realid",
+        "RCPOND_SERVICENOW_CLIENT_SECRET=abc123realsecret",
+    ],
+)
+def test_each_secret_key_is_flagged(tmp_path, line):
+    path = write_file(tmp_path, line + "\n")
     assert check_file(path) != []
 
 

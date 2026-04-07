@@ -130,13 +130,13 @@ class ServiceNow:
     def __init__(self, config: Config):
         self._base_url = config.servicenow_url
         self.session = requests.Session()
-        self.session.headers.update(
-            {
-                "Ocp-Apim-Subscription-Key": config.servicenow_token,
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            }
-        )
+        self.session.headers.update({"Content-Type": "application/json", "Accept": "application/json"})
+        if config.servicenow_client_id and config.servicenow_client_secret:
+            from rcpond.auth import get_bearer_token
+
+            self.session.headers["Authorization"] = f"Bearer {get_bearer_token(config)}"
+        else:
+            self.session.headers["Ocp-Apim-Subscription-Key"] = config.servicenow_token or ""
 
     def get_tickets(self, include_assigned_tickets: bool = False) -> list[Ticket]:
         """Get tickets that are applications for HPC/Azure
