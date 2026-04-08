@@ -90,11 +90,55 @@ A project-specific `.env` file can then override individual values where needed:
 $ rcpond --env-file .env display-all
 ```
 
-## Obtaining a ServiceNow API token
+## ServiceNow authentication
 
-For instructions on how to obtain a ServiceNow API token, see the [rcpond-rules repo](https://github.com/alan-turing-institute/rcpond-rules)
+RCPond supports two ways to authenticate with the ServiceNow API. If both are configured, OAuth takes precedence.
 
-You will need to add the token to your configuration (e.g. in the XDG config file or a `.env` file) under the key `RCPOND_SERVICENOW_TOKEN` for RCPond to be able to access the ServiceNow API.
+### Option 1: Static API token
+
+A static subscription key issued by the ServiceNow administrator. This is the simpler option and is supported by the default configuration file. However, actions taken by RCPond will be attributed to a generic integration user rather than an individual, and the token must be manually rotated when it expires.
+
+When using OAuth, actions taken by RCPond will be attributed to the individual user rather than a generic integration user.
+
+For instructions on how to obtain a token, see the [rcpond-rules repo](https://github.com/alan-turing-institute/rcpond-rules).
+
+Add the token to your configuration under `RCPOND_SERVICENOW_TOKEN`:
+
+```
+RCPOND_SERVICENOW_TOKEN=your-servicenow-token
+```
+
+### Option 2: OAuth 2.0 (Authorization Code + PKCE)
+
+OAuth allows RCPond to authenticate as a specific user via a browser-based login flow. Tokens are cached locally and refreshed silently, so the browser is only opened when necessary.
+
+When using OAuth, actions taken by RCPond will be attributed to the individual user rather than a generic integration user.
+
+To enable OAuth, add your client credentials to the configuration:
+
+```
+RCPOND_SERVICENOW_CLIENT_ID=your-client-id
+RCPOND_SERVICENOW_CLIENT_SECRET=your-client-secret
+RCPOND_SERVICENOW_OAUTH_SCOPE=useraccount
+RCPOND_SERVICENOW_OAUTH_REDIRECT_PORT=8765
+RCPOND_SERVICENOW_OAUTH_AUTH_URL=https://...service-now.com/oauth_auth.do
+RCPOND_SERVICENOW_OAUTH_TOKEN_URL=https://...service-now.com/oauth_token.do
+```
+
+Example / default values for the OAuth fields can be found in the default configuration file in the [rcpond-rules repo](https://github.com/alan-turing-institute/rcpond-rules).
+
+
+#### Logging in using OAuth
+
+Once the OAuth credentials are configured, run the `login` command to complete the browser-based flow and cache the tokens:
+
+```bash
+$ rcpond login
+```
+
+Subsequent commands will use the cached token automatically. The browser will only open again if the token expires and cannot be refreshed silently.
+
+Tokens are stored at `$XDG_CACHE_HOME/rcpond/tokens.json` (default: `~/.cache/rcpond/tokens.json`) with permissions `0600`.
 
 
 ## Email templates
