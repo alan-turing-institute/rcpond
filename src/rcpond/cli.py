@@ -117,7 +117,11 @@ try:
     import rcpond.html_servicenow as _  # noqa: F401
 
     @cli.command()
-    def evaluate_all(ctx: typer.Context, in_dir: Path, out_file: Path):
+    def evaluate_all(
+        ctx: typer.Context,
+        in_dir: Annotated[Path, typer.Argument(help="Directory of pre-downloaded HTML ticket files.")],
+        out_file: Annotated[Path, typer.Argument(help="Output CSV file path (must not already exist).")],
+    ):
         """Evaluate LLM performance against a directory of pre-downloaded HTML tickets."""
         if not out_file.parent.exists():
             msg = f"Output directory does not exist: {out_file.parent}"
