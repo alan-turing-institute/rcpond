@@ -120,7 +120,7 @@ try:
     def evaluate_all(
         ctx: typer.Context,
         in_dir: Annotated[Path, typer.Argument(help="Directory of pre-downloaded HTML ticket files.")],
-        out_file: Annotated[Path, typer.Argument(help="Output CSV file path (must not already exist).")],
+        out_file: Annotated[Path, typer.Argument(help="Output JSON file path (must not already exist).")],
     ):
         """Evaluate LLM performance against a directory of pre-downloaded HTML tickets."""
         if not out_file.parent.exists():
