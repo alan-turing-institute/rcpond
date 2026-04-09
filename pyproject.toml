@@ -136,10 +136,13 @@ flake8-unused-arguments.ignore-variadic-names = true  # allow unused *args/**kwa
 
 [dependency-groups]
 dev = [
+    "beautifulsoup4>=4.12",
+    "pandas>=2.0",
     "pandas-stubs>=2.0",
     "pdoc>=16.0.0",
     "pre-commit",
     "pytest >=6",
     "pytest-cov >=3",
     "types-beautifulsoup4>=4.12",
+    "types-requests>=2.32",
 ]
