@@ -6,7 +6,7 @@ RCPond reads requests via tickets from an ServiceNow instance. These requests ar
 
 ## Quick start
 
-Try the instructions below. If you need more details or encounter any issues, see the [Configuration](configuration.md) and [Contributing](contributing.md) docs.
+Try the instructions below for the simplest setup. If you need more details, different setup options or encounter any issues, see the [Configuration](configuration.md) and [Contributing](contributing.md) docs.
 
 ### 1 - Install RCPond using `uv`:
 
@@ -20,9 +20,12 @@ $ uv tool install git+https://github.com/alan-turing-institute/rcpond.git
 $ uvx git+ssh://git@github.com/alan-turing-institute/rcpond-rules.git
 ```
 
-### 3 - Obtain a ServiceNow API token
+### 3 - Login to ServiceNow via the CLI
 
-See [Configuration](configuration.md) for the details and then add the key to the configuration file at `~/.config/rcpond/default.config`
+```bash
+$ rcpond login
+```
+
 
 ## Further details
 
