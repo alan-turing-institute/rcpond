@@ -167,3 +167,5 @@ curl-cmd.txt
 /evaluate/html_dumps
 /evaluate/ground_truth
 /evaluate/evaluate_llm_options.html
+/scripts/html_download
+/temp
