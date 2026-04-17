@@ -160,3 +160,10 @@ Thumbs.db
 # Session cookies — never commit these, they grant account access
 cookies.env
 curl-cmd.txt
+
+# Project specific dirs and file to exclude
+/copied_from_t0_rcp
+/evaluate/evaluations
+/evaluate/html_dumps
+/evaluate/ground_truth
+/evaluate/evaluate_llm_options.html

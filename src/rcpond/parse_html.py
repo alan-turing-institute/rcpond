@@ -23,6 +23,7 @@ are found).
 No configuration is required.
 """
 
+import dataclasses
 from pathlib import Path
 
 import pandas as pd
@@ -377,4 +378,11 @@ def parse_ticket_html(filename: Path) -> FullTicket:
         short_description=_SHORT_DESCRIPTION,
     )
 
-    return FullTicket.from_Ticket(ticket, **facts)
+    ## Filter facts to only the extra fields expected by FullTicket (i.e. those
+    ## not already on Ticket), to avoid passing conflicting keys from extract_key_facts.
+    ticket_field_names = {f.name for f in dataclasses.fields(Ticket)}
+    full_ticket_field_names = {f.name for f in dataclasses.fields(FullTicket)}
+    extra_field_names = full_ticket_field_names - ticket_field_names
+    extra_facts = {k: v for k, v in facts.items() if k in extra_field_names}
+
+    return FullTicket.from_Ticket(ticket, **extra_facts)

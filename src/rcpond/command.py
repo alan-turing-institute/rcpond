@@ -55,7 +55,9 @@ def _process_ticket(ticket: Ticket, dry_run: bool, config: Config, service_now: 
     print(f"{full_ticket=}")
     tools = get_available_tools(config)
     system_prompt, user_prompt = construct_prompt(full_ticket, config)
-    llm_response: LLMResponse = llm.generate(system_prompt, user_prompt, config.llm_model, tools=tools)
+    llm_response: LLMResponse = llm.generate(
+        system_prompt, user_prompt, config.llm_model, tools=tools, ticket_number=ticket.number
+    )
     print(f"{llm_response=}")
 
     if not dry_run and llm_response.planned_tool_call is not None:
@@ -153,10 +155,13 @@ def batch_process_tickets(dry_run: bool, config: Config | None = None):
         _ = _process_ticket(ticket, dry_run, config, service_now, llm)
 
 
-def batch_evaluate_tickets(in_dir: Path, out_file: Path, config: Config | None = None):
-    """Process all tickets in an offline html-based directory of ServiceNow tickets.
+def batch_evaluate_tickets(in_dir: Path, out_file: Path, num_runs: int = 1, config: Config | None = None):
+    """Process all Azure tickets in an offline HTML directory, across multiple runs.
 
-    Used for evaluating the performance of the LLM in reviewing tickets.
+    Used for evaluating the performance of the LLM in reviewing tickets. Results
+    are written as ``dict[str, list[LLMResponse]]`` keyed by ticket number, so
+    that each ticket's responses across all runs are grouped together. Non-Azure
+    tickets are skipped.
 
     Parameters
     ----------
@@ -164,6 +169,8 @@ def batch_evaluate_tickets(in_dir: Path, out_file: Path, config: Config | None =
         Directory containing pre-downloaded HTML ticket files.
     out_file : Path
         Path to write the JSON results. Must not already exist.
+    num_runs : int
+        Number of times to run the LLM over all tickets (for majority-vote analysis).
     config : Config | None
         Configuration to use. If None, Config() is constructed from the environment.
     """
@@ -176,24 +183,27 @@ def batch_evaluate_tickets(in_dir: Path, out_file: Path, config: Config | None =
     config = config or Config()
     service_now: HtmlServiceNow = HtmlServiceNow(in_dir)
     llm: LLM = LLM(config)
-    all_responses: list[LLMResponse] = []
-    print("DEBUG: service_now.get_tickets(include_assigned_tickets=True)")
-    all_tickets = service_now.get_tickets(include_assigned_tickets=True)
-    for ticket in all_tickets:
-        # print(f"{ticket=}")
 
+    ## Pre-filter to Azure tickets only
+    all_tickets = service_now.get_tickets(include_assigned_tickets=True)
+    azure_tickets = []
+    for ticket in all_tickets:
         # TODO: Temporary, an messy way to limit tickets to only those related to Azure
         # Find a better solution
         full_ticket = service_now.get_full_ticket(ticket)
         if full_ticket.which_service != "Azure":
             print(f"skipping non-Azure ticket: {ticket.number}")
-            print()
-            continue
+        else:
+            azure_tickets.append(ticket)
 
-        resp = _process_ticket(ticket=ticket, dry_run=True, config=config, service_now=service_now, llm=llm)
-        all_responses.append(resp)
-        # print(f"{resp=}")
-        print()
+    ## Run the LLM num_runs times, accumulating responses per ticket
+    results: dict[str, list[LLMResponse]] = {t.number: [] for t in azure_tickets}
+    for run in range(num_runs):
+        print(f"\n--- Run {run + 1}/{num_runs} ---")
+        for ticket in azure_tickets:
+            resp = _process_ticket(ticket=ticket, dry_run=True, config=config, service_now=service_now, llm=llm)
+            results[ticket.number].append(resp)
+            print()
 
     with open(out_file, "w") as f:
-        json.dump([vars(r) for r in all_responses], f, indent=2)
+        json.dump({k: [vars(r) for r in v] for k, v in results.items()}, f, indent=2)

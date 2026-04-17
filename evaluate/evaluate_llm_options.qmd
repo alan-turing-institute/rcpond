@@ -1,0 +1,216 @@
+---
+title: "RCPond LLM Evaluation"
+format:
+  html:
+    toc: true
+    code-fold: true
+    self-contained: true
+    page-layout: full
+execute:
+  warning: false
+---
+
+## Rendering
+
+To render this file, in a shell, use the following commands:
+
+```bash
+cd evaluate
+uv run --with scikit-learn --with matplotlib --with jupyter --with nbformat quarto render evaluate_llm_options.qmd
+```
+
+## Parameters
+
+
+Edit these values to compare different evaluation runs or models.
+
+```{python}
+# Path to the JSON results file produced by `rcpond evaluate-all`.
+# Format: dict[ticket_number, list[LLMResponse]]
+results_file = "evaluations/html_download/gpt-4o_3runs.json"
+
+# Path to the ground truth CSV
+ground_truth_file = "ground_truth/ground_truth.csv"
+
+# Model label for titles/tables. Set to None to read from the JSON.
+llm_model_override = None  # e.g. "gpt-4o"
+
+# Mapping from email template filename to ground truth label.
+# Extend this dict as new templates are added.
+# Note that the old `t0-rcp` repo included an action `SEND_TO_DSG_TEAM`. There is no
+# cases in the ground truth, nor is there a jinja template for this, hence it is
+# excluded in the dict below.
+TEMPLATE_TO_LABEL: dict[str, str] = {
+    "approve.yaml.j2":                  "APPROVE",
+    "check_with_rcp.yaml.j2":           "CHECK_WITH_RCP",
+    "send_back_to_submitter.yaml.j2":   "SEND_BACK_TO_SUBMITTER",
+    "send_to_it.yaml.j2":               "SEND_TO_IT",
+    "send_to_pmu.yaml.j2":              "SEND_TO_PMU",
+    "send_to_rc_lead.yaml.j2":          "SEND_TO_RC_LEAD",
+    "send_to_rcp.yaml.j2":              "SEND_TO_RCP",
+    "send_to_rcwg.yaml.j2":             "SEND_TO_RCWG",
+}
+
+# Label used when the LLM made no tool call
+NO_ACTION_LABEL = "NO_ACTION"
+```
+
+```{python}
+import json
+from collections import Counter
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import pandas as pd
+from sklearn.metrics import ConfusionMatrixDisplay, confusion_matrix
+
+# ---------------------------------------------------------------------------
+# Load results: dict[ticket_number, list[LLMResponse]]
+# ---------------------------------------------------------------------------
+with Path(results_file).open() as f:
+    results: dict[str, list[dict]] = json.load(f)
+
+# ---------------------------------------------------------------------------
+# Derive model name and run count
+# ---------------------------------------------------------------------------
+first_response = next((runs[0] for runs in results.values() if runs), None)
+llm_model = llm_model_override or (first_response or {}).get("llm_model") or "unknown"
+num_runs = max((len(v) for v in results.values()), default=1)
+
+print(f"Model:   {llm_model}")
+print(f"Tickets: {len(results)}")
+print(f"Runs:    {num_runs}")
+```
+
+```{python}
+# ---------------------------------------------------------------------------
+# Load ground truth — filtered to tickets present in results
+# ---------------------------------------------------------------------------
+gt = pd.read_csv(ground_truth_file)
+gt.columns = gt.columns.str.strip()
+gt["ticket_number"] = gt["ticket_number"].str.strip()
+gt["answer"] = gt["answer"].str.strip()
+
+gt_filtered = gt[gt["ticket_number"].isin(results.keys())].copy()
+print(f"Ground truth rows matched: {len(gt_filtered)} / {len(results)} tickets")
+```
+
+## Per-ticket results
+
+Each row shows the ground truth label and the prediction for each run.
+Green = correct, red = incorrect.
+
+```{python}
+def _predicted_label(response: dict) -> str:
+    tc = response.get("planned_tool_call")
+    if not tc:
+        return NO_ACTION_LABEL
+    template = tc["function"]["arguments"].get("template_name", "")
+    return TEMPLATE_TO_LABEL.get(template, f"UNKNOWN:{template}")
+
+
+rows = []
+for _, gt_row in gt_filtered.iterrows():
+    ticket = gt_row["ticket_number"]
+    gt_label = gt_row["answer"]
+    notes = gt_row.get("notes", "")
+    predictions = [_predicted_label(r) for r in results.get(ticket, [])]
+
+    row = {"ticket_number": ticket, "ground_truth": gt_label, "notes": notes}
+    for i, pred in enumerate(predictions):
+        row[f"run_{i + 1}"] = pred
+        row[f"correct_{i + 1}"] = pred == gt_label
+
+    rows.append(row)
+
+detail_df = pd.DataFrame(rows)
+run_cols = [c for c in detail_df.columns if c.startswith("run_")]
+correct_cols = [c for c in detail_df.columns if c.startswith("correct_")]
+
+
+def _highlight(row):
+    styles = [""] * len(row)
+    for run_col in run_cols:
+        if run_col in row.index:
+            correct = row[run_col] == row["ground_truth"]
+            idx = list(row.index).index(run_col)
+            styles[idx] = "background-color: #d4edda" if correct else "background-color: #f8d7da"
+    return styles
+
+
+(
+    detail_df[["ticket_number", "ground_truth"] + run_cols]
+    .style.apply(_highlight, axis=1)
+    .set_table_styles([{"selector": "table", "props": [("width", "100%")]}])
+)
+```
+
+## Accuracy summary
+
+```{python}
+summary_rows = []
+for i, run_col in enumerate(run_cols):
+    correct_col = f"correct_{i + 1}"
+    n_correct = int(detail_df[correct_col].sum())
+    n_total = len(detail_df)
+    summary_rows.append({
+        "run": f"Run {i + 1}",
+        "correct": n_correct,
+        "total": n_total,
+        "accuracy": f"{n_correct / n_total:.1%}" if n_total else "—",
+    })
+
+print(f"Model: {llm_model}")
+pd.DataFrame(summary_rows)
+```
+
+```{python}
+# Majority-vote accuracy (most common prediction per ticket wins ties randomly)
+if num_runs > 1:
+    majority_correct = 0
+    for _, row in detail_df.iterrows():
+        predictions = [row[c] for c in run_cols]
+        majority_pred = Counter(predictions).most_common(1)[0][0]
+        if majority_pred == row["ground_truth"]:
+            majority_correct += 1
+
+    n = len(detail_df)
+    print(f"Majority-vote accuracy ({num_runs} runs): {majority_correct}/{n} = {majority_correct/n:.1%}")
+```
+
+## Per-label breakdown
+
+How often each label appears in the ground truth vs. the model's predictions.
+
+```{python}
+# Use majority prediction when multiple runs, otherwise run 1
+if num_runs > 1:
+    detail_df["prediction"] = detail_df.apply(
+        lambda row: Counter([row[c] for c in run_cols]).most_common(1)[0][0], axis=1
+    )
+else:
+    detail_df["prediction"] = detail_df["run_1"]
+
+all_labels = sorted(set(detail_df["ground_truth"]) | set(detail_df["prediction"]))
+
+pd.DataFrame([
+    {
+        "label": label,
+        "ground_truth_count": int((detail_df["ground_truth"] == label).sum()),
+        "predicted_count": int((detail_df["prediction"] == label).sum()),
+    }
+    for label in all_labels
+])
+```
+
+## Confusion matrix
+
+```{python}
+labels = sorted(set(detail_df["ground_truth"]) | set(detail_df["prediction"]))
+cm = confusion_matrix(detail_df["ground_truth"], detail_df["prediction"], labels=labels)
+fig, ax = plt.subplots(figsize=(max(6, len(labels)), max(5, len(labels) - 1)))
+ConfusionMatrixDisplay(cm, display_labels=labels).plot(ax=ax, xticks_rotation=90, colorbar=False)
+ax.set_title(f"Confusion matrix — {llm_model}")
+plt.tight_layout()
+plt.show()
+```
