@@ -24,10 +24,20 @@ The format of the configuration file is:
 RCPOND_LLM_CHAT_COMPLETIONS_URL=...
 RCPOND_LLM_API_KEY=your-api-key-here
 RCPOND_LLM_MODEL=...
-RCPOND_SERVICENOW_TOKEN=your-servicenow-token
 RCPOND_SERVICENOW_URL=https://turing-api.azure-api.net/dev-research/api/now/table
 RCPOND_RULES_PATH=/path/to/rule/file
 RCPOND_SYSTEM_PROMPT_TEMPLATE_PATH=/path/to/prompt/file
+
+# Static token auth (required unless OAuth credentials are set):
+RCPOND_SERVICENOW_TOKEN=your-servicenow-token  # pragma: allowlist secret
+
+# OAuth auth (takes precedence over the static token when both are set):
+# RCPOND_SERVICENOW_CLIENT_ID=your-client-id
+# RCPOND_SERVICENOW_CLIENT_SECRET=your-client-secret
+# RCPOND_SERVICENOW_OAUTH_SCOPE=useraccount
+# RCPOND_SERVICENOW_OAUTH_REDIRECT_PORT=8765
+# RCPOND_SERVICENOW_OAUTH_AUTH_URL=https://alanturingdev.service-now.com/oauth_auth.do
+# RCPOND_SERVICENOW_OAUTH_TOKEN_URL=https://alanturingdev.service-now.com/oauth_token.do
 ```
 
 Example use
@@ -68,10 +78,24 @@ class Config:
         API key for authenticating with the LLM provider.
     llm_model : str
         Model identifier to use for LLM requests.
-    servicenow_token : str
-        Bearer token for authenticating with the ServiceNow API.
+    servicenow_token : str | None
+        Static subscription key for the ServiceNow API. Required unless OAuth
+        credentials are provided (``servicenow_client_id`` + ``servicenow_client_secret``).
     servicenow_url : str
         Base URL of the ServiceNow instance.
+    servicenow_client_id : str | None
+        OAuth client ID. When set alongside ``servicenow_client_secret``, OAuth is
+        used in preference to ``servicenow_token``.
+    servicenow_client_secret : str | None
+        OAuth client secret.
+    servicenow_oauth_scope : str
+        OAuth scope requested from ServiceNow (default: ``useraccount``).
+    servicenow_oauth_redirect_port : int
+        Port for the local OAuth redirect listener (default: ``8765``).
+    servicenow_oauth_auth_url : str
+        ServiceNow OAuth authorisation endpoint URL.
+    servicenow_oauth_token_url : str
+        ServiceNow OAuth token endpoint URL.
     rules_path : Path
         Path to the RULES.md file used to construct the system prompt.
     system_prompt_template_path : Path
@@ -86,8 +110,14 @@ class Config:
     llm_chat_completions_url: str = field(init=False)
     llm_api_key: str = field(init=False)
     llm_model: str = field(init=False)
-    servicenow_token: str = field(init=False)
+    servicenow_token: str | None = field(init=False)
     servicenow_url: str = field(init=False)
+    servicenow_client_id: str | None = field(init=False)
+    servicenow_client_secret: str | None = field(init=False)
+    servicenow_oauth_scope: str = field(init=False)
+    servicenow_oauth_redirect_port: int = field(init=False)
+    servicenow_oauth_auth_url: str = field(init=False)
+    servicenow_oauth_token_url: str = field(init=False)
     rules_path: Path = field(init=False)
     system_prompt_template_path: Path = field(init=False)
     email_templates_dir: Path = field(init=False)
@@ -124,8 +154,18 @@ class Config:
                 if f.name in cli_args and cli_args[f.name] is not None:
                     values[f.name] = cli_args[f.name]
 
-        # Verify all required fields are present
-        missing = [f.name for f in fields(self) if f.name not in values]
+        ## Fields that are always optional (may be absent or None)
+        _ALWAYS_OPTIONAL = {"servicenow_client_id", "servicenow_client_secret"}
+
+        ## servicenow_token is required unless both OAuth credentials are present
+        oauth_present = bool(values.get("servicenow_client_id") and values.get("servicenow_client_secret"))
+        conditionally_optional = {"servicenow_token"} if oauth_present else set()
+
+        missing = [
+            f.name
+            for f in fields(self)
+            if f.name not in values and f.name not in _ALWAYS_OPTIONAL and f.name not in conditionally_optional
+        ]
         if missing:
             msg = f"Missing required configuration: {', '.join(missing)}"
             raise ValueError(msg)
@@ -134,8 +174,15 @@ class Config:
         field_names = {f.name for f in fields(self)}
         hints = {k: v for k, v in typing.get_type_hints(Config).items() if k in field_names}
         for f in fields(self):
-            value = _confirm_path_exists(values[f.name]) if hints[f.name] is Path else values[f.name]
-            setattr(self, f.name, value)
+            raw = values.get(f.name)
+            if raw is None:
+                setattr(self, f.name, None)
+            elif hints[f.name] is Path:
+                setattr(self, f.name, _confirm_path_exists(raw))
+            elif hints[f.name] is int:
+                setattr(self, f.name, int(raw))
+            else:
+                setattr(self, f.name, raw)
 
         # Validate Jinja2 templates
         _validate_jinja_template(self.system_prompt_template_path)

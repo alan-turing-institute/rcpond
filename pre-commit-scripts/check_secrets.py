@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Pre-commit hook to detect accidentally committed API keys and tokens.
 
-Scans staged files for RCPOND_LLM_API_KEY and RCPOND_SERVICENOW_TOKEN
-assignments and rejects any that look like real secrets (i.e. not a
-well-known placeholder value from the example .env file).
+Scans staged files for secret-bearing config keys and rejects any that look
+like real secrets (i.e. not a well-known placeholder value from the example
+.env file).
 """
 
 import re
@@ -14,6 +14,8 @@ import sys
 CHECKED_KEYS: dict[str, set[str]] = {
     "RCPOND_LLM_API_KEY": {"your-api-key-here", ""},
     "RCPOND_SERVICENOW_TOKEN": {"your-servicenow-token", ""},
+    "RCPOND_SERVICENOW_CLIENT_ID": {"your-client-id", ""},
+    "RCPOND_SERVICENOW_CLIENT_SECRET": {"your-client-secret", ""},
 }
 
 # Matches RCPOND_LLM_API_KEY=value, RCPOND_LLM_API_KEY: value, RCPOND_LLM_API_KEY value
@@ -27,9 +29,16 @@ def check_file(path: str) -> list[str]:
     try:
         with open(path, encoding="utf-8", errors="ignore") as f:
             for line_no, line in enumerate(f, start=1):
-                m = _PATTERN.search(line.rstrip())
+                stripped = line.rstrip()
+                ## Allow lines to opt out of this check (e.g. safe placeholders in docstrings)
+                if "# pragma: allowlist secret" in stripped:
+                    continue
+                m = _PATTERN.search(stripped)
                 if m:
-                    key, value = m.group(1), m.group(2).strip()
+                    key = m.group(1)
+                    ## Strip inline comments before comparing against safe placeholders
+                    raw = m.group(2).split("#")[0]
+                    value = raw.strip()
                     safe_values = CHECKED_KEYS[key]
                     if value not in safe_values:
                         violations.append(f"  {path}:{line_no}: {key} appears to contain a real secret")

@@ -62,8 +62,10 @@ def common_options(
     llm_chat_completions_url: Annotated[str | None, typer.Option(help="LLM API endpoint URL.")] = None,
     llm_api_key: Annotated[str | None, typer.Option(help="LLM API key.")] = None,
     llm_model: Annotated[str | None, typer.Option(help="LLM model identifier.")] = None,
-    servicenow_token: Annotated[str | None, typer.Option(help="ServiceNow API token.")] = None,
+    servicenow_token: Annotated[str | None, typer.Option(help="ServiceNow API token (static auth).")] = None,
     servicenow_url: Annotated[str | None, typer.Option(help="ServiceNow API base URL.")] = None,
+    servicenow_client_id: Annotated[str | None, typer.Option(help="ServiceNow OAuth client ID.")] = None,
+    servicenow_client_secret: Annotated[str | None, typer.Option(help="ServiceNow OAuth client secret.")] = None,
     rules_path: Annotated[str | None, typer.Option(help="Path to the rules file.")] = None,
     system_prompt_template_path: Annotated[str | None, typer.Option(help="Path to the system prompt template.")] = None,
     email_templates_dir: Annotated[str | None, typer.Option(help="Path to the email templates directory.")] = None,
@@ -78,6 +80,8 @@ def common_options(
             "llm_model": llm_model,
             "servicenow_token": servicenow_token,
             "servicenow_url": servicenow_url,
+            "servicenow_client_id": servicenow_client_id,
+            "servicenow_client_secret": servicenow_client_secret,
             "rules_path": rules_path,
             "system_prompt_template_path": system_prompt_template_path,
             "email_templates_dir": email_templates_dir,
@@ -87,6 +91,20 @@ def common_options(
 
 def _config(ctx: typer.Context) -> Config:
     return Config(env_path=ctx.obj["env_path"], cli_args=ctx.obj["cli_args"])
+
+
+@cli.command()
+def login(ctx: typer.Context) -> None:
+    """Authorise rcpond with ServiceNow via OAuth (browser-based flow).
+
+    Opens a browser, completes the Authorization Code + PKCE flow, and caches
+    the resulting tokens. Subsequent commands will use the cached token
+    automatically without prompting again.
+    """
+    from rcpond.auth import get_bearer_token
+
+    get_bearer_token(_config(ctx))
+    print("[green]Login successful.[/green] Token cached.")
 
 
 @cli.command()

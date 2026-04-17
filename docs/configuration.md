@@ -12,7 +12,7 @@ There are three main steps to get up and running:
 
 - Installing RCPond.
 - Create the configuration files.
-- Obtain a ServiceNow API token and add it to the configuration.
+- Either Login using OAuth, or obtain a ServiceNow API token and add it to the configuration.
 
 ## Installing RCPond
 
@@ -72,13 +72,21 @@ The configuration options can be provided in several different ways. This allow 
 
 ### Configuration file example
 
+The required keys depend on which ServiceNow authentication method you use (see below). A full example using OAuth:
+
 ```
 # ~/.config/rcpond/default.config
 RCPOND_LLM_CHAT_COMPLETIONS_URL=https://...
 RCPOND_LLM_API_KEY=your-api-key-here
 RCPOND_LLM_MODEL=gpt-4o
-RCPOND_SERVICENOW_TOKEN=your-servicenow-token
 RCPOND_SERVICENOW_URL=https://turing-api.azure-api.net/dev-research/api/now/table
+# RCPOND_SERVICENOW_TOKEN=your-servicenow-token  # required if not using OAuth
+RCPOND_SERVICENOW_CLIENT_ID=your-client-id
+RCPOND_SERVICENOW_CLIENT_SECRET=your-client-secret
+RCPOND_SERVICENOW_OAUTH_SCOPE=workspace
+RCPOND_SERVICENOW_OAUTH_REDIRECT_PORT=8765
+RCPOND_SERVICENOW_OAUTH_AUTH_URL=https://...service-now.com/oauth_auth.do
+RCPOND_SERVICENOW_OAUTH_TOKEN_URL=https://...service-now.com/oauth_token.do
 RCPOND_RULES_PATH=/path/to/rules.md
 RCPOND_SYSTEM_PROMPT_TEMPLATE_PATH=/path/to/system_prompt_template.txt
 RCPOND_EMAIL_TEMPLATES_DIR=/path/to/email_templates/
@@ -90,11 +98,54 @@ A project-specific `.env` file can then override individual values where needed:
 $ rcpond --env-file .env display-all
 ```
 
-## Obtaining a ServiceNow API token
+## ServiceNow authentication
 
-For instructions on how to obtain a ServiceNow API token, see the [rcpond-rules repo](https://github.com/alan-turing-institute/rcpond-rules)
+RCPond supports two ways to authenticate with the ServiceNow API. If both are configured, OAuth takes precedence.
 
-You will need to add the token to your configuration (e.g. in the XDG config file or a `.env` file) under the key `RCPOND_SERVICENOW_TOKEN` for RCPond to be able to access the ServiceNow API.
+### Option 1: OAuth 2.0 (Recommended)
+
+OAuth allows RCPond to authenticate as a specific user via a browser-based login flow. Tokens are cached locally and refreshed silently, so the browser is only opened when necessary.
+
+When using OAuth, actions taken by RCPond will be attributed to the individual user rather than a generic integration user.
+
+To enable OAuth, add your client credentials to the configuration:
+
+```
+RCPOND_SERVICENOW_CLIENT_ID=your-client-id
+RCPOND_SERVICENOW_CLIENT_SECRET=your-client-secret
+RCPOND_SERVICENOW_OAUTH_SCOPE=workspace
+RCPOND_SERVICENOW_OAUTH_REDIRECT_PORT=8765
+RCPOND_SERVICENOW_OAUTH_AUTH_URL=https://...service-now.com/oauth_auth.do
+RCPOND_SERVICENOW_OAUTH_TOKEN_URL=https://...service-now.com/oauth_token.do
+```
+
+Example / default values for the OAuth fields can be found in the default configuration file in the [rcpond-rules repo](https://github.com/alan-turing-institute/rcpond-rules).
+
+
+#### Logging in using OAuth
+
+Once the OAuth credentials are configured, run the `login` command to complete the browser-based flow and cache the tokens:
+
+```bash
+$ rcpond login
+```
+
+Subsequent commands will use the cached token automatically. The browser will only open again if the token expires and cannot be refreshed silently.
+
+Tokens are stored at `$XDG_CACHE_HOME/rcpond/tokens.json` (default: `~/.cache/rcpond/tokens.json`) with permissions `0600`.
+
+
+### Option 2: Static API token
+
+A static subscription key issued by the ServiceNow administrator. This is the simpler option and is supported by the default configuration file. However, actions taken by RCPond will be attributed to a generic integration user rather than an individual, and the token must be manually rotated when it expires.
+
+For instructions on how to obtain a token, see the [rcpond-rules repo](https://github.com/alan-turing-institute/rcpond-rules).
+
+Add the token to your configuration under `RCPOND_SERVICENOW_TOKEN`:
+
+```
+RCPOND_SERVICENOW_TOKEN=your-servicenow-token
+```
 
 
 ## Email templates
