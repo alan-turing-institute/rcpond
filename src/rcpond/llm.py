@@ -34,6 +34,10 @@ class LLMResponse:
     """Optional reasoning content (e.g. from models that support chain-of-thought)."""
     planned_tool_call: dict | None = None
     """Optional tool call requested by the model, with arguments parsed from JSON."""
+    ticket_number: str | None = None
+    """The ticket number this response relates to, passed in by the caller."""
+    llm_model: str | None = None
+    """The model identifier used to generate this response."""
 
 
 ## --------------------------------------------------------------------------------
@@ -127,7 +131,12 @@ class LLM:
         )
 
     def generate(
-        self, system_prompt: str, user_prompt: str, model: str, tools: list[Tool] | None = None
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        model: str,
+        tools: list[Tool] | None = None,
+        ticket_number: str | None = None,
     ) -> LLMResponse:
         """Generate an LLM response given a system prompt and a user prompt.
         Formats the system and user prompt into a single prompt and calls the `_generate` method to get the response from the LLM.
@@ -143,6 +152,8 @@ class LLM:
             The model to use for generation.
         tools : list[Tool] | None
             Optional list of tools to make available to the model.
+        ticket_number : str | None
+            The ticket number being processed, stored on the response for traceability.
 
         Returns
         -------
@@ -155,4 +166,7 @@ class LLM:
         ]
         tool_dicts = [t.to_openai_dict() for t in tools] if tools else None
         response = self._generate(messages, model=model, tools=tool_dicts)
-        return self._parse_response(response)
+        llm_response = self._parse_response(response)
+        llm_response.ticket_number = ticket_number
+        llm_response.llm_model = model
+        return llm_response

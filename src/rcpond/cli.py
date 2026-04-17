@@ -135,17 +135,31 @@ try:
     import rcpond.html_servicenow as _  # noqa: F401
 
     @cli.command()
-    def evaluate_all(ctx: typer.Context, in_dir: Path, out_file: Path):
-        """Evaluate LLM performance against a directory of pre-downloaded HTML tickets."""
-        if not out_file.parent.exists():
-            msg = f"Output directory does not exist: {out_file.parent}"
-            raise typer.BadParameter(msg, param_hint="out_file")
+    def evaluate_all(
+        ctx: typer.Context,
+        in_dir: Annotated[Path, typer.Argument(help="Directory of pre-downloaded HTML ticket files.")],
+        out_dir: Annotated[Path, typer.Argument(help="Directory to write the JSON results file.")],
+        num_runs: Annotated[int, typer.Option(help="Number of LLM runs per ticket (for majority-vote analysis).")] = 1,
+    ):
+        """Evaluate LLM performance against a directory of pre-downloaded HTML tickets.
+
+        The output filename is derived from the configured LLM model name and the
+        number of runs, e.g. ``gpt-4o_3runs.json``.
+        """
+        if not out_dir.exists():
+            msg = f"Output directory does not exist: {out_dir}"
+            raise typer.BadParameter(msg, param_hint="out_dir")
+
+        config = _config(ctx)
+        ## Sanitise model name for use in a filename (replace / and : which appear in some model IDs)
+        safe_model = config.llm_model.replace("/", "-").replace(":", "-")
+        out_file = out_dir / f"{safe_model}_{num_runs}runs.json"
 
         if out_file.exists():
-            msg = f"Output file already exists: {out_file}"
-            raise typer.BadParameter(msg, param_hint="out_file")
+            msg = f"Output file already exists: {out_file}. Delete it or choose a different output directory."
+            raise typer.BadParameter(msg, param_hint="out_dir")
 
-        command.batch_evaluate_tickets(in_dir=in_dir, out_file=out_file, config=_config(ctx))
+        command.batch_evaluate_tickets(in_dir=in_dir, out_file=out_file, num_runs=num_runs, config=config)
 
 except ImportError:
     pass
