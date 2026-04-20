@@ -14,11 +14,15 @@ Try the instructions below for the simplest setup. If you need more details, dif
 $ uv tool install git+https://github.com/alan-turing-institute/rcpond.git
 ```
 
+See the [Installation](configuration.md#installing-rcpond) docs for more details, including upgrading existing installations and troubleshooting tips.
+
 ### 2 - Create the default configuration file:
 
 ```bash
 $ uvx git+ssh://git@github.com/alan-turing-institute/rcpond-rules.git
 ```
+
+This command should complete within a few seconds. See the [Configuration](configuration.md#using-the-default-configuration-file-recommended) docs for more details, including troubleshooting tips.
 
 ### 3 - Login to ServiceNow via the CLI
 
