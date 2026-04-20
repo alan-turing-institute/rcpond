@@ -30,7 +30,7 @@ $ rcpond --version
 
 ## Upgrading RCPond
 
-To upgrade RCPond to the latest version, run the following command (THIS COMMAND HAS NOT YET BEEN TESTED):
+To upgrade RCPond to the latest version, run the following command:
 
 ```bash
 $ uv tool upgrade rcpond@git+https://github.com/alan-turing-institute/rcpond.git
