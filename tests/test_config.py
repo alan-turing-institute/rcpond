@@ -2,15 +2,9 @@
 
 XDG isolation
 -------------
-Config loads from ``$XDG_CONFIG_HOME/rcpond/default.config`` as its lowest-precedence
-source.  Any test that expects a ``ValueError`` for missing fields — or that makes a
-precise assertion about which value wins — must redirect ``XDG_CONFIG_HOME`` to an
-empty ``tmp_path``, otherwise the developer's own ``~/.config/rcpond/default.config``
-will silently supply the missing values and the test result will depend on the local
-machine's state. This line is used in the setup for many tests:
-
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-
+``XDG_CONFIG_HOME`` is redirected to a per-test ``tmp_path`` by the ``isolated_xdg_config``
+autouse fixture, so the developer's own ``~/.config/rcpond/default.config`` never leaks
+into the test suite.
 """
 
 from dataclasses import fields
@@ -25,6 +19,16 @@ _FAILING_TEMPLATES_DIR = Path("tests/fixtures/failing_templates")
 _SYSTEM_PROMPT_TEMPLATE = Path("tests/fixtures/system_prompt_template.txt")
 
 # --- Fixtures ---
+
+
+@pytest.fixture(autouse=True)
+def _isolated_xdg_config(tmp_path, monkeypatch):
+    """Redirect XDG_CONFIG_HOME to a tmp dir for every test.
+
+    Prevents the developer's own ~/.config/rcpond/default.config from leaking
+    into tests that assert on missing or specific config values.
+    """
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
 
 
 @pytest.fixture()
@@ -167,11 +171,10 @@ def test_cli_args_none_does_not_override_dotenv(tmp_path, common_config_values):
     assert config.llm_model == "gpt-4"
 
 
-def test_both_params_none_raises_when_no_env_vars_set(tmp_path, monkeypatch):
+def test_both_params_none_raises_when_no_env_vars_set(monkeypatch):
     """With no sources at all, Config() should raise."""
     from rcpond.config import _env_var_name
 
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))  ## empty — no xdg config
     for field in fields(Config):
         monkeypatch.delenv(_env_var_name(field.name), raising=False)
 
@@ -182,9 +185,8 @@ def test_both_params_none_raises_when_no_env_vars_set(tmp_path, monkeypatch):
 # --- XDG config loading ---
 
 
-def test_load_from_xdg_config_only(tmp_path, monkeypatch, common_config_values):
+def test_load_from_xdg_config_only(tmp_path, common_config_values):
     """Config loads from the XDG default.config file when present."""
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     write_xdg_config(tmp_path, common_config_values)
 
     config = Config()
@@ -193,9 +195,8 @@ def test_load_from_xdg_config_only(tmp_path, monkeypatch, common_config_values):
     assert config.llm_chat_completions_url == "https://api.example.com"
 
 
-def test_xdg_config_absent_does_not_raise(tmp_path, monkeypatch, common_config_values):
+def test_xdg_config_absent_does_not_raise(tmp_path, common_config_values):
     """Missing XDG config is silently ignored; other sources still work."""
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))  ## empty — no rcpond/default.config
     env_file = write_dotenv(tmp_path, common_config_values)
 
     config = Config(env_path=env_file)
@@ -203,8 +204,7 @@ def test_xdg_config_absent_does_not_raise(tmp_path, monkeypatch, common_config_v
     assert config.llm_model == "gpt-4"
 
 
-def test_dotenv_overrides_xdg_config(tmp_path, monkeypatch, common_config_values):
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+def test_dotenv_overrides_xdg_config(tmp_path, common_config_values):
     write_xdg_config(tmp_path, common_config_values)
     env_file = write_dotenv(tmp_path, {**common_config_values, "llm_model": "dotenv-model"})
 
@@ -214,7 +214,6 @@ def test_dotenv_overrides_xdg_config(tmp_path, monkeypatch, common_config_values
 
 
 def test_env_vars_override_xdg_config(tmp_path, monkeypatch, common_config_values):
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     write_xdg_config(tmp_path, common_config_values)
     monkeypatch.setenv("RCPOND_LLM_MODEL", "env-var-model")
 
@@ -223,8 +222,7 @@ def test_env_vars_override_xdg_config(tmp_path, monkeypatch, common_config_value
     assert config.llm_model == "env-var-model"
 
 
-def test_cli_args_override_xdg_config(tmp_path, monkeypatch, common_config_values):
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+def test_cli_args_override_xdg_config(tmp_path, common_config_values):
     write_xdg_config(tmp_path, common_config_values)
 
     config = Config(cli_args={"llm_model": "cli-model"})
@@ -234,7 +232,6 @@ def test_cli_args_override_xdg_config(tmp_path, monkeypatch, common_config_value
 
 def test_all_four_sources_precedence(tmp_path, monkeypatch, common_config_values):
     """Full precedence chain: xdg < dotenv < env vars < cli args."""
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     write_xdg_config(tmp_path, common_config_values)
     env_file = write_dotenv(tmp_path, {**common_config_values, "llm_model": "dotenv-model"})
     monkeypatch.setenv("RCPOND_LLM_MODEL", "env-var-model")
@@ -247,8 +244,7 @@ def test_all_four_sources_precedence(tmp_path, monkeypatch, common_config_values
 # --- Missing fields ---
 
 
-def test_missing_single_field_raises(tmp_path, monkeypatch, common_config_values):
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+def test_missing_single_field_raises(tmp_path, common_config_values):
     partial = {k: v for k, v in common_config_values.items() if k != "llm_api_key"}
     env_file = write_dotenv(tmp_path, partial)
 
@@ -256,8 +252,7 @@ def test_missing_single_field_raises(tmp_path, monkeypatch, common_config_values
         Config(env_path=env_file)
 
 
-def test_missing_multiple_fields_raises(tmp_path, monkeypatch, common_config_values):
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+def test_missing_multiple_fields_raises(tmp_path, common_config_values):
     partial = {k: v for k, v in common_config_values.items() if k in ("llm_base_url", "llm_model")}
     env_file = write_dotenv(tmp_path, partial)
 
@@ -441,9 +436,8 @@ def test_fields_are_config_values_only():
 # --- OAuth / servicenow_token conditional requirement ---
 
 
-def test_servicenow_token_required_without_oauth(tmp_path, monkeypatch, common_config_values):
+def test_servicenow_token_required_without_oauth(tmp_path, common_config_values):
     ## servicenow_token must be supplied when no OAuth credentials are set
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     servicenow_auth_keys = ["servicenow_token", "servicenow_client_id", "servicenow_client_secret"]
     partial = {k: v for k, v in common_config_values.items() if k not in servicenow_auth_keys}
     env_file = write_dotenv(tmp_path, partial)
@@ -451,9 +445,8 @@ def test_servicenow_token_required_without_oauth(tmp_path, monkeypatch, common_c
         Config(env_path=env_file)
 
 
-def test_servicenow_token_optional_when_oauth_present(tmp_path, monkeypatch, common_config_values):
+def test_servicenow_token_optional_when_oauth_present(tmp_path, common_config_values):
     ## servicenow_token may be omitted when OAuth credentials are provided
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     oauth_values = {k: v for k, v in common_config_values.items() if k != "servicenow_token"}
     oauth_values["servicenow_client_id"] = "my-client-id"
     oauth_values["servicenow_client_secret"] = "my-client-secret"
@@ -473,17 +466,15 @@ def test_oauth_fields_absent_when_not_configured(common_config_values):
     assert config.servicenow_client_secret is None
 
 
-def test_oauth_scope_missing_is_error(common_config_values, tmp_path, monkeypatch):
+def test_oauth_scope_missing_is_error(common_config_values):
     ## servicenow_oauth_scope has no built-in default — omitting it is an error
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     del common_config_values["servicenow_oauth_scope"]
     with pytest.raises(ValueError, match="servicenow_oauth_scope"):
         Config(cli_args=common_config_values)
 
 
-def test_oauth_redirect_port_missing_is_error(common_config_values, tmp_path, monkeypatch):
+def test_oauth_redirect_port_missing_is_error(common_config_values):
     ## servicenow_oauth_redirect_port has no built-in default — omitting it is an error
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     del common_config_values["servicenow_oauth_redirect_port"]
     with pytest.raises(ValueError, match="servicenow_oauth_redirect_port"):
         Config(cli_args=common_config_values)

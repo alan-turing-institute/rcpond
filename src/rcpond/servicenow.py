@@ -196,15 +196,24 @@ class ServiceNow:
             field.name for field in dataclasses.fields(Ticket)
         }
 
+        ## Variable fields (everything except work_notes) must be requested with the
+        ## "variables." prefix — they are stored as ServiceNow catalogue variables,
+        ## not top-level record fields.
+        _TOPLEVEL = {"work_notes"}
+        requested_fields = {f if f in _TOPLEVEL else f"variables.{f}" for f in extra_fields}
+
         resp = self.session.get(
             f"{self._base_url}/{self._TABLE}/{tkt.sys_id}",
-            params={"sysparm_fields": ",".join(extra_fields), "sysparm_display_value": "all"},
+            params={"sysparm_fields": ",".join(requested_fields), "sysparm_display_value": "all"},
         )
 
         resp.raise_for_status()
 
-        ## Parse the returned JSON
-        result = resp.json()["result"]
+        ## Parse the returned JSON, stripping the "variables." prefix so the keys
+        ## match FullTicket field names.
+        result = {
+            (k[len("variables.") :] if k.startswith("variables.") else k): v for k, v in resp.json()["result"].items()
+        }
 
         return FullTicket.from_Ticket(tkt, **_extract_ticket_fields(result, extra_fields))
 
