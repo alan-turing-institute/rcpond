@@ -11,14 +11,16 @@ The generic `Tool` ABC is defined in `rcpond.tool`.
 Example use
 -----------
 
->>> tools = get_available_tools(config)
->>> response = llm.generate(system, user, model, tools=tools)
->>> if response.planned_tool_call:
-...     name = response.planned_tool_call["function"]["name"]
-...     args = response.planned_tool_call["function"]["arguments"]
-...     for t in tools:
-...         if t.name == name:
-...             t.execute(service_now, ticket, **args)
+```python
+tools = get_available_tools(config)
+response = llm.generate(system, user, model, tools=tools)
+if response.planned_tool_call:
+    name = response.planned_tool_call["function"]["name"]
+    args = response.planned_tool_call["function"]["arguments"]
+    for t in tools:
+        if t.name == name:
+            t.execute(service_now, ticket, **args)
+```
 
 """
 

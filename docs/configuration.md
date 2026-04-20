@@ -25,13 +25,21 @@ $ uv tool install git+https://github.com/alan-turing-institute/rcpond.git
 This will install the `rcpond` command, add it your path and should now be available in your terminal. You can test that it is working by running:
 
 ```bash
-$ rcpond
+$ rcpond --version
 ```
 
-(Optional) It is also possible to invoke rcpond directly without installing it, using `uvx`:
+## Upgrading RCPond
+
+To upgrade RCPond to the latest version, run the following command:
 
 ```bash
-$ uvx git+https://github.com/alan-turing-institute/rcpond.git --help
+$ uv tool upgrade rcpond@git+https://github.com/alan-turing-institute/rcpond.git
+```
+
+(Optional) It is also possible to invoke rcpond directly without installing it, using `uvx`. When the `--no-cache` option is used, this will always use the latest version:
+
+```bash
+$ uvx --no-cache git+https://github.com/alan-turing-institute/rcpond.git --help
 ```
 
 ## Configuration
@@ -48,14 +56,33 @@ $ uvx git+ssh://git@github.com/alan-turing-institute/rcpond-rules.git
 
 This will install a default configuration file at `~/.config/rcpond/default.config` .
 
-If the command above fails, try cloning the repo and running the command locally:
+If the command above fails try the following troubleshooting steps:
+
+1. Check that you can access GitHub via SSH, without needed to enter a password. Test this with the following command:
+
+```bash
+$ ssh -T git@github.com
+Hi <your-github-username>! You've successfully authenticated, but GitHub does not provide shell access.
+```
+
+You should see a message like the one above, confirming that you have access. If you are prompted for a password, then please follow the instructions in the [GitHub docs](https://docs.github.com/en/authentication/connecting-to-github-with-ssh). For `uvx` to work correctly, you need to have your SSH key added to the ssh-agent and have an active ssh-agent running. See Github's guide to [adding your SSH key to the ssh-agent](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/generating-a-new-ssh-key-and-adding-it-to-the-ssh-agent#adding-your-ssh-key-to-the-ssh-agent)
+
+2. If this still does not work, you can try cloning the repo and running the command locally:
 
 ```bash
 $ git clone git@github.com:alan-turing-institute/rcpond-rules.git
 $ uvx ./rcpond-rules
 ```
 
-By default existing configuration files will not be overwritten. If you need to overwrite existing config files, this is possible using the `--force` option:
+3. If you are still having issues, please check that you have access to the [rcpond-rules repo](https://github.com/alan-turing-institute/rcpond), by following the link in your browser. If you don't have access to the repo, please contact the RCPond maintainers to request access.
+
+
+### Updating existing configuration files
+
+By default, existing configuration files will not be overwritten. If you need to overwrite existing config files, this is possible using the `--force` option:
+
+> [!WARNING]
+> Any custom values in the existing config file will be lost.
 
 ```bash
 $ uvx git+ssh://git@github.com/alan-turing-institute/rcpond-rules.git --force
