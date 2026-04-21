@@ -30,6 +30,11 @@ This command should complete within a few seconds. See the [Configuration](confi
 $ rcpond login
 ```
 
+### 4 - Display the relevant ServiceNow tickets:
+
+```bash
+$ rcpond display-all
+```
 
 ## Further details
 

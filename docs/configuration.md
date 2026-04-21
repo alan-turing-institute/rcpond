@@ -157,7 +157,11 @@ Once the OAuth credentials are configured, run the `login` command to complete t
 $ rcpond login
 ```
 
-Subsequent commands will use the cached token automatically. The browser will only open again if the token expires and cannot be refreshed silently.
+The first time you run this command, a browser window will open prompting you to log in to ServiceNow and authorize the application, as shown below. You will need to select "Allow":
+
+![Screenshot of ServiceNow OAuth authorisation prompt. The text reads: "Research CMD Access would like to connect to your ServiceNow account on instance alanturingdev.service-now.com. By clicking Allow, you allow Research CMD Access to connect to your ServiceNow account on instance alanturingdev.service-now.com and allow it to interact with records as you. You can change this and other account permissions at any time. The following permissions will be granted: Name: workspace. Options: 'Deny' or 'Allow'"](oauth_first_run.png)
+
+After successful login, the obtained tokens will be cached locally for future use. The browser will only open again if the token expires and cannot be refreshed silently.
 
 Tokens are stored at `$XDG_CACHE_HOME/rcpond/tokens.json` (default: `~/.cache/rcpond/tokens.json`) with permissions `0600`.
 
