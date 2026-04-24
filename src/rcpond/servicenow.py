@@ -33,6 +33,7 @@ from dataclasses import dataclass
 
 import requests
 
+from rcpond import __version__ as rcpond_version
 from rcpond.config import Config
 
 
@@ -258,10 +259,12 @@ class ServiceNow:
             tkt: The ticket
             note: The note to post
         """
+        prefix: str = f"[code]<b>RCPond v{rcpond_version} generated response:</b>[/code]\n" "----\n"
+
         ## This will append the `note` param to `work_notes` field
         resp = self.session.patch(
             f"{self._base_url}/{self._TABLE}/{tkt.sys_id}",
-            json={"work_notes": note},
+            json={"work_notes": prefix + note},
         )
         resp.raise_for_status()
 
