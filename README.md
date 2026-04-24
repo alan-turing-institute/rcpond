@@ -1,8 +1,7 @@
 # rcpond
 
 [![Actions Status][actions-badge]][actions-link]
-[![PyPI version][pypi-version]][pypi-link]
-[![PyPI platforms][pypi-platforms]][pypi-link]
+[![Docs][readthedocs-badge]][readthedocs-link]
 
 A tool to partly automate RCP requests.
 
@@ -35,6 +34,8 @@ Distributed under the terms of the [MIT licence](licence.md).
 <!-- prettier-ignore-start -->
 [actions-badge]:            https://github.com/alan-turing-institute/rcpond/workflows/CI/badge.svg
 [actions-link]:             https://github.com/alan-turing-institute/rcpond/actions
+[readthedocs-badge]:         https://readthedocs.org/projects/rcpond/badge/?version=latest&style=flat
+[readthedocs-link]:          https://rcpond.readthedocs.io/en/latest
 [pypi-link]:                https://pypi.org/project/rcpond/
 [pypi-platforms]:           https://img.shields.io/pypi/pyversions/rcpond
 [pypi-version]:             https://img.shields.io/pypi/v/rcpond
