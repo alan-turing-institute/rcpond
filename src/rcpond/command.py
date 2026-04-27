@@ -15,6 +15,7 @@ from pathlib import Path
 from pprint import pprint
 
 from rcpond.config import Config
+from rcpond.display import display_full_ticket, display_multi_tickets
 from rcpond.llm import LLM, LLMResponse
 from rcpond.prompt import construct_prompt
 from rcpond.servicenow import FullTicket, ServiceNow, Ticket
@@ -80,7 +81,7 @@ def display_all_tickets(include_assigned_tickets: bool, config: Config | None = 
     """Display the list of unassigned tickets from ServiceNow to the user."""
     config = config or Config()
     service_now: ServiceNow = ServiceNow(config)
-    _display_output(service_now.get_tickets(include_assigned_tickets=include_assigned_tickets))
+    display_multi_tickets(service_now.get_tickets(include_assigned_tickets=include_assigned_tickets))
 
 
 def display_single_ticket(ticket_number: str, config: Config | None = None):
@@ -88,7 +89,8 @@ def display_single_ticket(ticket_number: str, config: Config | None = None):
     config = config or Config()
     service_now: ServiceNow = ServiceNow(config)
     ticket = service_now.get_ticket(ticket_number)
-    _display_output(service_now.get_full_ticket(ticket))
+    # _display_output(service_now.get_full_ticket(ticket))
+    display_full_ticket(service_now.get_full_ticket(ticket))
 
 
 def process_next_ticket(dry_run: bool, config: Config | None = None):
