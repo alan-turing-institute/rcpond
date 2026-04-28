@@ -204,7 +204,7 @@ def display_multi_tickets(tickets: list[Ticket], *, console: Console | None = No
                 ticket.opened_at,
                 ticket.requested_for,
                 ticket.state,
-                ticket.assigned_to if ticket.assigned_to else "UNASSIGNED",
+                ticket.assigned_to if ticket.assigned_to else "[dim]UNASSIGNED[/dim]",
             )
 
         title = f"[bold]{description} / {category}[/bold]"
