@@ -15,7 +15,7 @@ import pytest
 
 from rcpond import command
 from rcpond.config import Config
-from rcpond.servicenow import FullTicket, Ticket
+from rcpond.servicenow import Ticket
 
 
 @pytest.fixture()
@@ -33,6 +33,7 @@ def ticket():
         u_category="HPC",
         u_sub_category="New",
         short_description="Request access to HPC and cloud computing facilities",
+        state="New",
     )
 
 
@@ -58,8 +59,7 @@ def test_display_all_tickets_can_include_assigned(cfg):
 
 def test_display_single_ticket_uses_get_ticket(cfg, ticket):
     """display_single_ticket delegates lookup to get_ticket(), which searches all tickets."""
-    with patch("rcpond.command.ServiceNow") as MockSN:
+    with patch("rcpond.command.ServiceNow") as MockSN, patch("rcpond.command.display_full_ticket"):
         MockSN.return_value.get_ticket.return_value = ticket
-        MockSN.return_value.get_full_ticket.return_value = MagicMock(spec=FullTicket)
         command.display_single_ticket(ticket_number="RES0001000", config=cfg)
     MockSN.return_value.get_ticket.assert_called_once_with("RES0001000")

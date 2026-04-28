@@ -376,6 +376,7 @@ def parse_ticket_html(filename: Path) -> FullTicket:
         u_category=facts.get("category") or "",
         u_sub_category=facts.get("sub_category") or "",
         short_description=_SHORT_DESCRIPTION,
+        state="",
     )
 
     ## Filter facts to only the extra fields expected by FullTicket (i.e. those

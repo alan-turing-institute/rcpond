@@ -39,6 +39,7 @@ def test_post_freeform_note_execute():
         u_category="RC",
         u_sub_category="Azure",
         short_description="Request access",
+        state="New",
     )
     PostFreeformNoteTool().execute(service_now, ticket, note="Please provide more information.")
     service_now.post_note.assert_called_once_with(ticket, note="Please provide more information.")
@@ -79,6 +80,7 @@ def test_post_templated_note_execute_renders_and_posts():
         u_category="RC",
         u_sub_category="Azure",
         short_description="Request access",
+        state="New",
         work_notes="",
         project_title="",
         research_area_programme="",
@@ -155,6 +157,7 @@ def test_call_tool_unknown_tool_raises():
         u_category="RC",
         u_sub_category="Azure",
         short_description="Request access",
+        state="New",
         work_notes="",
         project_title="",
         research_area_programme="",

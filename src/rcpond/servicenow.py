@@ -51,6 +51,8 @@ class Ticket:
     u_category: str
     u_sub_category: str
     short_description: str
+    state: str
+    """Human-readable ticket state, e.g. 'New', 'In Progress', 'On Hold', 'Resolved', 'Closed'."""
 
 
 @dataclass

@@ -49,6 +49,7 @@ def _header_panel(ticket: Ticket) -> Panel:
             ("Opened", ticket.opened_at),
             ("Requested by", ticket.requested_for),
             ("Category", f"{ticket.u_category} / {ticket.u_sub_category}"),
+            ("Status", ticket.state),
             ("Description", ticket.short_description),
         ]
     )
@@ -200,20 +201,63 @@ def display_multi_tickets(tickets: list[Ticket], *, console: Console | None = No
                 ticket.number,
                 ticket.opened_at,
                 ticket.requested_for,
-                # ticket.u_sub_category,
-                "",  # Pending adding status field
+                ticket.state,
             )
 
         title = f"[bold]{description} / {category}[/bold]"
         con.print(Panel(table, title=title, title_align="left", border_style="bright_blue"))
 
 
-def display_response(response: LLMResponse) -> None:
+def display_response(response: LLMResponse, *, console: Console | None = None) -> None:
     """Display an LLM response.
 
     Parameters
     ----------
     response : LLMResponse
         The response to display.
+    console : Console | None
+        Rich Console to write to. Defaults to the module-level console (stdout).
     """
-    raise NotImplementedError
+    con = console or _console
+
+    title = "[bold]LLM Response[/bold]"
+    if response.ticket_number:
+        title += f"  [dim]{response.ticket_number}[/dim]"
+    if response.llm_model:
+        title += f"  [dim italic]{response.llm_model}[/dim italic]"
+
+    ## Main response text
+    response_text = response.response_text if response.response_text else "NO RESPONSE RECEIVED!"
+    con.print(
+        Panel(
+            Text(response_text, overflow="fold"),
+            title=title,
+            title_align="left",
+            border_style="bright_blue",
+        )
+    )
+
+    ## Reasoning (only present for chain-of-thought models)
+    if response.reasoning:
+        con.print(
+            Panel(
+                Text(response.reasoning, overflow="fold"),
+                title="[bold]Reasoning[/bold]",
+                title_align="left",
+                border_style="dim",
+            )
+        )
+
+    ## Planned tool call
+    if response.planned_tool_call:
+        tool_name = response.planned_tool_call.get("function", {}).get("name", "unknown")
+        args = response.planned_tool_call.get("function", {}).get("arguments", {})
+        rows = list(args.items()) if isinstance(args, dict) else [("arguments", str(args))]
+        con.print(
+            Panel(
+                _kv_table(rows),
+                title=f"[bold]Tool call:[/bold] [cyan]{tool_name}[/cyan]",
+                title_align="left",
+                border_style="yellow",
+            )
+        )
