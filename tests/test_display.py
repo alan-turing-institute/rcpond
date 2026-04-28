@@ -20,6 +20,7 @@ def full_ticket() -> FullTicket:
         u_sub_category="Research Computing Services",
         short_description="Request access to HPC and cloud computing facilities",
         state="New",
+        assigned_to="",
     )
     return FullTicket.from_Ticket(
         base,

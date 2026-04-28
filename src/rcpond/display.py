@@ -50,6 +50,7 @@ def _header_panel(ticket: Ticket) -> Panel:
             ("Requested by", ticket.requested_for),
             ("Category", f"{ticket.u_category} / {ticket.u_sub_category}"),
             ("Status", ticket.state),
+            ("Assigned to", ticket.assigned_to),
             ("Description", ticket.short_description),
         ]
     )
@@ -192,9 +193,10 @@ def display_multi_tickets(tickets: list[Ticket], *, console: Console | None = No
     for (category, description), group in groups.items():
         table = Table(show_header=True, header_style="bold cyan", box=None, padding=(0, 2))
         table.add_column("Number", no_wrap=True)
-        table.add_column("Opened", no_wrap=True)
+        table.add_column("Opened", no_wrap=False)
         table.add_column("Requested by")
         table.add_column("Status")
+        table.add_column("Assigned To")
 
         for ticket in group:
             table.add_row(
@@ -202,6 +204,7 @@ def display_multi_tickets(tickets: list[Ticket], *, console: Console | None = No
                 ticket.opened_at,
                 ticket.requested_for,
                 ticket.state,
+                ticket.assigned_to if ticket.assigned_to else "UNASSIGNED",
             )
 
         title = f"[bold]{description} / {category}[/bold]"

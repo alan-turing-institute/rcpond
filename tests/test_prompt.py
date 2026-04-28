@@ -58,6 +58,7 @@ def full_ticket():
         u_sub_category="Azure",
         short_description="Request access to HPC and cloud computing facilities",
         state="New",
+        assigned_to="",
         work_notes="",
         project_title="My Project",
         research_area_programme="Health",
