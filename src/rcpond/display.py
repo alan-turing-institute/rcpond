@@ -3,7 +3,7 @@
 Provides:
 
 - `display_all_tickets`: Display a grouped summary table of tickets.
-- `display_ticket`: Display a high-level ticket summary.
+- `display_short_ticket`: Display a high-level ticket summary.
 - `display_full_ticket`: Display the full details of a ticket.
 - `display_response`: Display an LLM response.
 """
