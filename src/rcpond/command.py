@@ -12,25 +12,13 @@ The four main entry points are:
 
 import json
 from pathlib import Path
-from pprint import pprint
 
 from rcpond.config import Config
-from rcpond.display import display_full_ticket, display_multi_tickets, display_response, display_ticket
+from rcpond.display import display_full_ticket, display_multi_tickets, display_response, display_short_ticket
 from rcpond.llm import LLM, LLMResponse
 from rcpond.prompt import construct_prompt
 from rcpond.servicenow import FullTicket, ServiceNow, Ticket
 from rcpond.tools import get_available_tools
-
-
-def _display_output(*stuff):
-    """
-    Display stuff in a useful way to the user. Precise behaviour TBD.
-
-    Params:
-        stuff: undefined things to display to the user. Precise syntax and structure TBD.
-    """
-
-    pprint(stuff)
 
 
 def _process_ticket(ticket: Ticket, dry_run: bool, config: Config, service_now: ServiceNow, llm: LLM) -> LLMResponse:
@@ -53,13 +41,11 @@ def _process_ticket(ticket: Ticket, dry_run: bool, config: Config, service_now: 
         The LLM client.
     """
     full_ticket: FullTicket = service_now.get_full_ticket(ticket)
-    # print(f"{full_ticket=}")
     tools = get_available_tools(config)
     system_prompt, user_prompt = construct_prompt(full_ticket, config)
     llm_response: LLMResponse = llm.generate(
         system_prompt, user_prompt, config.llm_model, tools=tools, ticket_number=ticket.number
     )
-    # print(f"{llm_response=}")
 
     if not dry_run and llm_response.planned_tool_call is not None:
         name = llm_response.planned_tool_call["function"]["name"]
@@ -89,7 +75,6 @@ def display_single_ticket(ticket_number: str, config: Config | None = None):
     config = config or Config()
     service_now: ServiceNow = ServiceNow(config)
     ticket = service_now.get_ticket(ticket_number)
-    # _display_output(service_now.get_full_ticket(ticket))
     display_full_ticket(service_now.get_full_ticket(ticket))
 
 
@@ -112,7 +97,7 @@ def process_next_ticket(dry_run: bool, config: Config | None = None):
     tickets: list[Ticket] = service_now.get_tickets()
     next_ticket = tickets.pop()
     resp: LLMResponse = _process_ticket(next_ticket, dry_run, config, service_now, llm)
-    display_ticket(next_ticket)
+    display_short_ticket(next_ticket)
     display_response(resp)
 
 
@@ -136,7 +121,7 @@ def process_specific_ticket(ticket_number: str, dry_run: bool, config: Config | 
     llm: LLM = LLM(config)
     ticket = service_now.get_ticket(ticket_number)
     resp: LLMResponse = _process_ticket(ticket, dry_run, config, service_now, llm)
-    display_ticket(ticket)
+    display_short_ticket(ticket)
     display_response(resp)
 
 

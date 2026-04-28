@@ -59,7 +59,7 @@ def _header_panel(ticket: Ticket) -> Panel:
     )
 
 
-def display_ticket(ticket: Ticket, *, console: Console | None = None) -> None:
+def display_short_ticket(ticket: Ticket, *, console: Console | None = None) -> None:
     """Display a high-level ticket summary.
 
     Parameters
