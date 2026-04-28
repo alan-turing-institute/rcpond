@@ -51,6 +51,10 @@ class Ticket:
     u_category: str
     u_sub_category: str
     short_description: str
+    state: str
+    """Human-readable ticket state, e.g. 'New', 'In Progress', 'On Hold', 'Resolved', 'Closed'."""
+    assigned_to: str
+    """Display name of the assigned agent, or empty string if unassigned."""
 
 
 @dataclass
@@ -306,6 +310,7 @@ class ServiceNow:
             if new_assignee["display_value"] != "" or new_assignee["value"] != "":
                 err_msg = f"Expected ticket '{ticket.number}' to be unassigned but got: {new_assignee}"
                 raise RuntimeError(err_msg)
+            ticket.assigned_to = ""
             return new_assignee
 
         ## If the assign_to value was not recognised by ServiceNow, then the
@@ -321,6 +326,7 @@ class ServiceNow:
             )
             raise ValueError(err_msg)
 
+        ticket.assigned_to = new_assignee["display_value"]
         return new_assignee
 
 

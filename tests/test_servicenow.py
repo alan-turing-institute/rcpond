@@ -27,6 +27,8 @@ def ticket():
         u_category="HPC",
         u_sub_category="New",
         short_description="Request access to HPC and cloud computing facilities",
+        state="New",
+        assigned_to="",
     )
 
 

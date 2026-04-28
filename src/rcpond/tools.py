@@ -134,7 +134,6 @@ class PostTemplatedNoteTool(Tool):
         template_name = kwargs.pop("template_name")
         jinja_env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(self._dir)))
         rendered = jinja_env.get_template(template_name).render(ticket=ticket, **kwargs)
-        print(rendered)
         service_now.post_note(ticket, note=rendered)
 
 
