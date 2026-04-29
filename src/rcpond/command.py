@@ -78,6 +78,22 @@ def display_single_ticket(ticket_number: str, config: Config | None = None):
     display_full_ticket(service_now.get_full_ticket(ticket))
 
 
+def get_ticket_url(ticket_number: str, config: Config | None = None) -> str:
+    """Return the ServiceNow Web UI URL for a specific ticket.
+
+    Parameters
+    ----------
+    ticket_number : str
+        The ticket number to look up (e.g. ``"RES0001234"``).
+    config : Config | None
+        Configuration to use. If None, Config() is constructed from the environment.
+    """
+    config = config or Config()
+    service_now: ServiceNow = ServiceNow(config)
+    ticket = service_now.get_ticket(ticket_number)
+    return service_now.web_url(ticket)
+
+
 def process_next_ticket(dry_run: bool, config: Config | None = None):
     """Process an arbitrarily selected ServiceNow ticket via the LLM.
 

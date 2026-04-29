@@ -3,9 +3,11 @@ CLI for rcpond.
 
 This module creates the Typer `cli` object that is the target of the pyproject.scripts directive.
 
-It adds five subcommands
+It adds six subcommands
 
 - `display-all-tickets`
+- `display-ticket`
+- `browse-ticket`
 - `process-next`
 - `process-ticket`
 - `process-all`
@@ -24,6 +26,7 @@ variables and/or any `.env` file supplied.
 The `Config` object is constructed via the `_config` helpful func, so that config validation will not be called when using the `--help` option, directly on `rcpond` or one one of the subcommands.
 """
 
+import webbrowser
 from importlib.metadata import version
 from pathlib import Path
 from typing import Annotated
@@ -64,6 +67,7 @@ def common_options(
     llm_model: Annotated[str | None, typer.Option(help="LLM model identifier.")] = None,
     servicenow_token: Annotated[str | None, typer.Option(help="ServiceNow API token (static auth).")] = None,
     servicenow_url: Annotated[str | None, typer.Option(help="ServiceNow API base URL.")] = None,
+    servicenow_web_url: Annotated[str | None, typer.Option(help="ServiceNow Web UI base URL.")] = None,
     servicenow_client_id: Annotated[str | None, typer.Option(help="ServiceNow OAuth client ID.")] = None,
     servicenow_client_secret: Annotated[str | None, typer.Option(help="ServiceNow OAuth client secret.")] = None,
     rules_path: Annotated[str | None, typer.Option(help="Path to the rules file.")] = None,
@@ -80,6 +84,7 @@ def common_options(
             "llm_model": llm_model,
             "servicenow_token": servicenow_token,
             "servicenow_url": servicenow_url,
+            "servicenow_web_url": servicenow_web_url,
             "servicenow_client_id": servicenow_client_id,
             "servicenow_client_secret": servicenow_client_secret,
             "rules_path": rules_path,
@@ -117,6 +122,13 @@ def display_all(ctx: typer.Context, include_assigned_tickets: bool = False):
 def display_ticket(ctx: typer.Context, ticket_number: str):
     """Display the details of a specific ticket (e.g. RES0001234)."""
     command.display_single_ticket(ticket_number=ticket_number, config=_config(ctx))
+
+
+@cli.command()
+def browse_ticket(ctx: typer.Context, ticket_number: str):
+    """Opens a ticket in you default the browser (e.g. RES0001234)."""
+    url = command.get_ticket_url(ticket_number=ticket_number, config=_config(ctx))
+    webbrowser.open(url)
 
 
 @cli.command()
