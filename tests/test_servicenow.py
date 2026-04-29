@@ -37,8 +37,20 @@ def sn_instance():
     """A ServiceNow instance with the HTTP session replaced by a MagicMock."""
     sn = ServiceNow.__new__(ServiceNow)
     sn._base_url = "https://example.com/api/now/table"
+    sn._web_base_url = "https://example.com"
     sn.session = MagicMock()
     return sn
+
+
+def test_web_url_returns_correct_url(sn_instance, ticket):
+    url = sn_instance.web_url(ticket)
+    assert url == f"https://example.com/x_tati_resmgt_research.do?sys_id={ticket.sys_id}"
+
+
+def test_web_url_strips_trailing_slash(sn_instance, ticket):
+    sn_instance._web_base_url = "https://example.com/"
+    url = sn_instance.web_url(ticket)
+    assert "example.com//" not in url
 
 
 def test_assign_to_valid_assignee(sn_instance, ticket):

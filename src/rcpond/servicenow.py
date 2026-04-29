@@ -134,6 +134,7 @@ class ServiceNow:
 
     def __init__(self, config: Config):
         self._base_url = config.servicenow_url
+        self._web_base_url: str = config.servicenow_web_url
         self.session = requests.Session()
         self.session.headers.update({"Content-Type": "application/json", "Accept": "application/json"})
         if config.servicenow_client_id and config.servicenow_client_secret:
@@ -192,6 +193,16 @@ class ServiceNow:
             err_msg = f"Multiple tickets match '{ticket_number}':\n{detail}"
             raise ValueError(err_msg)
         return matched[0]
+
+    def web_url(self, tkt: Ticket) -> str:
+        """Return the ServiceNow Web UI URL for ``tkt``.
+
+        Parameters
+        ----------
+        tkt : Ticket
+            The ticket to generate a URL for.
+        """
+        return f"{self._web_base_url.rstrip('/')}/{self._TABLE}.do?sys_id={tkt.sys_id}"
 
     def get_full_ticket(self, tkt: Ticket) -> FullTicket:
         """Get full ticket details."""

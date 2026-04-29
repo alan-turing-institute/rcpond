@@ -71,6 +71,7 @@ def make_config(tmp_path):
             "llm_model": "gpt-oss-120b",
             "servicenow_token": "fake-token",
             "servicenow_url": "https://example.com/servicenow",
+            "servicenow_web_url": "https://example.com",
             "servicenow_oauth_scope": "useraccount",
             "servicenow_oauth_redirect_port": "8765",
             "servicenow_oauth_auth_url": "https://alanturingdev.service-now.com/oauth_auth.do",
