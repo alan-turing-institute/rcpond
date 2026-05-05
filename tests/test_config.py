@@ -214,6 +214,21 @@ def test_dotenv_overrides_xdg_config(tmp_path, common_config_values):
     assert config.llm_model == "dotenv-model"
 
 
+def test_env_file_replaces_xdg_config_entirely(tmp_path, common_config_values):
+    """When --env-file is given, the XDG default.config is ignored entirely.
+
+    A field present only in XDG (not in env_file) must raise a missing-field
+    error, even though it could have been satisfied by the XDG file.
+    """
+    write_xdg_config(tmp_path, common_config_values)
+    ## env_file is deliberately missing llm_api_key
+    partial = {k: v for k, v in common_config_values.items() if k != "llm_api_key"}
+    env_file = write_dotenv(tmp_path, partial)
+
+    with pytest.raises(ValueError, match="llm_api_key"):
+        Config(env_path=env_file)
+
+
 def test_env_vars_override_xdg_config(tmp_path, monkeypatch, common_config_values):
     write_xdg_config(tmp_path, common_config_values)
     monkeypatch.setenv("RCPOND_LLM_MODEL", "env-var-model")
@@ -468,18 +483,34 @@ def test_oauth_fields_absent_when_not_configured(common_config_values):
     assert config.servicenow_client_secret is None
 
 
-def test_oauth_scope_missing_is_error(common_config_values):
-    ## servicenow_oauth_scope has no built-in default — omitting it is an error
-    del common_config_values["servicenow_oauth_scope"]
+def test_oauth_only_fields_optional_without_oauth_credentials(common_config_values):
+    ## All four OAuth-only fields may be omitted when OAuth credentials are absent
+    for key in (
+        "servicenow_oauth_scope",
+        "servicenow_oauth_redirect_port",
+        "servicenow_oauth_auth_url",
+        "servicenow_oauth_token_url",
+    ):
+        del common_config_values[key]
+    config = Config(cli_args=common_config_values)
+    assert config.servicenow_oauth_scope is None
+    assert config.servicenow_oauth_redirect_port is None
+    assert config.servicenow_oauth_auth_url is None
+    assert config.servicenow_oauth_token_url is None
+
+
+def test_oauth_scope_required_when_oauth_credentials_present(common_config_values):
+    oauth_values = {**common_config_values, "servicenow_client_id": "cid", "servicenow_client_secret": "csec"}
+    del oauth_values["servicenow_oauth_scope"]
     with pytest.raises(ValueError, match="servicenow_oauth_scope"):
-        Config(cli_args=common_config_values)
+        Config(cli_args=oauth_values)
 
 
-def test_oauth_redirect_port_missing_is_error(common_config_values):
-    ## servicenow_oauth_redirect_port has no built-in default — omitting it is an error
-    del common_config_values["servicenow_oauth_redirect_port"]
+def test_oauth_redirect_port_required_when_oauth_credentials_present(common_config_values):
+    oauth_values = {**common_config_values, "servicenow_client_id": "cid", "servicenow_client_secret": "csec"}
+    del oauth_values["servicenow_oauth_redirect_port"]
     with pytest.raises(ValueError, match="servicenow_oauth_redirect_port"):
-        Config(cli_args=common_config_values)
+        Config(cli_args=oauth_values)
 
 
 def test_oauth_scope_and_port_configurable(common_config_values):

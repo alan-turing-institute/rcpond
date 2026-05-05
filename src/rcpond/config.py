@@ -2,14 +2,16 @@
 
 Provides class `Config` to read, parse, and make available
 configuration variables required at runtime.  The constructor loads
-configuration from:
+configuration from up to three sources, in order of increasing precedence:
 
-1. The default file at $XDG_CONFIG_HOME/rcpond/default.config
-2. A file (if ``env_path`` is supplied)
-3. Environment variables prefixed with ``RCPOND_`` and uppercased (e.g. ``RCPOND_LLM_MODEL``)
-4. Explicit CLI arguments passed as ``cli_args``
+1. Exactly one config file — either ``$XDG_CONFIG_HOME/rcpond/default.config``
+   (the personal default) **or** the file given by ``env_path``, but never both.
+   Supplying ``env_path`` completely replaces the XDG file; the XDG file is not
+   read at all and any values it contains are ignored.
+2. Environment variables prefixed with ``RCPOND_`` and uppercased (e.g. ``RCPOND_LLM_MODEL``)
+3. Explicit CLI arguments passed as ``cli_args``
 
-Values from a later sources override earlier ones.  A ``ValueError``
+Values from a later source override earlier ones.  A ``ValueError``
 is raised if any required field is still missing after all sources are
 merged, or if a path field does not exist on disk.
 
@@ -67,7 +69,10 @@ class Config:
     Parameters
     ----------
     env_path : str | None
-        Path to a .env file to load. If None, no .env file is read.
+        Path to a .env file to load. When supplied, this file is used instead of
+        ``$XDG_CONFIG_HOME/rcpond/default.config`` — the XDG file is not read at
+        all. The supplied file must therefore be self-contained (all required fields
+        present); it cannot rely on the XDG file to fill in missing values.
     cli_args : dict | None
         Dict of config field names to values from the CLI. None values are ignored.
 
@@ -92,14 +97,14 @@ class Config:
         used in preference to ``servicenow_token``.
     servicenow_client_secret : str | None
         OAuth client secret.
-    servicenow_oauth_scope : str
-        OAuth scope requested from ServiceNow (default: ``useraccount``).
-    servicenow_oauth_redirect_port : int
-        Port for the local OAuth redirect listener (default: ``8765``).
-    servicenow_oauth_auth_url : str
-        ServiceNow OAuth authorisation endpoint URL.
-    servicenow_oauth_token_url : str
-        ServiceNow OAuth token endpoint URL.
+    servicenow_oauth_scope : str | None
+        OAuth scope requested from ServiceNow. Required when using OAuth; ignored otherwise.
+    servicenow_oauth_redirect_port : int | None
+        Port for the local OAuth redirect listener. Required when using OAuth; ignored otherwise.
+    servicenow_oauth_auth_url : str | None
+        ServiceNow OAuth authorisation endpoint URL. Required when using OAuth; ignored otherwise.
+    servicenow_oauth_token_url : str | None
+        ServiceNow OAuth token endpoint URL. Required when using OAuth; ignored otherwise.
     rules_path : Path
         Path to the RULES.md file used to construct the system prompt.
     system_prompt_template_path : Path
@@ -119,10 +124,10 @@ class Config:
     servicenow_web_url: str = field(init=False)
     servicenow_client_id: str | None = field(init=False)
     servicenow_client_secret: str | None = field(init=False)
-    servicenow_oauth_scope: str = field(init=False)
-    servicenow_oauth_redirect_port: int = field(init=False)
-    servicenow_oauth_auth_url: str = field(init=False)
-    servicenow_oauth_token_url: str = field(init=False)
+    servicenow_oauth_scope: str | None = field(init=False)
+    servicenow_oauth_redirect_port: int | None = field(init=False)
+    servicenow_oauth_auth_url: str | None = field(init=False)
+    servicenow_oauth_token_url: str | None = field(init=False)
     rules_path: Path = field(init=False)
     system_prompt_template_path: Path = field(init=False)
     email_templates_dir: Path = field(init=False)
@@ -131,21 +136,41 @@ class Config:
         values: dict[str, str] = {}
 
         # 1. Load from $XDG_CONFIG_HOME/rcpond/default.config (lowest precedence)
-        xdg_default = xdg_config_home() / "rcpond" / "default.config"
-        if xdg_default.exists():
-            xdg_vars = _parse_dotenv(xdg_default)
-            for f in fields(self):
-                env_key = _env_var_name(f.name)
-                if env_key in xdg_vars:
-                    values[f.name] = xdg_vars[env_key]
+        # xdg_default = xdg_config_home() / "rcpond" / "default.config"
+        # if xdg_default.exists():
+        #     xdg_vars = _parse_dotenv(xdg_default)
+        #     for f in fields(self):
+        #         env_key = _env_var_name(f.name)
+        #         if env_key in xdg_vars:
+        #             values[f.name] = xdg_vars[env_key]
 
-        # 2. Load from .env file
+        # # 2. Load from .env file
+        # if env_path is not None:
+        #     dotenv_vars = _parse_dotenv(_confirm_path_exists(env_path))
+        #     for f in fields(self):
+        #         env_key = _env_var_name(f.name)
+        #         if env_key in dotenv_vars:
+        #             values[f.name] = dotenv_vars[env_key]
+
+        # Test which config files exist (if any)
+        # Only load from one, skip if neither exist
+        # 'env_path' takes precedence over XDG_CONFIG_HOME
+        # 1. First test $XDG_CONFIG_HOME/rcpond/default.config (lowest precedence)
+        #    Silently ignore if this file does not exist
+        # 2. Overide with 'env_path' if it exists and is valid
+        # .   Error if 'env_path' is specified, but not valid.
+        xdg_default = xdg_config_home() / "rcpond" / "default.config"
+        config_path = xdg_default if xdg_default.exists() else None
+
         if env_path is not None:
-            dotenv_vars = _parse_dotenv(_confirm_path_exists(env_path))
+            config_path = _confirm_path_exists(env_path)
+
+        if config_path:
+            config_file_vars = _parse_dotenv(config_path)
             for f in fields(self):
                 env_key = _env_var_name(f.name)
-                if env_key in dotenv_vars:
-                    values[f.name] = dotenv_vars[env_key]
+                if env_key in config_file_vars:
+                    values[f.name] = config_file_vars[env_key]
 
         # 3. Override with actual environment variables
         for f in fields(self):
@@ -162,9 +187,17 @@ class Config:
         ## Fields that are always optional (may be absent or None)
         _ALWAYS_OPTIONAL = {"servicenow_client_id", "servicenow_client_secret"}
 
-        ## servicenow_token is required unless both OAuth credentials are present
+        _OAUTH_ONLY = {
+            "servicenow_oauth_scope",
+            "servicenow_oauth_redirect_port",
+            "servicenow_oauth_auth_url",
+            "servicenow_oauth_token_url",
+        }
+
+        ## servicenow_token is required unless both OAuth credentials are present;
+        ## OAuth-only fields are required only when OAuth credentials are present.
         oauth_present = bool(values.get("servicenow_client_id") and values.get("servicenow_client_secret"))
-        conditionally_optional = {"servicenow_token"} if oauth_present else set()
+        conditionally_optional = {"servicenow_token"} if oauth_present else _OAUTH_ONLY
 
         missing = [
             f.name
@@ -184,7 +217,7 @@ class Config:
                 setattr(self, f.name, None)
             elif hints[f.name] is Path:
                 setattr(self, f.name, _confirm_path_exists(raw))
-            elif hints[f.name] is int:
+            elif int in (typing.get_args(hints[f.name]) or (hints[f.name],)):
                 setattr(self, f.name, int(raw))
             else:
                 setattr(self, f.name, raw)
