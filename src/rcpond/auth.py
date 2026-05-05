@@ -143,6 +143,7 @@ def _run_authorization_code_flow(config: Config) -> dict:
         Token dict with at least ``access_token``, ``expires_at``, and
         (if issued by the server) ``refresh_token``.
     """
+    assert config.servicenow_oauth_redirect_port is not None
     port = config.servicenow_oauth_redirect_port
     redirect_uri = f"http://localhost:{port}/callback"
 

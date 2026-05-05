@@ -90,12 +90,11 @@ $ uvx git+ssh://git@github.com/alan-turing-institute/rcpond-rules.git --force
 
 ### Other configuration options
 
-The configuration options can be provided in several different ways. This allow for testing with different credentials and using the development ServiceNow instance without needing to change the default configuration file. Values are loaded from the following sources, in order of increasing precedence:
+The configuration options can be provided in several different ways. This allows for testing with different credentials and using the development ServiceNow instance without needing to change the default configuration file. Values are loaded from the following sources, in order of increasing precedence:
 
-1. `$XDG_CONFIG_HOME/rcpond/default.config` (default: `~/.config/rcpond/default.config`)
-2. A `.env` file passed via `--env-file`
-3. Environment variables prefixed with `RCPOND_`
-4. CLI flags (e.g. `--llm-api-key`)
+1. Exactly one config file — either `~/.config/rcpond/default.config` **or** a file passed via `--env-file`, but never both. Passing `--env-file` completely replaces the default config file; the default config file is not read at all. The `--env-file` must therefore be self-contained and include all required fields.
+2. Environment variables prefixed with `RCPOND_`
+3. CLI flags (e.g. `--llm-api-key`)
 
 ### Configuration file example
 
@@ -119,11 +118,14 @@ RCPOND_SYSTEM_PROMPT_TEMPLATE_PATH=/path/to/system_prompt_template.txt
 RCPOND_EMAIL_TEMPLATES_DIR=/path/to/email_templates/
 ```
 
-A project-specific `.env` file can then override individual values where needed:
+A project-specific `.env` file can be used as a complete, self-contained config (for example, to point at a different ServiceNow instance without touching your personal default config):
 
 ```bash
 $ rcpond --env-file .env display-all
 ```
+
+> [!WARNING]
+> `--env-file` completely replaces `~/.config/rcpond/default.config` — it does **not** merge with it. The `.env` file must contain all required fields.
 
 ## ServiceNow authentication
 
