@@ -28,7 +28,11 @@ Example use
 
 """
 
+from __future__ import annotations
+
+import base64
 import dataclasses
+import json
 from dataclasses import dataclass
 
 import requests
@@ -55,6 +59,21 @@ class Ticket:
     """Human-readable ticket state, e.g. 'New', 'In Progress', 'On Hold', 'Resolved', 'Closed'."""
     assigned_to: str
     """Display name of the assigned agent, or empty string if unassigned."""
+
+    def assign_to_me(self, service_now: ServiceNow) -> None:
+        """Assign this ticket to the currently authenticated OAuth user.
+
+        Parameters
+        ----------
+        service_now : ServiceNow
+            The ServiceNow client. Must be configured with OAuth credentials.
+
+        Raises
+        ------
+        NotImplementedError
+            If the ServiceNow client is using static token authentication.
+        """
+        service_now.assign_to_me(self)
 
 
 @dataclass
@@ -134,14 +153,17 @@ class ServiceNow:
 
     def __init__(self, config: Config):
         self._base_url = config.servicenow_url
+        self._web_base_url: str = config.servicenow_web_url
         self.session = requests.Session()
         self.session.headers.update({"Content-Type": "application/json", "Accept": "application/json"})
         if config.servicenow_client_id and config.servicenow_client_secret:
             from rcpond.auth import get_bearer_token
 
             self.session.headers["Authorization"] = f"Bearer {get_bearer_token(config)}"
+            self._is_oauth = True
         else:
             self.session.headers["Ocp-Apim-Subscription-Key"] = config.servicenow_token or ""
+            self._is_oauth = False
 
     def get_tickets(self, include_assigned_tickets: bool = False) -> list[Ticket]:
         """Get tickets that are applications for HPC/Azure
@@ -192,6 +214,16 @@ class ServiceNow:
             err_msg = f"Multiple tickets match '{ticket_number}':\n{detail}"
             raise ValueError(err_msg)
         return matched[0]
+
+    def web_url(self, tkt: Ticket) -> str:
+        """Return the ServiceNow Web UI URL for ``tkt``.
+
+        Parameters
+        ----------
+        tkt : Ticket
+            The ticket to generate a URL for.
+        """
+        return f"{self._web_base_url.rstrip('/')}/{self._TABLE}.do?sys_id={tkt.sys_id}"
 
     def get_full_ticket(self, tkt: Ticket) -> FullTicket:
         """Get full ticket details."""
@@ -272,6 +304,47 @@ class ServiceNow:
         )
         resp.raise_for_status()
 
+    def _current_user_sys_id(self) -> str:
+        """Decode the JWT bearer token and return the current user's sys_id.
+
+        The ServiceNow OAuth JWT carries the user's sys_id in the ``sub`` claim.
+        """
+        auth = self.session.headers["Authorization"]
+        token = (auth.decode() if isinstance(auth, bytes) else auth).removeprefix("Bearer ")
+        payload_b64 = token.split(".")[1]
+        ## base64url requires padding to a multiple of 4
+        payload = json.loads(base64.urlsafe_b64decode(payload_b64 + "=="))
+        return payload["sub"]
+
+    def assign_to_me(self, ticket: Ticket) -> dict[str, str]:
+        """Assign ``ticket`` to the currently authenticated OAuth user.
+
+        Parameters
+        ----------
+        ticket : Ticket
+            The ticket to assign.
+
+        Returns
+        -------
+        dict[str, str]
+            The updated assignee dict (``display_value`` and ``value``).
+
+        Raises
+        ------
+        NotImplementedError
+            If the client is using static token authentication, which does not
+            carry a per-user identity. OAuth credentials (``servicenow_client_id``
+            + ``servicenow_client_secret``) are required to use this feature.
+        """
+        if not self._is_oauth:
+            msg = (
+                "assign_to_me() requires OAuth authentication.\n"
+                "Static token auth does not carry a per-user identity.\n"
+                "Set servicenow_client_id and servicenow_client_secret in your config to enable this feature."
+            )
+            raise NotImplementedError(msg)
+        return self.assign_to(ticket, self._current_user_sys_id())
+
     def _attempt_assign_to(self, ticket: Ticket, assignee: str) -> None:
         resp = self.session.patch(
             f"{self._base_url}/{self._TABLE}/{ticket.sys_id}",
@@ -328,49 +401,3 @@ class ServiceNow:
 
         ticket.assigned_to = new_assignee["display_value"]
         return new_assignee
-
-
-## --------------------------------------------------------------------------------
-## Non-functioning exploration of how to identify the user making the calls
-
-# def get_current_user_sys_id(self) -> str:
-#     """Get the sys_id of the currently authenticated user.
-
-#     Uses the sys_user table with sysparm_limit=1 and a query scoped to
-#     the authenticated session. This is a best-effort approach — the exact
-#     mechanism may vary by ServiceNow instance configuration.
-#     """
-
-#     user_url = "https://turing-api.azure-api.net/dev-research/api/now/account"
-#     # user_url = f"{self._base_url}/sys_user"
-#     params = {
-#         # "sysparm_query": "user_name=javascript:gs.getUserName()",
-#         "sysparm_query": "caller_id=javascript:gs.getUserID()^active=true",
-#         "sysparm_fields": "sys_id",
-#         "sysparm_limit": "1",
-#     }
-#     resp = self.session.get(user_url, params=params)
-#     resp.raise_for_status()
-#     results = resp.json()["result"]
-#     if not results:
-#         err_msg = "Could not determine current user sys_id"
-#         raise RuntimeError(err_msg)
-#     return results[0]["sys_id"]
-
-# def get_user_end_point(self) -> dict:
-#     """Probe the sys_user table for current-user information.
-
-#     Queries ``{_base_url}/sys_user`` (the standard ServiceNow Table API
-#     path).  Returns the parsed JSON response body.
-#     Raises ``requests.HTTPError`` on a non-2xx response (e.g. 404 if the
-#     sys_user table is not exposed through the API gateway).
-#     """
-#     resp = self.session.get(
-#         f"{self._base_url}/sys_user",
-#         params={
-#             "sysparm_fields": "sys_id,name,user_name,email",
-#             "sysparm_limit": "1",
-#         },
-#     )
-#     resp.raise_for_status()
-#     return resp.json()

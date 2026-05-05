@@ -1,9 +1,18 @@
+import base64
+import json
 from unittest.mock import MagicMock, call, patch
 
 import pytest
 
 from rcpond import config, servicenow
 from rcpond.servicenow import ServiceNow, Ticket
+
+
+def _make_jwt(sub: str) -> str:
+    """Build a minimal JWT with the given sub claim (no real signature)."""
+    header = base64.urlsafe_b64encode(b'{"alg":"RS256"}').rstrip(b"=").decode()
+    payload = base64.urlsafe_b64encode(json.dumps({"sub": sub}).encode()).rstrip(b"=").decode()
+    return f"{header}.{payload}.fake-sig"
 
 
 @pytest.fixture()
@@ -37,8 +46,52 @@ def sn_instance():
     """A ServiceNow instance with the HTTP session replaced by a MagicMock."""
     sn = ServiceNow.__new__(ServiceNow)
     sn._base_url = "https://example.com/api/now/table"
+    sn._web_base_url = "https://example.com"
     sn.session = MagicMock()
     return sn
+
+
+def test_web_url_returns_correct_url(sn_instance, ticket):
+    url = sn_instance.web_url(ticket)
+    assert url == f"https://example.com/x_tati_resmgt_research.do?sys_id={ticket.sys_id}"
+
+
+def test_web_url_strips_trailing_slash(sn_instance, ticket):
+    sn_instance._web_base_url = "https://example.com/"
+    url = sn_instance.web_url(ticket)
+    assert "example.com//" not in url
+
+
+## ── assign_to_me ────────────────────────────────────────────────────────────
+
+
+def test_assign_to_me_raises_without_oauth(sn_instance, ticket):
+    """Static token auth must raise NotImplementedError with a helpful message."""
+    sn_instance._is_oauth = False
+    with pytest.raises(NotImplementedError, match="OAuth"):
+        sn_instance.assign_to_me(ticket)
+
+
+def test_assign_to_me_calls_assign_to_with_current_user(sn_instance, ticket):
+    """With OAuth, assign_to_me decodes the JWT sub and calls assign_to."""
+    sn_instance._is_oauth = True
+    sn_instance.session.headers = {"Authorization": f"Bearer {_make_jwt('user-sys-id-123')}"}
+    with patch.object(sn_instance, "assign_to") as mock_assign:
+        sn_instance.assign_to_me(ticket)
+    mock_assign.assert_called_once_with(ticket, "user-sys-id-123")
+
+
+def test_current_user_sys_id_decodes_jwt(sn_instance):
+    """_current_user_sys_id extracts the sub claim from the bearer token."""
+    sn_instance.session.headers = {"Authorization": f"Bearer {_make_jwt('abc-xyz-456')}"}
+    assert sn_instance._current_user_sys_id() == "abc-xyz-456"
+
+
+def test_ticket_assign_to_me_delegates_to_service_now(ticket):
+    """Ticket.assign_to_me delegates to service_now.assign_to_me."""
+    sn = MagicMock(spec=ServiceNow)
+    ticket.assign_to_me(sn)
+    sn.assign_to_me.assert_called_once_with(ticket)
 
 
 def test_assign_to_valid_assignee(sn_instance, ticket):

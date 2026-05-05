@@ -25,6 +25,7 @@ RCPOND_LLM_CHAT_COMPLETIONS_URL=...
 RCPOND_LLM_API_KEY=your-api-key-here
 RCPOND_LLM_MODEL=...
 RCPOND_SERVICENOW_URL=https://turing-api.azure-api.net/dev-research/api/now/table
+RCPOND_SERVICENOW_WEB_URL=https://alanturingdev.service-now.com
 RCPOND_RULES_PATH=/path/to/rule/file
 RCPOND_SYSTEM_PROMPT_TEMPLATE_PATH=/path/to/prompt/file
 
@@ -82,7 +83,10 @@ class Config:
         Static subscription key for the ServiceNow API. Required unless OAuth
         credentials are provided (``servicenow_client_id`` + ``servicenow_client_secret``).
     servicenow_url : str
-        Base URL of the ServiceNow instance.
+        Base URL of the ServiceNow REST API endpoint.
+    servicenow_web_url : str
+        Base URL of the ServiceNow Web UI (e.g. ``https://alanturingdev.service-now.com``).
+        Used to generate direct links to tickets.
     servicenow_client_id : str | None
         OAuth client ID. When set alongside ``servicenow_client_secret``, OAuth is
         used in preference to ``servicenow_token``.
@@ -112,6 +116,7 @@ class Config:
     llm_model: str = field(init=False)
     servicenow_token: str | None = field(init=False)
     servicenow_url: str = field(init=False)
+    servicenow_web_url: str = field(init=False)
     servicenow_client_id: str | None = field(init=False)
     servicenow_client_secret: str | None = field(init=False)
     servicenow_oauth_scope: str = field(init=False)

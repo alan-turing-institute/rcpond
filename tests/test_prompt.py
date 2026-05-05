@@ -36,6 +36,7 @@ def config(tmp_path, rules_text, template_text):
             "llm_model": "gpt-4",
             "servicenow_token": "sn-token",
             "servicenow_url": "https://snow.example.com",
+            "servicenow_web_url": "https://example.com",
             "servicenow_oauth_scope": "useraccount",
             "servicenow_oauth_redirect_port": "8765",
             "servicenow_oauth_auth_url": "https://alanturingdev.service-now.com/oauth_auth.do",
