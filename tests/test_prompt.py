@@ -61,6 +61,7 @@ def full_ticket():
         state="New",
         assigned_to="",
         work_notes="",
+        comments="",
         project_title="My Project",
         research_area_programme="Health",
         if_other_please_specify="",

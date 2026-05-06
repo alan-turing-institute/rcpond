@@ -320,6 +320,7 @@ def extract_key_facts(filename: Path) -> dict:
         "activities": activities,
         ## FullTicket fields — keys match FullTicket field names exactly
         "work_notes": work_notes,
+        "comments": "",
         "which_service": _extract_platform_choice(soup) or "",
         "requested_for": _q("requested for", "Variables"),
         "project_title": _q("project title"),
