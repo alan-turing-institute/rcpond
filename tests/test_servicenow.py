@@ -1,11 +1,12 @@
 import base64
 import json
+from datetime import datetime
 from unittest.mock import MagicMock, call, patch
 
 import pytest
 
 from rcpond import config, servicenow
-from rcpond.servicenow import ServiceNow, Ticket
+from rcpond.servicenow import NoteEntry, ServiceNow, Ticket
 
 
 def _make_jwt(sub: str) -> str:
@@ -163,14 +164,18 @@ def test_parse_comment_display_values():
     )
 
     expected_output = [
-        ("11/03/2026 13:32:41 - Research API User (Work notes)\n" "A multiline \n" "work note"),
-        ("11/03/2026 11:18:09 - Joe Bloggs (Work notes)\n" "[code]<p>Manually added work note.</p>[/code]"),
-        ("11/03/2026 11:00:20 - Research API User (Work notes)\n" "A work note"),
+        NoteEntry(datetime(2026, 3, 11, 13, 32, 41), "Research API User", "Work notes", "A multiline \nwork note"),
+        NoteEntry(
+            datetime(2026, 3, 11, 11, 18, 9),
+            "Joe Bloggs",
+            "Work notes",
+            "[code]<p>Manually added work note.</p>[/code]",
+        ),
+        NoteEntry(datetime(2026, 3, 11, 11, 0, 20), "Research API User", "Work notes", "A work note"),
     ]
 
     actual_output = servicenow._parse_comment_display_values(input)
 
-    assert len(actual_output) == 3
     assert actual_output == expected_output
 
 
