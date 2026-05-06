@@ -198,6 +198,7 @@ def batch_evaluate_tickets(in_dir: Path, out_file: Path, num_runs: int = 1, conf
         # TODO: Temporary, an messy way to limit tickets to only those related to Azure
         # Find a better solution
         full_ticket = service_now.get_full_ticket(ticket)
+
         if full_ticket.which_service != "Azure":
             print(f"skipping non-Azure ticket: {ticket.number}")
         else:

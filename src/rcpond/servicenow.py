@@ -81,6 +81,7 @@ class FullTicket(Ticket):
     """A ticket; includes full details from the original submission."""
 
     work_notes: str
+    comments: str
     project_title: str
     research_area_programme: str
     if_other_please_specify: str
@@ -236,7 +237,7 @@ class ServiceNow:
         ## Variable fields (everything except work_notes) must be requested with the
         ## "variables." prefix — they are stored as ServiceNow catalogue variables,
         ## not top-level record fields.
-        _TOPLEVEL = {"work_notes"}
+        _TOPLEVEL = {"work_notes", "comments"}
         requested_fields = {f if f in _TOPLEVEL else f"variables.{f}" for f in extra_fields}
 
         resp = self.session.get(

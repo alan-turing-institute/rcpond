@@ -166,6 +166,17 @@ def display_full_ticket(ticket: FullTicket, *, console: Console | None = None) -
             )
         )
 
+    ## Comments:
+    if ticket.comments:
+        con.print(
+            Panel(
+                Text(ticket.comments, overflow="fold"),
+                title="[bold]Comments[/bold]",
+                title_align="left",
+                border_style="dim",
+            )
+        )
+
 
 def display_multi_tickets(tickets: list[Ticket], *, console: Console | None = None) -> None:
     """Display a table of ticket summaries.
