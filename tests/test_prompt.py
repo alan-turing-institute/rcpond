@@ -61,6 +61,7 @@ def full_ticket():
         state="New",
         assigned_to="",
         work_notes="",
+        comments="",
         project_title="My Project",
         research_area_programme="Health",
         if_other_please_specify="",
@@ -118,3 +119,10 @@ def test_user_prompt_contains_ticket_fields(config, full_ticket):
     assert parsed["number"] == "RES0001234"
     assert parsed["project_title"] == "My Project"
     assert parsed["requested_for"] == "Alice Example"
+
+
+def test_user_prompt_contains_work_notes(config, full_ticket):
+    full_ticket.work_notes = "03/01/2025 10:00 - RCP Team (Work notes)\nTicket received."
+    _, user_prompt = construct_prompt(full_ticket, config)
+    parsed = json.loads(user_prompt)
+    assert parsed["work_notes"] == full_ticket.work_notes

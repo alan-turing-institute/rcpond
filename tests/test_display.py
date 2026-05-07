@@ -25,6 +25,7 @@ def full_ticket() -> FullTicket:
     return FullTicket.from_Ticket(
         base,
         work_notes="01/01/2026 09:30:00 - RCP Team (Work notes)\nTicket received.",
+        comments="",
         project_title="Climate Modelling",
         research_area_programme="Environmental Science",
         if_other_please_specify="",
