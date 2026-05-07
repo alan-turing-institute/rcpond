@@ -159,6 +159,11 @@ def test_parse_comment_display_values():
         "[code]<p>Manually added work note.</p>[/code]\n"
         "\n"
         "11/03/2026 11:00:20 - Research API User (Work notes)\n"
+        "A work note...\n"
+        "\n"
+        "... which is extended over a blank line"
+        "\n"
+        "11/03/2026 11:00:21 - Research API User (Work notes)\n"
         "A work note\n"
         "\n"
     )
@@ -171,11 +176,18 @@ def test_parse_comment_display_values():
             "Work notes",
             "[code]<p>Manually added work note.</p>[/code]",
         ),
-        NoteEntry(datetime(2026, 3, 11, 11, 0, 20), "Research API User", "Work notes", "A work note"),
+        NoteEntry(
+            datetime(2026, 3, 11, 11, 0, 20),
+            "Research API User",
+            "Work notes",
+            "A work note...\n\n... which is extended over a blank line",
+        ),
+        NoteEntry(datetime(2026, 3, 11, 11, 0, 21), "Research API User", "Work notes", "A work note"),
     ]
 
     actual_output = servicenow._parse_comment_display_values(input)
 
+    assert len(actual_output) == len(expected_output)
     assert actual_output == expected_output
 
 

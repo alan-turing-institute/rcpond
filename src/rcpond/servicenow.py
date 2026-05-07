@@ -180,15 +180,26 @@ def _parse_comment_display_values(input: str) -> list[NoteEntry]:
     list[NoteEntry]
         One entry per parsed block, in the order they appear in ``input``.
     """
+    _HEADER = re.compile(r"^(\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}) - (.+?) \(([^)]+)\)$")
     result: list[NoteEntry] = []
-    for block in input.split("\n\n"):
-        if not block:
-            continue
-        header, _, content = block.partition("\n")
-        m = re.match(r"^(\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}) - (.+?) \(([^)]+)\)$", header)
+    current_key: tuple[datetime, str, str] | None = None
+    content_lines: list[str] = []
+
+    def _flush() -> None:
+        if current_key is not None:
+            content = "\n".join(content_lines).rstrip("\n")
+            result.append(NoteEntry(*current_key, content))
+
+    for line in input.splitlines():
+        m = _HEADER.match(line)
         if m:
-            dt = datetime.strptime(m.group(1), "%d/%m/%Y %H:%M:%S")
-            result.append(NoteEntry(dt, m.group(2), m.group(3), content))
+            _flush()
+            current_key = (datetime.strptime(m.group(1), "%d/%m/%Y %H:%M:%S"), m.group(2), m.group(3))
+            content_lines = []
+        elif current_key is not None:
+            content_lines.append(line)
+
+    _flush()
     return result
 
 
