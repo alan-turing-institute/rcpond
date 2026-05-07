@@ -22,10 +22,11 @@ Configuration
 No ``Config`` object is needed. Pass the directory path directly.
 """
 
+from datetime import datetime
 from pathlib import Path
 
 from rcpond.parse_html import extract_key_facts, parse_ticket_html
-from rcpond.servicenow import FullTicket, ServiceNow, Ticket
+from rcpond.servicenow import FullTicket, NoteEntry, ServiceNow, Ticket
 
 ## ---- Interface to this module ----
 
@@ -128,7 +129,7 @@ class HtmlServiceNow(ServiceNow):
         html_file = self._find_html_for_ticket(tkt)
         return parse_ticket_html(html_file)
 
-    def get_work_notes(self, tkt: Ticket) -> list[str]:
+    def get_work_notes(self, tkt: Ticket) -> list[NoteEntry]:
         """Return the work notes for ``tkt`` extracted from the HTML activity log.
 
         Parameters
@@ -138,13 +139,23 @@ class HtmlServiceNow(ServiceNow):
 
         Returns
         -------
-        list[str]
-            One entry per work note, in chronological order.
+        list[NoteEntry]
+            One entry per work note, sorted chronologically (oldest first).
         """
         html_file = self._find_html_for_ticket(tkt)
         facts = extract_key_facts(html_file)
         activities = facts["activities"]
-        return list(activities[activities["field_name"] == "work_notes"]["text"].dropna())
+        rows = activities[activities["field_name"] == "work_notes"].dropna(subset=["date", "text"])
+        entries = [
+            NoteEntry(
+                datetime_stamp=datetime.strptime(row["date"], "%d/%m/%Y %H:%M:%S"),
+                user=row["user"] or "",
+                note_type=row["field_label"] or "Work notes",
+                content=row["text"],
+            )
+            for _, row in rows.iterrows()
+        ]
+        return sorted(entries, key=lambda e: e.datetime_stamp)
 
     def get_assignee(self, tkt: Ticket) -> dict[str, str]:
         """Return the assignee for ``tkt`` extracted from the HTML.

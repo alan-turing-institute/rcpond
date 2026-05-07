@@ -143,9 +143,26 @@ class FullTicket(Ticket):
         entries = _parse_comment_display_values(self.work_notes) + _parse_comment_display_values(self.comments)
         return sorted(entries, key=lambda e: e.datetime_stamp)
 
+    def is_rcpond_processed(self) -> bool:
+        """Returns `True` if RCPond (any version) has ever posted a Comment or Work Note on this ticket. `False` otherwise."""
+        return any(_RCPOND_NOTE_RE.match(e.content) for e in self.get_combined_notes())
+
+    def is_rcpond_most_recent_process(self) -> bool:
+        """Returns `True` if the current version of RCPond posted the most recent Comment or Work Note on this ticket. `False` otherwise."""
+        notes = self.get_combined_notes()
+        return bool(notes) and notes[-1].content.startswith(_note_prefix())
+
 
 ## --------------------------------------------------------------------------------
 ## Utilities
+
+
+def _note_prefix(version: str = rcpond_version) -> str:
+    return f"[code]<b>RCPond v{version} generated response:</b>[/code]\n----\n"
+
+
+## Matches the RCPond prefix for any version.
+_RCPOND_NOTE_RE = re.compile(r"^\[code\]<b>RCPond v\S+ generated response:</b>\[/code\]")
 
 
 ## Extract, from the record returned from ServiceNow, the fields
@@ -351,9 +368,6 @@ class ServiceNow:
         resp.raise_for_status()
         return resp.json()["result"]["assigned_to"]
 
-    def _prefix(self):
-        return f"[code]<b>RCPond v{rcpond_version} generated response:</b>[/code]\n" "----\n"
-
     def post_note(self, tkt: Ticket, note: str) -> None:
         """Post a work note to a ticket.
 
@@ -361,7 +375,7 @@ class ServiceNow:
             tkt: The ticket
             note: The note to post
         """
-        prefix = self._prefix()
+        prefix = _note_prefix()
 
         ## This will append the `note` param to `work_notes` field
         resp = self.session.patch(

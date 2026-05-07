@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, call, patch
 import pytest
 
 from rcpond import config, servicenow
-from rcpond.servicenow import NoteEntry, ServiceNow, Ticket
+from rcpond.servicenow import FullTicket, NoteEntry, ServiceNow, Ticket
 
 
 def _make_jwt(sub: str) -> str:
@@ -189,6 +189,107 @@ def test_parse_comment_display_values():
 
     assert len(actual_output) == len(expected_output)
     assert actual_output == expected_output
+
+
+## ── is_rcpond_processed / is_rcpond_most_recent_process ─────────────────────
+
+
+def _make_ticket(work_notes: str = "", comments: str = "") -> FullTicket:
+    """Minimal FullTicket with controllable note strings; all other fields are empty."""
+    return FullTicket(
+        sys_id="abc",
+        number="RES0001000",
+        opened_at="",
+        requested_for="",
+        u_category="",
+        u_sub_category="",
+        short_description="",
+        state="",
+        assigned_to="",
+        work_notes=work_notes,
+        comments=comments,
+        project_title="",
+        research_area_programme="",
+        if_other_please_specify="",
+        pi_supervisor_name="",
+        pi_supervisor_email="",
+        which_service="",
+        subscription_type="",
+        which_finance_code="",
+        pmu_contact_email="",
+        credits_requested="",
+        which_facility="",
+        if_other_please_specify_facility="",
+        cpu_hours_required="",
+        gpu_hours_required="",
+        new_or_existing_allocation="",
+        azure_subscription_id_or_hpc_group_project_id="",
+        start_date="",
+        end_date="",
+        data_sensitivity="",
+        platform_justification="",
+        research_justification="",
+        computational_requirements="",
+        users_who_require_access_names_and_emails="",
+        cost_compute_time_breakdown="",
+    )
+
+
+def _note(ts: str, user: str, content: str, note_type: str = "Work notes") -> str:
+    return f"{ts} - {user} ({note_type})\n{content}"
+
+
+_RCPOND_OLD = _note("01/01/2026 09:00:00", "RCPond", servicenow._note_prefix("0.0.0") + "Old response")
+_RCPOND_CURRENT = _note("01/01/2026 10:00:00", "RCPond", servicenow._note_prefix() + "Response")
+_HUMAN_NOTE = _note("01/01/2026 11:00:00", "Alice", "A human work note")
+
+
+def test_rcpond_note_detection_no_notes():
+    ticket = _make_ticket()
+    assert ticket.is_rcpond_processed() is False
+    assert ticket.is_rcpond_most_recent_process() is False
+
+
+def test_rcpond_note_detection_only_human_notes():
+    ticket = _make_ticket(work_notes=_HUMAN_NOTE)
+    assert ticket.is_rcpond_processed() is False
+    assert ticket.is_rcpond_most_recent_process() is False
+
+
+def test_rcpond_note_detection_current_version_only():
+    ticket = _make_ticket(work_notes=_RCPOND_CURRENT)
+    assert ticket.is_rcpond_processed() is True
+    assert ticket.is_rcpond_most_recent_process() is True
+
+
+def test_rcpond_note_detection_old_version_only():
+    """Old-version note: processed=True, but current version was not the last poster."""
+    ticket = _make_ticket(work_notes=_RCPOND_OLD)
+    assert ticket.is_rcpond_processed() is True
+    assert ticket.is_rcpond_most_recent_process() is False
+
+
+def test_rcpond_note_detection_current_version_in_comments():
+    """Current-version note posted as a comment is detected by both methods."""
+    ticket = _make_ticket(comments=_RCPOND_CURRENT)
+    assert ticket.is_rcpond_processed() is True
+    assert ticket.is_rcpond_most_recent_process() is True
+
+
+def test_rcpond_note_detection_human_note_is_most_recent():
+    """Human note posted after RCPond: processed=True, but most-recent=False."""
+    notes = "\n".join([_RCPOND_CURRENT, _HUMAN_NOTE])
+    ticket = _make_ticket(work_notes=notes)
+    assert ticket.is_rcpond_processed() is True
+    assert ticket.is_rcpond_most_recent_process() is False
+
+
+def test_rcpond_note_detection_current_version_after_old():
+    """Current-version note posted after old-version note: both True."""
+    notes = "\n".join([_RCPOND_OLD, _RCPOND_CURRENT])
+    ticket = _make_ticket(work_notes=notes)
+    assert ticket.is_rcpond_processed() is True
+    assert ticket.is_rcpond_most_recent_process() is True
 
 
 @pytest.mark.integration()
