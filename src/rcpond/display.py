@@ -14,7 +14,7 @@ from rich.table import Table
 from rich.text import Text
 
 from rcpond.llm import LLMResponse
-from rcpond.servicenow import FullTicket, Ticket
+from rcpond.servicenow import FullTicket, NoteEntry, Ticket
 
 _console = Console()
 
@@ -35,6 +35,26 @@ def _kv_table(rows: list[tuple[str, str]], *, min_col_width: int = 30) -> Table:
 def _section(title: str, rows: list[tuple[str, str]]) -> Panel:
     """Wrap a key/value table in a titled panel."""
     return Panel(_kv_table(rows), title=f"[bold]{title}[/bold]", title_align="left", border_style="dim")
+
+
+def _notes_panel(notes: list[NoteEntry]) -> Panel:
+    """Render a list of NoteEntry objects as a single panel, colour-coded by type."""
+    # These colours match those used in the Workspace Web UI
+    # _COLOURS = {"Work notes": "#ffc651", "Additional comments": "#c8da6e"}
+    # These colours match those used in the Ticket-Only Web UI
+    # _COLOURS = {"Work notes": "#ffde32", "Additional comments": "#43464c"}
+    # These colours have better contrast on a terminal than either of the Web UI options
+    _COLOURS = {"Work notes": "#ffc651", "Additional comments": "cyan"}
+
+    text = Text(overflow="fold")
+    for i, entry in enumerate(notes):
+        if i > 0:
+            text.append("\n\n")
+        colour = _COLOURS.get(entry.note_type, "white")
+        stamp = entry.datetime_stamp.strftime("%d/%m/%Y %H:%M")
+        text.append(f"{stamp} · {entry.user} [{entry.note_type}]\n", style=f"bold {colour}")
+        text.append(entry.content)
+    return Panel(text, title="[bold]Comments and Work Notes[/bold]", title_align="left", border_style="dim")
 
 
 ## --------------------------------------------------------------------------------
@@ -155,27 +175,10 @@ def display_full_ticket(ticket: FullTicket, *, console: Console | None = None) -
             )
         )
 
-    ## Work notes
-    if ticket.work_notes:
-        con.print(
-            Panel(
-                Text(ticket.work_notes, overflow="fold"),
-                title="[bold]Work notes[/bold]",
-                title_align="left",
-                border_style="dim",
-            )
-        )
-
-    ## Comments:
-    if ticket.comments:
-        con.print(
-            Panel(
-                Text(ticket.comments, overflow="fold"),
-                title="[bold]Comments[/bold]",
-                title_align="left",
-                border_style="dim",
-            )
-        )
+    ## Work notes and comments, merged chronologically
+    notes = ticket.get_combined_notes()
+    if notes:
+        con.print(_notes_panel(notes))
 
 
 def display_multi_tickets(tickets: list[Ticket], *, console: Console | None = None) -> None:
