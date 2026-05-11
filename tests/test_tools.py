@@ -41,6 +41,8 @@ def test_post_freeform_note_execute():
         short_description="Request access",
         state="New",
         assigned_to="",
+        work_notes="",
+        comments="",
     )
     PostFreeformNoteTool().execute(service_now, ticket, note="Please provide more information.")
     service_now.post_note.assert_called_once_with(ticket, note="Please provide more information.")

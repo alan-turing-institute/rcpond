@@ -21,6 +21,8 @@ def full_ticket() -> FullTicket:
         short_description="Request access to HPC and cloud computing facilities",
         state="New",
         assigned_to="",
+        work_notes="",
+        comments="",
     )
     return FullTicket.from_Ticket(
         base,

@@ -36,6 +36,7 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import datetime
+from typing import ClassVar
 
 import requests
 
@@ -61,6 +62,12 @@ class Ticket:
     """Human-readable ticket state, e.g. 'New', 'In Progress', 'On Hold', 'Resolved', 'Closed'."""
     assigned_to: str
     """Display name of the assigned agent, or empty string if unassigned."""
+    work_notes: str
+    """Raw display_value string for work notes, as returned by the ServiceNow API."""
+    comments: str
+    """Raw display_value string for additional comments, as returned by the ServiceNow API."""
+
+    _REFRESHABLE_FIELDS: ClassVar[frozenset[str]] = frozenset({"state", "assigned_to", "work_notes", "comments"})
 
     def assign_to_me(self, service_now: ServiceNow) -> None:
         """Assign this ticket to the currently authenticated OAuth user.
@@ -76,6 +83,40 @@ class Ticket:
             If the ServiceNow client is using static token authentication.
         """
         service_now.assign_to_me(self)
+
+    def get_combined_notes(self) -> list[NoteEntry]:
+        """Return work notes and comments merged and sorted chronologically (oldest first).
+
+        Returns
+        -------
+        list[NoteEntry]
+            All entries from ``work_notes`` and ``comments``, sorted by timestamp.
+            The most recent entry is ``result[-1]``; the list is empty when both
+            fields are blank.
+        """
+        entries = _parse_comment_display_values(self.work_notes) + _parse_comment_display_values(self.comments)
+        return sorted(entries, key=lambda e: e.datetime_stamp)
+
+    def is_rcpond_processed(self) -> bool:
+        """Returns `True` if RCPond (any version) has ever posted a Comment or Work Note on this ticket. `False` otherwise."""
+        return any(_RCPOND_NOTE_RE.match(e.content) for e in self.get_combined_notes())
+
+    def is_rcpond_most_recent_process(self) -> bool:
+        """Returns `True` if the current version of RCPond posted the most recent Comment or Work Note on this ticket. `False` otherwise."""
+        notes = self.get_combined_notes()
+        return bool(notes) and notes[-1].content.startswith(_note_prefix())
+
+    def refresh(self, service_now: ServiceNow) -> None:
+        """Refresh mutable fields by re-querying the ServiceNow API.
+
+        Parameters
+        ----------
+        service_now : ServiceNow
+            The ServiceNow client used to fetch updated values.
+        """
+        values = service_now._fetch_fields(self.sys_id, set(self._REFRESHABLE_FIELDS))
+        for field, value in values.items():
+            setattr(self, field, value)
 
 
 @dataclass(frozen=True)
@@ -96,8 +137,6 @@ class NoteEntry:
 class FullTicket(Ticket):
     """A ticket; includes full details from the original submission."""
 
-    work_notes: str
-    comments: str
     project_title: str
     research_area_programme: str
     if_other_please_specify: str
@@ -128,29 +167,9 @@ class FullTicket(Ticket):
         """Create a new FullTicket starting from a Ticket and passing
         only the additional fields.
         """
-        return cls(**(dataclasses.asdict(t)), **extras)
-
-    def get_combined_notes(self) -> list[NoteEntry]:
-        """Return work notes and comments merged and sorted chronologically (oldest first).
-
-        Returns
-        -------
-        list[NoteEntry]
-            All entries from ``work_notes`` and ``comments``, sorted by timestamp.
-            The most recent entry is ``result[-1]``; the list is empty when both
-            fields are blank.
-        """
-        entries = _parse_comment_display_values(self.work_notes) + _parse_comment_display_values(self.comments)
-        return sorted(entries, key=lambda e: e.datetime_stamp)
-
-    def is_rcpond_processed(self) -> bool:
-        """Returns `True` if RCPond (any version) has ever posted a Comment or Work Note on this ticket. `False` otherwise."""
-        return any(_RCPOND_NOTE_RE.match(e.content) for e in self.get_combined_notes())
-
-    def is_rcpond_most_recent_process(self) -> bool:
-        """Returns `True` if the current version of RCPond posted the most recent Comment or Work Note on this ticket. `False` otherwise."""
-        notes = self.get_combined_notes()
-        return bool(notes) and notes[-1].content.startswith(_note_prefix())
+        base = dataclasses.asdict(t)
+        base.update(extras)
+        return cls(**base)
 
 
 ## --------------------------------------------------------------------------------
@@ -313,11 +332,9 @@ class ServiceNow:
             field.name for field in dataclasses.fields(Ticket)
         }
 
-        ## Variable fields (everything except work_notes) must be requested with the
-        ## "variables." prefix — they are stored as ServiceNow catalogue variables,
-        ## not top-level record fields.
-        _TOPLEVEL = {"work_notes", "comments"}
-        requested_fields = {f if f in _TOPLEVEL else f"variables.{f}" for f in extra_fields}
+        ## All extra fields are ServiceNow catalogue variables and must be requested
+        ## with the "variables." prefix — they are not top-level record fields.
+        requested_fields = {f"variables.{f}" for f in extra_fields}
 
         resp = self.session.get(
             f"{self._base_url}/{self._TABLE}/{tkt.sys_id}",
@@ -334,20 +351,31 @@ class ServiceNow:
 
         return FullTicket.from_Ticket(tkt, **_extract_ticket_fields(result, extra_fields))
 
-    def get_work_notes(self, tkt: Ticket) -> list[NoteEntry]:
+    def _fetch_fields(self, sys_id: str, fields: set[str]) -> dict[str, str]:
+        """Fetch display values for the specified fields from a single record.
+
+        Parameters
+        ----------
+        sys_id : str
+            The ``sys_id`` of the record to fetch.
+        fields : set[str]
+            Top-level field names to request.
+
+        Returns
+        -------
+        dict[str, str]
+            Mapping of field name to its display-value string.
+        """
         resp = self.session.get(
-            f"{self._base_url}/{self._TABLE}/{tkt.sys_id}",
-            params={
-                "sysparm_display_value": "true",
-                "sysparm_exclude_reference_link": "true",
-                "sysparm_fields": "work_notes",
-                "sysparm_query_no_domain": "false",
-            },
+            f"{self._base_url}/{self._TABLE}/{sys_id}",
+            params={"sysparm_display_value": "true", "sysparm_fields": ",".join(fields)},
         )
         resp.raise_for_status()
+        return _extract_ticket_fields(resp.json()["result"], fields)
 
-        raw_result = resp.json()["result"]["work_notes"]
-        return _parse_comment_display_values(raw_result)
+    def get_work_notes(self, tkt: Ticket) -> list[NoteEntry]:
+        result = self._fetch_fields(tkt.sys_id, {"work_notes"})
+        return _parse_comment_display_values(result["work_notes"])
 
     def get_assignee(self, tkt: Ticket) -> dict[str, str]:
         """
