@@ -57,6 +57,18 @@ def _process_ticket(ticket: Ticket, dry_run: bool, config: Config, service_now: 
         system_prompt, user_prompt, config.llm_model, tools=tools, ticket_number=ticket.number
     )
 
+    # Check that no-one else has replied whilst the LLM was working
+    full_ticket.refresh(service_now)
+    if full_ticket.is_rcpond_most_recent_process():
+        prev_msg = full_ticket.get_combined_notes()[-1]
+        msg = f"Skipping: Another user has comments on ticket '{full_ticket.number}' whilst RCPond was working. There message is\n'{prev_msg}'"
+        # We use a LLMResponse obj for ease of downstream display etc
+        # Setting the llm_model=None indicates that the response was
+        # deterministic, and not LLM generated.
+        return LLMResponse(
+            response_text="", reasoning=msg, planned_tool_call=None, ticket_number=full_ticket.number, llm_model=None
+        )
+
     if not dry_run and llm_response.planned_tool_call is not None:
         name = llm_response.planned_tool_call["function"]["name"]
         args = llm_response.planned_tool_call["function"]["arguments"]
