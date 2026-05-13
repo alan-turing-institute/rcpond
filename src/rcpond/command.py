@@ -41,11 +41,33 @@ def _process_ticket(ticket: Ticket, dry_run: bool, config: Config, service_now: 
         The LLM client.
     """
     full_ticket: FullTicket = service_now.get_full_ticket(ticket)
+    if full_ticket.is_rcpond_most_recent_process():
+        prev_time = full_ticket.get_combined_notes()[-1].datetime_stamp
+        msg = f"Skipping: There has been no new activity on ticket '{full_ticket.number}' since RCPond's previous review on {prev_time}"
+        # We use a LLMResponse obj for ease of downstream display etc
+        # Setting the llm_model=None indicates that the response was
+        # deterministic, and not LLM generated.
+        return LLMResponse(
+            response_text="", reasoning=msg, planned_tool_call=None, ticket_number=full_ticket.number, llm_model=None
+        )
+
     tools = get_available_tools(config)
     system_prompt, user_prompt = construct_prompt(full_ticket, config)
     llm_response: LLMResponse = llm.generate(
         system_prompt, user_prompt, config.llm_model, tools=tools, ticket_number=ticket.number
     )
+
+    # Check that no-one else has replied whilst the LLM was working
+    full_ticket.refresh(service_now)
+    if full_ticket.is_rcpond_most_recent_process():
+        prev_msg = full_ticket.get_combined_notes()[-1]
+        msg = f"Skipping: Another user has comments on ticket '{full_ticket.number}' whilst RCPond was working. There message is\n'{prev_msg}'"
+        # We use a LLMResponse obj for ease of downstream display etc
+        # Setting the llm_model=None indicates that the response was
+        # deterministic, and not LLM generated.
+        return LLMResponse(
+            response_text="", reasoning=msg, planned_tool_call=None, ticket_number=full_ticket.number, llm_model=None
+        )
 
     if not dry_run and llm_response.planned_tool_call is not None:
         name = llm_response.planned_tool_call["function"]["name"]
@@ -198,6 +220,7 @@ def batch_evaluate_tickets(in_dir: Path, out_file: Path, num_runs: int = 1, conf
         # TODO: Temporary, an messy way to limit tickets to only those related to Azure
         # Find a better solution
         full_ticket = service_now.get_full_ticket(ticket)
+
         if full_ticket.which_service != "Azure":
             print(f"skipping non-Azure ticket: {ticket.number}")
         else:

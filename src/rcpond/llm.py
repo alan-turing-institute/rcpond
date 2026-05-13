@@ -37,7 +37,7 @@ class LLMResponse:
     ticket_number: str | None = None
     """The ticket number this response relates to, passed in by the caller."""
     llm_model: str | None = None
-    """The model identifier used to generate this response."""
+    """The model identifier used to generate this response. A value ``None`` indiciates that the response was not LLM generated, but generated deterministically."""
 
 
 ## --------------------------------------------------------------------------------

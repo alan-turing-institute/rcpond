@@ -35,6 +35,8 @@ def ticket():
         short_description="Request access to HPC and cloud computing facilities",
         state="New",
         assigned_to="",
+        work_notes="",
+        comments="",
     )
 
 

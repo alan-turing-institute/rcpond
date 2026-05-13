@@ -128,6 +128,7 @@ def display_ticket(ctx: typer.Context, ticket_number: str):
 def browse_ticket(ctx: typer.Context, ticket_number: str):
     """Opens a ticket in you default the browser (e.g. RES0001234)."""
     url = command.get_ticket_url(ticket_number=ticket_number, config=_config(ctx))
+    print(f"Opening ticket: {url}")
     webbrowser.open(url)
 
 
