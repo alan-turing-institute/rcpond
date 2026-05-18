@@ -4,6 +4,7 @@ from datetime import datetime
 from unittest.mock import MagicMock, call, patch
 
 import pytest
+import requests as _requests  ## used by test_token_introspection
 
 from rcpond import config, servicenow
 from rcpond.servicenow import FullTicket, NoteEntry, ServiceNow, Ticket
@@ -48,8 +49,9 @@ def ticket():
 def sn_instance():
     """A ServiceNow instance with the HTTP session replaced by a MagicMock."""
     sn = ServiceNow.__new__(ServiceNow)
-    sn._base_url = "https://example.com/api/now/table"
+    sn._base_api_url = "https://example.com/api/now/table"
     sn._web_base_url = "https://example.com"
+    sn._id_token = None
     sn.session = MagicMock()
     return sn
 
@@ -76,18 +78,26 @@ def test_assign_to_me_raises_without_oauth(sn_instance, ticket):
 
 
 def test_assign_to_me_calls_assign_to_with_current_user(sn_instance, ticket):
-    """With OAuth, assign_to_me decodes the JWT sub and calls assign_to."""
+    """With OAuth, assign_to_me decodes the id_token sub and calls assign_to."""
     sn_instance._is_oauth = True
-    sn_instance.session.headers = {"Authorization": f"Bearer {_make_jwt('user-sys-id-123')}"}
+    sn_instance._id_token = _make_jwt("user-sys-id-123")
     with patch.object(sn_instance, "assign_to") as mock_assign:
         sn_instance.assign_to_me(ticket)
     mock_assign.assert_called_once_with(ticket, "user-sys-id-123")
 
 
 def test_current_user_sys_id_decodes_jwt(sn_instance):
-    """_current_user_sys_id extracts the sub claim from the bearer token."""
-    sn_instance.session.headers = {"Authorization": f"Bearer {_make_jwt('abc-xyz-456')}"}
+    """_current_user_sys_id extracts the sub claim from the id_token."""
+    sn_instance._id_token = _make_jwt("abc-xyz-456")
     assert sn_instance._current_user_sys_id() == "abc-xyz-456"
+
+
+def test_current_user_sys_id_raises_without_id_token(sn_instance):
+    """_current_user_sys_id raises RuntimeError when no id_token and sys_user fallback also fails."""
+    sn_instance._id_token = None
+    sn_instance.session.get.return_value.ok = False
+    with pytest.raises(RuntimeError, match="openid"):
+        sn_instance._current_user_sys_id()
 
 
 def test_ticket_assign_to_me_delegates_to_service_now(ticket):
@@ -294,6 +304,161 @@ def test_rcpond_note_detection_current_version_after_old():
     assert ticket.is_rcpond_most_recent_process() is True
 
 
+## ── _current_user_sys_id / _current_user_display_name ──────────────────────
+
+
+@pytest.mark.integration()
+def test_apim_userinfo_and_sys_user_me(dev_instance_sn):
+    """Diagnostic: APIM userinfo (404), sys_user/me (404 — 'me' not a valid sys_id), plain sys_user (404 through APIM).
+    Direct sys_user/me also 404; direct sys_user without filter returns ALL users (3 MB — not useful).
+    None of these identify the current user."""
+    if not dev_instance_sn._is_oauth:
+        pytest.skip("Requires OAuth authentication")
+    base = dev_instance_sn._base_api_url.removesuffix("/table")  # .../api/now
+
+    for label, url in [
+        ("APIM userinfo", f"{base}/v1/userinfo"),
+        ("APIM sys_user/me", f"{dev_instance_sn._base_api_url}/sys_user/me"),
+        ("APIM sys_user", f"{dev_instance_sn._base_api_url}/sys_user"),
+        ("direct sys_user/me", f"{dev_instance_sn._web_base_url}/api/now/table/sys_user/me"),
+        ("direct sys_user", f"{dev_instance_sn._web_base_url}/api/now/table/sys_user"),
+    ]:
+        resp = dev_instance_sn.session.get(url)
+        print(f"\n{label}  →  HTTP {resp.status_code}")
+        try:
+            print(f"  body: {resp.json()}")
+        except Exception:
+            print(f"  body (raw): {resp.text[:200]}")
+
+
+@pytest.mark.integration()
+def test_apim_response_headers(dev_instance_sn):
+    """Diagnostic: response headers contain X-Is-Logged-In: true but no user sys_id or name.
+    APIM does not inject user-identity headers."""
+    if not dev_instance_sn._is_oauth:
+        pytest.skip("Requires OAuth authentication")
+    resp = dev_instance_sn.session.get(
+        f"{dev_instance_sn._base_api_url}/{dev_instance_sn._TABLE}",
+        params={"sysparm_limit": "1"},
+    )
+    print("\nResponse headers:")
+    for k, v in sorted(resp.headers.items()):
+        print(f"  {k}: {v}")
+
+
+@pytest.mark.integration()
+def test_sys_user_lookup_via_apim(dev_instance_sn):
+    """Diagnostic: sys_user/{sys_id} IS accessible through the gateway and returns full user info.
+    The problem is obtaining the current user's own sys_id — not solved by this endpoint alone."""
+    if not dev_instance_sn._is_oauth:
+        pytest.skip("Requires OAuth authentication")
+
+    ## Get a known sys_id from an assigned ticket's assignee field
+    all_tickets = dev_instance_sn.get_tickets(long_list=True)
+    assigned = [t for t in all_tickets if t.assigned_to]
+    if not assigned:
+        pytest.skip("No assigned tickets available to extract a sys_id from")
+
+    assignee = dev_instance_sn.get_assignee(assigned[0])
+    sys_id = assignee["value"]
+    print(f"\nUsing assignee sys_id: {sys_id!r}  (display_value: {assignee['display_value']!r})")
+
+    resp = dev_instance_sn.session.get(
+        f"{dev_instance_sn._base_api_url}/sys_user/{sys_id}",
+        params={"sysparm_fields": "name,sys_id,user_name,email", "sysparm_display_value": "true"},
+    )
+    print(f"GET sys_user/{sys_id}  →  HTTP {resp.status_code}")
+    try:
+        print(f"  body: {resp.json()}")
+    except Exception:
+        print(f"  body (raw): {resp.text[:300]}")
+
+
+@pytest.mark.integration()
+def test_token_introspection(dev_instance_sn, dev_instance_config):
+    """Diagnostic: POST /oauth_introspect.do returns HTTP 200 HTML login page for all auth variants.
+    The endpoint is not configured as a REST API on this ServiceNow instance."""
+    if not dev_instance_sn._is_oauth:
+        pytest.skip("Requires OAuth authentication")
+    token = dev_instance_sn.session.headers.get("Authorization", "").removeprefix("Bearer ")
+    base_url = dev_instance_sn._web_base_url
+    client_id = dev_instance_config.servicenow_client_id
+    client_secret = dev_instance_config.servicenow_client_secret
+
+    def _post(label: str, **kwargs) -> None:
+        resp = _requests.post(f"{base_url}/oauth_introspect.do", **kwargs)
+        print(f"\n{label}  →  HTTP {resp.status_code}")
+        try:
+            print(f"  body: {resp.json()}")
+        except Exception:
+            print(f"  body (raw): {resp.text[:300]}")
+
+    ## Variation 1: Basic Auth + form body
+    b64 = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+    _post(
+        "Basic Auth",
+        headers={
+            "Authorization": f"Basic {b64}",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "application/json",
+        },
+        data={"token": token},
+    )
+    ## Variation 2: client credentials in form body only
+    _post(
+        "Form body creds",
+        headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"},
+        data={"token": token, "client_id": client_id, "client_secret": client_secret},
+    )
+    ## Variation 3: Bearer token, no client creds
+    _post(
+        "Bearer only",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "application/json",
+        },
+        data={"token": token},
+    )
+
+
+@pytest.mark.integration()
+def test_userinfo_endpoint_response(dev_instance_sn):
+    """Diagnostic: GET /api/now/v1/userinfo returns HTTP 400 'Requested URI does not represent any resource'.
+    OIDC is not configured on this ServiceNow instance — neither id_token nor userinfo are available."""
+    if not dev_instance_sn._is_oauth:
+        pytest.skip("Requires OAuth authentication")
+    resp = dev_instance_sn.session.get(f"{dev_instance_sn._web_base_url}/api/now/v1/userinfo")
+    print(f"\nGET /api/now/v1/userinfo  →  HTTP {resp.status_code}")
+    print(f"id_token in cache: {dev_instance_sn._id_token is not None}")
+    try:
+        print(f"Response body: {resp.json()}")
+    except Exception:
+        print(f"Response body (raw): {resp.text[:500]}")
+    assert resp.ok, f"Userinfo endpoint returned HTTP {resp.status_code}: {resp.text[:200]}"
+
+
+@pytest.mark.integration()
+def test_current_user_sys_id(dev_instance_sn):
+    """_current_user_sys_id returns a 32-char hex sys_id for the authenticated OAuth user."""
+    if not dev_instance_sn._is_oauth:
+        pytest.skip("Requires OAuth authentication")
+    sys_id = dev_instance_sn._current_user_sys_id()
+    assert sys_id, f"Got empty sys_id: {sys_id!r}"
+    assert len(sys_id) == 32, f"Unexpected sys_id format (expected 32 hex chars): {sys_id!r}"
+    assert sys_id.isalnum(), f"Unexpected sys_id format (expected 32 hex chars): {sys_id!r}"
+
+
+@pytest.mark.integration()
+def test_current_user_display_name(dev_instance_sn):
+    """_current_user_display_name returns a non-empty display name for the authenticated OAuth user."""
+    if not dev_instance_sn._is_oauth:
+        pytest.skip("Requires OAuth authentication")
+    name = dev_instance_sn._current_user_display_name()
+    assert name is not None, "Got None — user identity could not be established (check OIDC scope and token cache)"
+    assert name, f"Got empty display name: {name!r}"
+
+
 @pytest.mark.integration()
 def test_post_note(dev_instance_sn):
     tickets = dev_instance_sn.get_tickets()
@@ -317,7 +482,7 @@ def test_post_note(dev_instance_sn):
 @pytest.mark.integration()
 def test_get_tickets(dev_instance_sn):
     unassigned_tickets = dev_instance_sn.get_tickets()
-    all_tickets = dev_instance_sn.get_tickets(include_assigned_tickets=True)
+    all_tickets = dev_instance_sn.get_tickets(long_list=True)
 
     assert len(all_tickets) >= len(unassigned_tickets)
 
@@ -326,7 +491,7 @@ def test_get_tickets(dev_instance_sn):
 def test_change_assignee(dev_instance_sn):
     # Attempt to select one assigned and on unassigned ticket
     unassigned_tickets = dev_instance_sn.get_tickets()
-    all_tickets = dev_instance_sn.get_tickets(include_assigned_tickets=True)
+    all_tickets = dev_instance_sn.get_tickets(long_list=True)
 
     unassigned_sys_ids = {t.sys_id for t in unassigned_tickets}
     assigned_tickets = [t for t in all_tickets if t.sys_id not in unassigned_sys_ids]
