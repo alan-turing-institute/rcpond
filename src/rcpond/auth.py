@@ -1,10 +1,12 @@
 """OAuth 2.0 Authorization Code + PKCE authentication for rcpond.
 
-Provides a single public function:
+Provides the following public functions:
 
 - ``get_bearer_token(config)``: Return a valid Bearer token string for the
   ServiceNow API, running the full browser-based flow or a silent token
   refresh as needed.
+- ``get_id_token()``: Return the ``id_token`` JWT from the cached token
+  response, or ``None`` if absent (requires ``openid`` scope).
 - ``clear_token_cache()``: Delete any cached tokens.
 
 Token lifecycle
@@ -75,6 +77,15 @@ def _token_is_expired(token_data: dict) -> bool:
     if expires_at is None:
         return True
     return float(expires_at) - _CLOCK_SKEW_SECONDS < time.time()
+
+
+def get_id_token() -> str | None:
+    """Return the id_token from the cached OAuth token response, or None if absent.
+
+    Requires the ``openid`` scope to have been requested during authentication.
+    """
+    cached = _load_cache()
+    return cached.get("id_token") if cached else None
 
 
 def clear_token_cache() -> None:

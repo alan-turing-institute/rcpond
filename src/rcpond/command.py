@@ -85,11 +85,11 @@ def _process_ticket(ticket: Ticket, dry_run: bool, config: Config, service_now: 
 ## Interface to this module
 
 
-def display_all_tickets(include_assigned_tickets: bool, config: Config | None = None):
+def display_all_tickets(long_list: bool, config: Config | None = None):
     """Display the list of unassigned tickets from ServiceNow to the user."""
     config = config or Config()
     service_now: ServiceNow = ServiceNow(config)
-    display_multi_tickets(service_now.get_tickets(include_assigned_tickets=include_assigned_tickets))
+    display_multi_tickets(service_now.get_tickets(long_list=long_list))
 
 
 def display_single_ticket(ticket_number: str, config: Config | None = None):
@@ -214,7 +214,7 @@ def batch_evaluate_tickets(in_dir: Path, out_file: Path, num_runs: int = 1, conf
     llm: LLM = LLM(config)
 
     ## Pre-filter to Azure tickets only
-    all_tickets = service_now.get_tickets(include_assigned_tickets=True)
+    all_tickets = service_now.get_tickets(long_list=True)
     azure_tickets = []
     for ticket in all_tickets:
         # TODO: Temporary, an messy way to limit tickets to only those related to Azure

@@ -1,8 +1,8 @@
-"""Tests for the include_assigned_tickets behaviour of each command.
+"""Tests for the long_list behaviour of each command.
 
 Each command has a specific policy:
 
-- display_all_tickets:      honours an explicit include_assigned_tickets argument
+- display_all_tickets:      honours an explicit long_list argument
 - display_single_ticket:    uses get_ticket(), which always searches all tickets
 - process_next_ticket:      only ever selects from unassigned tickets
 - process_specific_ticket:  uses get_ticket(), which always searches all tickets
@@ -43,18 +43,18 @@ def ticket():
 ## ── display_all_tickets ─────────────────────────────────────────────────────
 
 
-def test_display_all_tickets_excludes_assigned_by_default(cfg):
-    """display_all_tickets passes include_assigned_tickets=False by default."""
+def test_display_all_tickets_uses_shortlist_by_default(cfg):
+    """display_all_tickets passes long_list=False by default."""
     with patch("rcpond.command.ServiceNow") as MockSN:
-        command.display_all_tickets(include_assigned_tickets=False, config=cfg)
-    MockSN.return_value.get_tickets.assert_called_once_with(include_assigned_tickets=False)
+        command.display_all_tickets(long_list=False, config=cfg)
+    MockSN.return_value.get_tickets.assert_called_once_with(long_list=False)
 
 
-def test_display_all_tickets_can_include_assigned(cfg):
-    """display_all_tickets passes include_assigned_tickets=True when requested."""
+def test_display_all_tickets_can_use_longlist(cfg):
+    """display_all_tickets passes long_list=True when requested."""
     with patch("rcpond.command.ServiceNow") as MockSN:
-        command.display_all_tickets(include_assigned_tickets=True, config=cfg)
-    MockSN.return_value.get_tickets.assert_called_once_with(include_assigned_tickets=True)
+        command.display_all_tickets(long_list=True, config=cfg)
+    MockSN.return_value.get_tickets.assert_called_once_with(long_list=True)
 
 
 ## ── display_single_ticket ───────────────────────────────────────────────────

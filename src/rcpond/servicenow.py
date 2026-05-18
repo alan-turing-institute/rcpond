@@ -34,6 +34,7 @@ import base64
 import dataclasses
 import json
 import re
+import sys
 from dataclasses import dataclass
 from datetime import datetime
 from typing import ClassVar
@@ -251,40 +252,68 @@ class ServiceNow:
     _TABLE = "x_tati_resmgt_research"
 
     def __init__(self, config: Config):
-        self._base_url = config.servicenow_url
+        self._base_api_url = config.servicenow_url
         self._web_base_url: str = config.servicenow_web_url
+        self._id_token: str | None = None
+        self._is_oauth = False
         self.session = requests.Session()
         self.session.headers.update({"Content-Type": "application/json", "Accept": "application/json"})
         if config.servicenow_client_id and config.servicenow_client_secret:
-            from rcpond.auth import get_bearer_token
+            from rcpond.auth import get_bearer_token, get_id_token
 
             self.session.headers["Authorization"] = f"Bearer {get_bearer_token(config)}"
+            self._id_token = get_id_token()
             self._is_oauth = True
         else:
             self.session.headers["Ocp-Apim-Subscription-Key"] = config.servicenow_token or ""
-            self._is_oauth = False
 
-    def get_tickets(self, include_assigned_tickets: bool = False) -> list[Ticket]:
-        """Get tickets that are applications for HPC/Azure
-        credits.
+    def get_tickets(self, long_list: bool = False) -> list[Ticket]:
+        """Get tickets that are applications for HPC/Azure credits.
+
+        Parameters
+        ----------
+        long_list : bool
+            If ``False`` (default), return a curated shortlist relevant to the
+            current user or bot. If ``True``, return all non-closed/resolved tickets.
+
+        Returns
+        -------
+        list[Ticket]
+            For interactive (OAuth) users — shortlist: unassigned or assigned to the
+            current user; longlist: all non-closed/resolved tickets.
+            For bot (token) users — shortlist: unassigned tickets where RCPond has not
+            posted the most recent note; longlist: all non-closed/resolved tickets where
+            RCPond has not posted the most recent note.
         """
-
-        _UNASSIGNED_FILTER = "assigned_toISEMPTY^short_description=Request access to HPC and cloud computing facilities"
-        _INC_ASSIGNED_FILTER = "short_description=Request access to HPC and cloud computing facilities"
-
-        query = _INC_ASSIGNED_FILTER if include_assigned_tickets else _UNASSIGNED_FILTER
+        _BASE_QUERY = "short_description=Request access to HPC and cloud computing facilities"
+        _CLOSED_STATES = frozenset({"Closed", "Resolved", "Cancelled"})
 
         ticket_fields = {field.name for field in dataclasses.fields(Ticket)}
-
-        ## Get the list of unassigned tickets as JSON
         resp = self.session.get(
-            f"{self._base_url}/{self._TABLE}", params={"sysparm_query": query, "sysparm_display_value": "all"}
+            f"{self._base_api_url}/{self._TABLE}", params={"sysparm_query": _BASE_QUERY, "sysparm_display_value": "all"}
         )
-
         resp.raise_for_status()
 
-        ## Parse the JSON for each ticket
-        return [Ticket(**_extract_ticket_fields(tkt, ticket_fields)) for tkt in resp.json()["result"]]
+        tickets = [Ticket(**_extract_ticket_fields(tkt, ticket_fields)) for tkt in resp.json()["result"]]
+        ## Always exclude closed/resolved tickets; remaining filters depend on auth mode and long_list
+        tickets = [t for t in tickets if t.state not in _CLOSED_STATES]
+
+        if long_list:
+            ## Bot longlist: exclude tickets RCPond already handled (OAuth sees everything)
+            if not self._is_oauth:
+                tickets = [t for t in tickets if not t.is_rcpond_most_recent_process()]
+        else:
+            if self._is_oauth:
+                my_name = self._current_user_display_name()
+                if my_name is not None:
+                    ## Interactive shortlist: only tickets assigned to me or unassigned
+                    tickets = [t for t in tickets if t.assigned_to in ("", my_name)]
+                ## else: user identity unknown — return all non-closed tickets
+            else:
+                ## Bot shortlist: unassigned tickets RCPond has not already handled
+                tickets = [t for t in tickets if t.assigned_to == "" and not t.is_rcpond_most_recent_process()]
+
+        return tickets
 
     def get_ticket(self, ticket_number: str) -> Ticket:
         """Returns the unique ticket matching ``ticket_number``, or raise ValueError if either no match,
@@ -303,7 +332,7 @@ class ServiceNow:
             If no ticket matches, or if more than one matches (should not happen
             in practice — ServiceNow enforces uniqueness, but guarded defensively).
         """
-        matched = [t for t in self.get_tickets(include_assigned_tickets=True) if t.number == ticket_number]
+        matched = [t for t in self.get_tickets(long_list=True) if t.number == ticket_number]
         if len(matched) == 0:
             err_msg = f"Ticket '{ticket_number}' not found."
             raise ValueError(err_msg)
@@ -337,7 +366,7 @@ class ServiceNow:
         requested_fields = {f"variables.{f}" for f in extra_fields}
 
         resp = self.session.get(
-            f"{self._base_url}/{self._TABLE}/{tkt.sys_id}",
+            f"{self._base_api_url}/{self._TABLE}/{tkt.sys_id}",
             params={"sysparm_fields": ",".join(requested_fields), "sysparm_display_value": "all"},
         )
 
@@ -367,7 +396,7 @@ class ServiceNow:
             Mapping of field name to its display-value string.
         """
         resp = self.session.get(
-            f"{self._base_url}/{self._TABLE}/{sys_id}",
+            f"{self._base_api_url}/{self._TABLE}/{sys_id}",
             params={"sysparm_display_value": "true", "sysparm_fields": ",".join(fields)},
         )
         resp.raise_for_status()
@@ -385,7 +414,7 @@ class ServiceNow:
             A dict with two keys `display_value` and `value`
         """
         resp = self.session.get(
-            f"{self._base_url}/{self._TABLE}/{tkt.sys_id}",
+            f"{self._base_api_url}/{self._TABLE}/{tkt.sys_id}",
             params={
                 "sysparm_display_value": "all",
                 "sysparm_exclude_reference_link": "true",
@@ -407,22 +436,97 @@ class ServiceNow:
 
         ## This will append the `note` param to `work_notes` field
         resp = self.session.patch(
-            f"{self._base_url}/{self._TABLE}/{tkt.sys_id}",
+            f"{self._base_api_url}/{self._TABLE}/{tkt.sys_id}",
             json={"work_notes": prefix + note},
         )
         resp.raise_for_status()
 
-    def _current_user_sys_id(self) -> str:
-        """Decode the JWT bearer token and return the current user's sys_id.
+    def _fetch_current_user_claims(self) -> dict | None:
+        """Return identity claims for the current OAuth user, or ``None`` if unavailable.
 
-        The ServiceNow OAuth JWT carries the user's sys_id in the ``sub`` claim.
+        Tries in order:
+        1. Decode the cached ``_id_token`` JWT (no extra network round-trip).
+        2. Query the ``sys_user`` table with ``sys_id=javascript:gs.getUserID()``, which
+           ServiceNow evaluates server-side so it returns exactly the authenticated user's
+           record regardless of their sys_id.
+
+        Returns a dict with at least ``sub`` (sys_id) and ``name`` keys on success.
         """
-        auth = self.session.headers["Authorization"]
-        token = (auth.decode() if isinstance(auth, bytes) else auth).removeprefix("Bearer ")
-        payload_b64 = token.split(".")[1]
-        ## base64url requires padding to a multiple of 4
-        payload = json.loads(base64.urlsafe_b64decode(payload_b64 + "=="))
-        return payload["sub"]
+        if self._id_token:
+            try:
+                payload_b64 = self._id_token.split(".")[1]
+                ## base64url requires padding to a multiple of 4
+                return json.loads(base64.urlsafe_b64decode(payload_b64 + "=="))
+            except Exception:
+                pass
+
+        try:
+            resp = self.session.get(
+                f"{self._web_base_url}/api/now/table/sys_user",
+                params={
+                    "sysparm_query": "sys_id=javascript:gs.getUserID()",
+                    "sysparm_fields": "sys_id,name,user_name",
+                    "sysparm_display_value": "true",
+                },
+            )
+            if resp.ok:
+                result = resp.json().get("result", [])
+                if result:
+                    record = result[0]
+                    return {"sub": record["sys_id"], "name": record["name"], "user_name": record.get("user_name", "")}
+        except Exception:
+            pass
+
+        return None
+
+    def _current_user_sys_id(self) -> str:
+        """Return the current user's sys_id from OIDC claims (``sub`` claim).
+
+        Raises
+        ------
+        RuntimeError
+            If neither the ``id_token`` nor the OIDC userinfo endpoint provides a
+            ``sub`` claim. Ensure ``openid`` is in ``RCPOND_SERVICENOW_OAUTH_SCOPE``
+            and re-authenticate.
+        """
+        claims = self._fetch_current_user_claims()
+        if not claims or "sub" not in claims:
+            msg = (
+                "Cannot determine current user sys_id: no id_token and userinfo endpoint unavailable.\n"
+                "Ensure 'openid' is in RCPOND_SERVICENOW_OAUTH_SCOPE and re-authenticate."
+            )
+            raise RuntimeError(msg)
+        return claims["sub"]
+
+    def _current_user_display_name(self) -> str | None:
+        """Return the display name of the currently authenticated OAuth user.
+
+        Tries OIDC claims (``name`` field) first; falls back to a ``sys_user`` table
+        lookup using the ``sub`` claim. Returns ``None`` with a warning when identity
+        cannot be established.
+
+        Returns
+        -------
+        str | None
+            The user's display name, or ``None`` if it cannot be determined.
+        """
+        claims = self._fetch_current_user_claims()
+        if claims:
+            if name := claims.get("name"):
+                return name
+            if sub := claims.get("sub"):
+                try:
+                    resp = self.session.get(
+                        f"{self._web_base_url}/api/now/table/sys_user/{sub}",
+                        params={"sysparm_fields": "name", "sysparm_display_value": "true"},
+                    )
+                    resp.raise_for_status()
+                    return resp.json()["result"]["name"]
+                except Exception:
+                    pass
+
+        print("Warning: unable to determine current user identity; showing all open tickets.", file=sys.stderr)
+        return None
 
     def assign_to_me(self, ticket: Ticket) -> dict[str, str]:
         """Assign ``ticket`` to the currently authenticated OAuth user.
@@ -455,7 +559,7 @@ class ServiceNow:
 
     def _attempt_assign_to(self, ticket: Ticket, assignee: str) -> None:
         resp = self.session.patch(
-            f"{self._base_url}/{self._TABLE}/{ticket.sys_id}",
+            f"{self._base_api_url}/{self._TABLE}/{ticket.sys_id}",
             json={"assigned_to": assignee},
         )
         resp.raise_for_status()

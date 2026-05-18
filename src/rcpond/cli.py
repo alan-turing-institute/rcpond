@@ -3,9 +3,11 @@ CLI for rcpond.
 
 This module creates the Typer `cli` object that is the target of the pyproject.scripts directive.
 
-It adds six subcommands
+It adds the following subcommands
 
-- `display-all-tickets`
+- `login`
+- `whoami`
+- `display-all`
 - `display-ticket`
 - `browse-ticket`
 - `process-next`
@@ -113,9 +115,27 @@ def login(ctx: typer.Context) -> None:
 
 
 @cli.command()
-def display_all(ctx: typer.Context, include_assigned_tickets: bool = False):
+def whoami(ctx: typer.Context) -> None:
+    """Show the identity of the currently authenticated OAuth user."""
+    from rcpond.servicenow import ServiceNow
+
+    sn = ServiceNow(_config(ctx))
+    if not sn._is_oauth:
+        print("[yellow]Static token authentication — user identity not available.[/yellow]")
+        return
+    claims = sn._fetch_current_user_claims()
+    if not claims:
+        print("[red]Unable to determine user identity.[/red]")
+        raise typer.Exit(1)
+    print(f"[bold]Name:[/bold]      {claims.get('name', '?')}")
+    print(f"[bold]Username:[/bold]  {claims.get('user_name', '?')}")
+    print(f"[bold]sys_id:[/bold]    {claims.get('sub', '?')}")
+
+
+@cli.command()
+def display_all(ctx: typer.Context, long_list: bool = False):
     """Display all unassigned tickets from ServiceNow."""
-    command.display_all_tickets(include_assigned_tickets=include_assigned_tickets, config=_config(ctx))
+    command.display_all_tickets(long_list=long_list, config=_config(ctx))
 
 
 @cli.command()
@@ -126,7 +146,7 @@ def display_ticket(ctx: typer.Context, ticket_number: str):
 
 @cli.command()
 def browse_ticket(ctx: typer.Context, ticket_number: str):
-    """Opens a ticket in you default the browser (e.g. RES0001234)."""
+    """Opens a ticket in your default the browser (e.g. RES0001234)."""
     url = command.get_ticket_url(ticket_number=ticket_number, config=_config(ctx))
     print(f"Opening ticket: {url}")
     webbrowser.open(url)

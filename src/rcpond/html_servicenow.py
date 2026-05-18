@@ -86,12 +86,12 @@ class HtmlServiceNow(ServiceNow):
 
     ## ---- Read methods ----
 
-    def get_tickets(self, include_assigned_tickets: bool = False) -> list[Ticket]:
+    def get_tickets(self, long_list: bool = False) -> list[Ticket]:
         """Return a ``FullTicket`` for each HTML file in ``html_dir``.
 
         Parameters
         ----------
-        include_assigned_tickets : bool
+        long_list : bool
             If ``False`` (default), only unassigned tickets are returned.
             If ``True``, all tickets are returned regardless of assignment state.
 
@@ -104,7 +104,7 @@ class HtmlServiceNow(ServiceNow):
         for f in sorted(self._html_dir.glob("*.html")):
             facts = extract_key_facts(f)
             is_assigned = bool(facts["assigned_to"]["display_value"])
-            if is_assigned and not include_assigned_tickets:
+            if is_assigned and not long_list:
                 continue
             tickets.append(parse_ticket_html(f))
         return tickets
