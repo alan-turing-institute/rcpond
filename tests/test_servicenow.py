@@ -423,22 +423,6 @@ def test_token_introspection(dev_instance_sn, dev_instance_config):
 
 
 @pytest.mark.integration()
-def test_userinfo_endpoint_response(dev_instance_sn):
-    """Diagnostic: GET /api/now/v1/userinfo returns HTTP 400 'Requested URI does not represent any resource'.
-    OIDC is not configured on this ServiceNow instance — neither id_token nor userinfo are available."""
-    if not dev_instance_sn._is_oauth:
-        pytest.skip("Requires OAuth authentication")
-    resp = dev_instance_sn.session.get(f"{dev_instance_sn._web_base_url}/api/now/v1/userinfo")
-    print(f"\nGET /api/now/v1/userinfo  →  HTTP {resp.status_code}")
-    print(f"id_token in cache: {dev_instance_sn._id_token is not None}")
-    try:
-        print(f"Response body: {resp.json()}")
-    except Exception:
-        print(f"Response body (raw): {resp.text[:500]}")
-    assert resp.ok, f"Userinfo endpoint returned HTTP {resp.status_code}: {resp.text[:200]}"
-
-
-@pytest.mark.integration()
 def test_current_user_sys_id(dev_instance_sn):
     """_current_user_sys_id returns a 32-char hex sys_id for the authenticated OAuth user."""
     if not dev_instance_sn._is_oauth:
