@@ -180,8 +180,12 @@ def batch_process_tickets(dry_run: bool, config: Config | None = None):
     config = config or Config()
     service_now: ServiceNow = ServiceNow(config)
     llm: LLM = LLM(config)
-    for ticket in service_now.get_tickets():
-        _ = _process_ticket(ticket, dry_run, config, service_now, llm)
+    all_tickets = service_now.get_tickets()
+    for num, ticket in enumerate(all_tickets, start=1):
+        print(f"Processing ticket {num} of {len(all_tickets)}")
+        resp: LLMResponse = _process_ticket(ticket, dry_run, config, service_now, llm)
+        display_short_ticket(ticket)
+        display_response(resp)
 
 
 def batch_evaluate_tickets(in_dir: Path, out_file: Path, num_runs: int = 1, config: Config | None = None):
