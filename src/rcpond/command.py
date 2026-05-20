@@ -41,7 +41,7 @@ def _process_ticket(ticket: Ticket, dry_run: bool, config: Config, service_now: 
         The LLM client.
     """
     full_ticket: FullTicket = service_now.get_full_ticket(ticket)
-    if full_ticket.is_rcpond_most_recent_process():
+    if full_ticket.is_rcpond_processed():
         prev_time = full_ticket.get_combined_notes()[-1].datetime_stamp
         msg = f"Skipping: There has been no new activity on ticket '{full_ticket.number}' since RCPond's previous review on {prev_time}"
         # We use a LLMResponse obj for ease of downstream display etc
@@ -59,7 +59,7 @@ def _process_ticket(ticket: Ticket, dry_run: bool, config: Config, service_now: 
 
     # Check that no-one else has replied whilst the LLM was working
     full_ticket.refresh(service_now)
-    if full_ticket.is_rcpond_most_recent_process():
+    if full_ticket.is_rcpond_processed():
         prev_msg = full_ticket.get_combined_notes()[-1]
         msg = f"Skipping: Another user has comments on ticket '{full_ticket.number}' whilst RCPond was working. There message is\n'{prev_msg}'"
         # We use a LLMResponse obj for ease of downstream display etc
