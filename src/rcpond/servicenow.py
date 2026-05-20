@@ -301,7 +301,7 @@ class ServiceNow:
         if long_list:
             ## Bot longlist: exclude tickets RCPond already handled (OAuth sees everything)
             if not self._is_oauth:
-                tickets = [t for t in tickets if not t.is_rcpond_most_recent_process()]
+                tickets = [t for t in tickets if not t.is_rcpond_processed()]
         else:
             if self._is_oauth:
                 my_name = self._current_user_display_name()
@@ -311,7 +311,7 @@ class ServiceNow:
                 ## else: user identity unknown — return all non-closed tickets
             else:
                 ## Bot shortlist: unassigned tickets RCPond has not already handled
-                tickets = [t for t in tickets if t.assigned_to == "" and not t.is_rcpond_most_recent_process()]
+                tickets = [t for t in tickets if t.assigned_to == "" and not t.is_rcpond_processed()]
 
         return tickets
 
