@@ -472,23 +472,19 @@ class ServiceNow:
                 },
             )
         except Exception as exc:
-            raise RuntimeError(
-                "Network error fetching user identity from ServiceNow. "
-                "Check your connection and re-authenticate with 'rcpond login'."
-            ) from exc
+            msg = "Network error fetching user identity from ServiceNow. Check your connection and re-authenticate with 'rcpond login'."
+            raise RuntimeError(msg) from exc
 
         if not resp.ok:
-            raise RuntimeError(
-                f"ServiceNow returned HTTP {resp.status_code} when fetching user identity. "
-                "Re-authenticate with 'rcpond login'."
-            )
+            msg = f"ServiceNow returned HTTP {resp.status_code} when fetching user identity. Re-authenticate with 'rcpond login'."
+            raise RuntimeError(msg)
 
         result = resp.json().get("result", [])
         if not result:
-            raise RuntimeError(
-                "ServiceNow returned no user record for the authenticated session. "
-                "Re-authenticate with 'rcpond login'."
+            msg = (
+                "ServiceNow returned no user record for the authenticated session. Re-authenticate with 'rcpond login'."
             )
+            raise RuntimeError(msg)
 
         record = result[0]
         return {"sub": record["sys_id"], "name": record["name"], "user_name": record.get("user_name", "")}
@@ -504,7 +500,8 @@ class ServiceNow:
         claims = self._fetch_current_user_claims()
         if sub := claims.get("sub"):
             return sub
-        raise RuntimeError("User identity claims contain no 'sub' (sys_id). " "Re-authenticate with 'rcpond login'.")
+        msg = "User identity claims contain no 'sub' (sys_id). Re-authenticate with 'rcpond login'."
+        raise RuntimeError(msg)
 
     def _current_user_display_name(self) -> str:
         """Return the display name of the currently authenticated OAuth user.
@@ -533,9 +530,8 @@ class ServiceNow:
             )
             resp.raise_for_status()
             return resp.json()["result"]["name"]
-        raise RuntimeError(
-            "User identity claims contain neither 'name' nor 'sub'. " "Re-authenticate with 'rcpond login'."
-        )
+        msg = "User identity claims contain neither 'name' nor 'sub'. Re-authenticate with 'rcpond login'."
+        raise RuntimeError(msg)
 
     def assign_to_me(self, ticket: Ticket) -> dict[str, str]:
         """Assign ``ticket`` to the currently authenticated OAuth user.

@@ -59,6 +59,11 @@ NO_REASONING_RESPONSE = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _isolated_xdg_config(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+
+
 @pytest.fixture()
 def make_config(tmp_path):
     rules_file = tmp_path / "rules.txt"

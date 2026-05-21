@@ -12,6 +12,11 @@ _WORKING_TEMPLATES_DIR = Path("tests/fixtures/working_templates")
 # --- Fixtures ---
 
 
+@pytest.fixture(autouse=True)
+def _isolated_xdg_config(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+
+
 @pytest.fixture()
 def rules_text():
     return "Rule 1: Be helpful.\nRule 2: Be concise."
