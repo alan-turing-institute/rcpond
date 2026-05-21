@@ -34,7 +34,6 @@ import base64
 import dataclasses
 import json
 import re
-import sys
 from dataclasses import dataclass
 from datetime import datetime
 from typing import ClassVar
@@ -305,10 +304,8 @@ class ServiceNow:
         else:
             if self._is_oauth:
                 my_name = self._current_user_display_name()
-                if my_name is not None:
-                    ## Interactive shortlist: only tickets assigned to me or unassigned
-                    tickets = [t for t in tickets if t.assigned_to in ("", my_name)]
-                ## else: user identity unknown — return all non-closed tickets
+                ## Interactive shortlist: only tickets assigned to me or unassigned
+                tickets = [t for t in tickets if t.assigned_to in ("", my_name)]
             else:
                 ## Bot shortlist: unassigned tickets RCPond has not already handled
                 tickets = [t for t in tickets if t.assigned_to == "" and not t.is_rcpond_processed()]
@@ -441,8 +438,8 @@ class ServiceNow:
         )
         resp.raise_for_status()
 
-    def _fetch_current_user_claims(self) -> dict | None:
-        """Return identity claims for the current OAuth user, or ``None`` if unavailable.
+    def _fetch_current_user_claims(self) -> dict:
+        """Return identity claims for the current OAuth user.
 
         Tries in order:
         1. Decode the cached ``_id_token`` JWT (no extra network round-trip).
@@ -451,6 +448,11 @@ class ServiceNow:
            record regardless of their sys_id.
 
         Returns a dict with at least ``sub`` (sys_id) and ``name`` keys on success.
+
+        Raises
+        ------
+        RuntimeError
+            If user identity cannot be determined.
         """
         if self._id_token:
             try:
@@ -458,7 +460,7 @@ class ServiceNow:
                 ## base64url requires padding to a multiple of 4
                 return json.loads(base64.urlsafe_b64decode(payload_b64 + "=="))
             except Exception:
-                pass
+                pass  ## Malformed id_token; fall through to sys_user lookup
 
         try:
             resp = self.session.get(
@@ -469,15 +471,23 @@ class ServiceNow:
                     "sysparm_display_value": "true",
                 },
             )
-            if resp.ok:
-                result = resp.json().get("result", [])
-                if result:
-                    record = result[0]
-                    return {"sub": record["sys_id"], "name": record["name"], "user_name": record.get("user_name", "")}
-        except Exception:
-            pass
+        except Exception as exc:
+            msg = "Network error fetching user identity from ServiceNow. Check your connection and re-authenticate with 'rcpond login'."
+            raise RuntimeError(msg) from exc
 
-        return None
+        if not resp.ok:
+            msg = f"ServiceNow returned HTTP {resp.status_code} when fetching user identity. Re-authenticate with 'rcpond login'."
+            raise RuntimeError(msg)
+
+        result = resp.json().get("result", [])
+        if not result:
+            msg = (
+                "ServiceNow returned no user record for the authenticated session. Re-authenticate with 'rcpond login'."
+            )
+            raise RuntimeError(msg)
+
+        record = result[0]
+        return {"sub": record["sys_id"], "name": record["name"], "user_name": record.get("user_name", "")}
 
     def _current_user_sys_id(self) -> str:
         """Return the current user's sys_id from OIDC claims (``sub`` claim).
@@ -485,48 +495,43 @@ class ServiceNow:
         Raises
         ------
         RuntimeError
-            If neither the ``id_token`` nor the OIDC userinfo endpoint provides a
-            ``sub`` claim. Ensure ``openid`` is in ``RCPOND_SERVICENOW_OAUTH_SCOPE``
-            and re-authenticate.
+            If claims are unavailable or contain no ``sub`` field.
         """
         claims = self._fetch_current_user_claims()
-        if not claims or "sub" not in claims:
-            msg = (
-                "Cannot determine current user sys_id: no id_token and userinfo endpoint unavailable.\n"
-                "Ensure 'openid' is in RCPOND_SERVICENOW_OAUTH_SCOPE and re-authenticate."
-            )
-            raise RuntimeError(msg)
-        return claims["sub"]
+        if sub := claims.get("sub"):
+            return sub
+        msg = "User identity claims contain no 'sub' (sys_id). Re-authenticate with 'rcpond login'."
+        raise RuntimeError(msg)
 
-    def _current_user_display_name(self) -> str | None:
+    def _current_user_display_name(self) -> str:
         """Return the display name of the currently authenticated OAuth user.
 
         Tries OIDC claims (``name`` field) first; falls back to a ``sys_user`` table
-        lookup using the ``sub`` claim. Returns ``None`` with a warning when identity
-        cannot be established.
+        lookup using the ``sub`` claim.
 
         Returns
         -------
-        str | None
-            The user's display name, or ``None`` if it cannot be determined.
+        str
+            The user's display name.
+
+        Raises
+        ------
+        RuntimeError
+            If identity cannot be established.
         """
         claims = self._fetch_current_user_claims()
-        if claims:
-            if name := claims.get("name"):
-                return name
-            if sub := claims.get("sub"):
-                try:
-                    resp = self.session.get(
-                        f"{self._web_base_url}/api/now/table/sys_user/{sub}",
-                        params={"sysparm_fields": "name", "sysparm_display_value": "true"},
-                    )
-                    resp.raise_for_status()
-                    return resp.json()["result"]["name"]
-                except Exception:
-                    pass
-
-        print("Warning: unable to determine current user identity; showing all open tickets.", file=sys.stderr)
-        return None
+        if name := claims.get("name"):
+            return name
+        ## id_token present but lacks 'name' claim — look up by sub
+        if sub := claims.get("sub"):
+            resp = self.session.get(
+                f"{self._web_base_url}/api/now/table/sys_user/{sub}",
+                params={"sysparm_fields": "name", "sysparm_display_value": "true"},
+            )
+            resp.raise_for_status()
+            return resp.json()["result"]["name"]
+        msg = "User identity claims contain neither 'name' nor 'sub'. Re-authenticate with 'rcpond login'."
+        raise RuntimeError(msg)
 
     def assign_to_me(self, ticket: Ticket) -> dict[str, str]:
         """Assign ``ticket`` to the currently authenticated OAuth user.

@@ -208,6 +208,14 @@ class Config:
             msg = f"Missing required configuration: {', '.join(missing)}"
             raise ValueError(msg)
 
+        if oauth_present and "openid" not in values.get("servicenow_oauth_scope", "").split():
+            scope = values.get("servicenow_oauth_scope", "(not set)")
+            msg = (
+                f"RCPOND_SERVICENOW_OAUTH_SCOPE must include 'openid' when OAuth credentials are set "
+                f"(current value: {scope!r}). Add 'openid' to the scope and re-authenticate with 'rcpond login'."
+            )
+            raise ValueError(msg)
+
         # Confirm path fields are valid and set attributes
         field_names = {f.name for f in fields(self)}
         hints = {k: v for k, v in typing.get_type_hints(Config).items() if k in field_names}
