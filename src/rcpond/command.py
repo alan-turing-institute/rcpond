@@ -181,11 +181,15 @@ def batch_process_tickets(dry_run: bool, config: Config | None = None):
     service_now: ServiceNow = ServiceNow(config)
     llm: LLM = LLM(config)
     all_tickets = service_now.get_tickets()
-    for num, ticket in enumerate(all_tickets, start=1):
-        print(f"Processing ticket {num} of {len(all_tickets)}")
-        resp: LLMResponse = _process_ticket(ticket, dry_run, config, service_now, llm)
-        display_short_ticket(ticket)
-        display_response(resp)
+
+    if len(all_tickets) > 0:
+        for num, ticket in enumerate(all_tickets, start=1):
+            print(f"Processing ticket {num} of {len(all_tickets)}")
+            resp: LLMResponse = _process_ticket(ticket, dry_run, config, service_now, llm)
+            display_short_ticket(ticket)
+            display_response(resp)
+    else:
+        print("No tickets that have not been previously processed by RCPond")
 
 
 def batch_evaluate_tickets(in_dir: Path, out_file: Path, num_runs: int = 1, config: Config | None = None):

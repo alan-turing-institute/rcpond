@@ -96,8 +96,27 @@ def test_current_user_sys_id_raises_without_id_token(sn_instance):
     """_current_user_sys_id raises RuntimeError when no id_token and sys_user fallback also fails."""
     sn_instance._id_token = None
     sn_instance.session.get.return_value.ok = False
-    with pytest.raises(RuntimeError, match="openid"):
+    sn_instance.session.get.return_value.status_code = 401
+    with pytest.raises(RuntimeError, match="401"):
         sn_instance._current_user_sys_id()
+
+
+def test_fetch_current_user_claims_raises_on_http_error(sn_instance):
+    """HTTP error from sys_user endpoint raises RuntimeError containing the status code."""
+    sn_instance._id_token = None
+    sn_instance.session.get.return_value.ok = False
+    sn_instance.session.get.return_value.status_code = 403
+    with pytest.raises(RuntimeError, match="403"):
+        sn_instance._fetch_current_user_claims()
+
+
+def test_fetch_current_user_claims_raises_on_empty_result(sn_instance):
+    """Empty sys_user result raises RuntimeError."""
+    sn_instance._id_token = None
+    sn_instance.session.get.return_value.ok = True
+    sn_instance.session.get.return_value.json.return_value = {"result": []}
+    with pytest.raises(RuntimeError, match="no user record"):
+        sn_instance._fetch_current_user_claims()
 
 
 def test_ticket_assign_to_me_delegates_to_service_now(ticket):
@@ -302,6 +321,196 @@ def test_rcpond_note_detection_current_version_after_old():
     ticket = _make_ticket(work_notes=notes)
     assert ticket.is_rcpond_processed() is True
     assert ticket.is_rcpond_most_recent_process() is True
+
+
+## ── get_tickets filtering ───────────────────────────────────────────────────
+
+
+def _raw_ticket(
+    sys_id: str = "abc",
+    number: str = "RES0001000",
+    state: str = "New",
+    assigned_to: str = "",
+    work_notes: str = "",
+    comments: str = "",
+) -> dict:
+    """Ticket dict in the ServiceNow API response format (plain strings for display_value fields)."""
+    return {
+        "sys_id": sys_id,
+        "number": number,
+        "opened_at": "01/01/2026 09:00:00",
+        "requested_for": "Test User",
+        "u_category": "HPC",
+        "u_sub_category": "New",
+        "short_description": "Request access to HPC and cloud computing facilities",
+        "state": state,
+        "assigned_to": assigned_to,
+        "work_notes": work_notes,
+        "comments": comments,
+    }
+
+
+def _setup_session(sn_instance, raw_tickets: list[dict]) -> None:
+    sn_instance.session.get.return_value.json.return_value = {"result": raw_tickets}
+    sn_instance.session.get.return_value.raise_for_status = MagicMock()
+
+
+## Closed/resolved/cancelled tickets are always excluded, regardless of auth mode or long_list.
+
+
+# @pytest.mark.parametrize(("oauth", "long_list"), [(True, True), (True, False), (False, True), (False, False)])
+# def test_get_tickets_excludes_closed_states(sn_instance, oauth, long_list):
+#     """Should get the same result irrespective of the oauth and long_list settings"""
+#     _setup_session(
+#         sn_instance,
+#         [
+#             _raw_ticket(number="RES0000001", state="New"),
+#             _raw_ticket(number="RES0000002", state="Closed"),
+#             _raw_ticket(number="RES0000003", state="Resolved"),
+#             _raw_ticket(number="RES0000004", state="Cancelled"),
+#         ],
+#     )
+#     sn_instance._is_oauth = oauth
+#     tickets = sn_instance.get_tickets(long_list=long_list)
+#     assert [t.number for t in tickets] == ["RES0000001"]
+
+
+# ## OAuth shortlist — unassigned or assigned-to-me; everything else excluded.
+
+
+# def test_get_tickets_oauth_shortlist_includes_unassigned(sn_instance):
+#     _setup_session(sn_instance, [_raw_ticket(number="RES0000001", assigned_to="")])
+#     sn_instance._is_oauth = True
+#     with patch.object(sn_instance, "_current_user_display_name", return_value="Alice Smith"):
+#         tickets = sn_instance.get_tickets()
+#     assert len(tickets) == 1
+
+
+# def test_get_tickets_oauth_shortlist_includes_assigned_to_me(sn_instance):
+#     _setup_session(sn_instance, [_raw_ticket(number="RES0000001", assigned_to="Alice Smith")])
+#     sn_instance._is_oauth = True
+#     with patch.object(sn_instance, "_current_user_display_name", return_value="Alice Smith"):
+#         tickets = sn_instance.get_tickets()
+#     assert len(tickets) == 1
+
+
+# def test_get_tickets_oauth_shortlist_excludes_assigned_to_other(sn_instance):
+#     _setup_session(sn_instance, [_raw_ticket(number="RES0000001", assigned_to="Bob Jones")])
+#     sn_instance._is_oauth = True
+#     with patch.object(sn_instance, "_current_user_display_name", return_value="Alice Smith"):
+#         tickets = sn_instance.get_tickets()
+#     assert tickets == []
+
+
+## OAuth longlist — all non-closed tickets regardless of assignment or rcpond status.
+
+
+@pytest.mark.parametrize(
+    ("oauth", "long_list", "expected"),
+    [
+        (
+            True,
+            True,
+            {
+                "unassigned_new",
+                "current_user",
+                "other_user",
+                "rcpond_latest_comment",
+                "rcpond_early_comment",
+                "human_note",
+                "unassigned_in_progress",
+            },
+        ),
+        (
+            True,
+            False,
+            {
+                "unassigned_new",
+                "current_user",
+                "rcpond_latest_comment",
+                "rcpond_early_comment",
+                "human_note",
+                "unassigned_in_progress",
+            },
+        ),
+        (False, True, {"unassigned_new", "current_user", "other_user", "human_note", "unassigned_in_progress"}),
+        (False, False, {"unassigned_new", "human_note", "unassigned_in_progress"}),
+    ],
+)
+def test_get_tickets_oauth_longlist_combinations(sn_instance, oauth, long_list, expected):
+    _setup_session(
+        sn_instance,
+        [
+            _raw_ticket(number="unassigned_new", state="New", assigned_to=""),
+            _raw_ticket(number="current_user", assigned_to="Current OAuth User"),
+            _raw_ticket(number="other_user", assigned_to="A.N.Other User"),
+            _raw_ticket(number="rcpond_latest_comment", work_notes=_RCPOND_CURRENT),
+            _raw_ticket(number="rcpond_early_comment", work_notes=_RCPOND_OLD),
+            _raw_ticket(number="human_note", work_notes=_HUMAN_NOTE),
+            _raw_ticket(number="unassigned_in_progress", state="In Progress", assigned_to=""),
+            _raw_ticket(number="closed", state="Closed"),
+            _raw_ticket(number="resolved", state="Resolved"),
+            _raw_ticket(number="cancelled", state="Cancelled"),
+        ],
+    )
+    sn_instance._is_oauth = oauth
+
+    if oauth:
+        with patch.object(sn_instance, "_current_user_display_name", return_value="Current OAuth User"):
+            tickets = sn_instance.get_tickets(long_list=long_list)
+    else:
+        tickets = sn_instance.get_tickets(long_list=long_list)
+
+    assert {t.number for t in tickets} == expected
+
+
+## Bot (static-token) shortlist — unassigned AND not rcpond_processed.
+
+
+# def test_get_tickets_bot_shortlist_includes_unassigned_unprocessed(sn_instance):
+#     _setup_session(sn_instance, [_raw_ticket(number="RES0000001", assigned_to="", work_notes=_HUMAN_NOTE)])
+#     sn_instance._is_oauth = False
+#     tickets = sn_instance.get_tickets()
+#     assert len(tickets) == 1
+
+
+# def test_get_tickets_bot_shortlist_excludes_rcpond_processed(sn_instance):
+#     _setup_session(sn_instance, [_raw_ticket(number="RES0000001", assigned_to="", work_notes=_RCPOND_CURRENT)])
+#     sn_instance._is_oauth = False
+#     tickets = sn_instance.get_tickets()
+#     assert tickets == []
+
+
+# def test_get_tickets_bot_shortlist_excludes_assigned(sn_instance):
+#     """Assigned tickets are excluded from the bot shortlist even if unprocessed."""
+#     _setup_session(sn_instance, [_raw_ticket(number="RES0000001", assigned_to="Bob Jones")])
+#     sn_instance._is_oauth = False
+#     tickets = sn_instance.get_tickets()
+#     assert tickets == []
+
+
+## Bot (static-token) longlist — all non-closed tickets, minus rcpond_processed.
+
+
+# def test_get_tickets_bot_longlist_excludes_rcpond_processed(sn_instance):
+#     _setup_session(
+#         sn_instance,
+#         [
+#             _raw_ticket(number="RES0000001", work_notes=_RCPOND_CURRENT),
+#             _raw_ticket(number="RES0000002", assigned_to="Bob Jones", work_notes=_RCPOND_CURRENT),
+#         ],
+#     )
+#     sn_instance._is_oauth = False
+#     tickets = sn_instance.get_tickets(long_list=True)
+#     assert tickets == []
+
+
+# def test_get_tickets_bot_longlist_includes_assigned_unprocessed(sn_instance):
+#     """Bot longlist includes assigned tickets as long as RCPond has not processed them."""
+#     _setup_session(sn_instance, [_raw_ticket(number="RES0000001", assigned_to="Bob Jones")])
+#     sn_instance._is_oauth = False
+#     tickets = sn_instance.get_tickets(long_list=True)
+#     assert len(tickets) == 1
 
 
 ## ── _current_user_sys_id / _current_user_display_name ──────────────────────

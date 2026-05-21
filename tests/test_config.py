@@ -467,6 +467,7 @@ def test_servicenow_token_optional_when_oauth_present(tmp_path, common_config_va
     oauth_values = {k: v for k, v in common_config_values.items() if k != "servicenow_token"}
     oauth_values["servicenow_client_id"] = "my-client-id"
     oauth_values["servicenow_client_secret"] = "my-client-secret"
+    oauth_values["servicenow_oauth_scope"] = "workspace openid"
     env_file = write_dotenv(tmp_path, oauth_values)
     config = Config(env_path=env_file)
     assert config.servicenow_token is None
@@ -513,6 +514,19 @@ def test_oauth_redirect_port_required_when_oauth_credentials_present(common_conf
         Config(cli_args=oauth_values)
 
 
+def test_oauth_scope_requires_openid(common_config_values):
+    """OAuth credentials with a scope that omits 'openid' must raise ValueError."""
+    with pytest.raises(ValueError, match="openid"):
+        Config(
+            cli_args={
+                **common_config_values,
+                "servicenow_client_id": "cid",
+                "servicenow_client_secret": "csec",
+                "servicenow_oauth_scope": "workspace",
+            }
+        )
+
+
 def test_oauth_scope_and_port_configurable(common_config_values):
     config = Config(
         cli_args={
@@ -528,7 +542,12 @@ def test_oauth_scope_and_port_configurable(common_config_values):
 def test_oauth_wins_when_both_configured(common_config_values):
     ## When all three are set, both token and OAuth fields are present; servicenow.py decides which to use
     config = Config(
-        cli_args={**common_config_values, "servicenow_client_id": "cid", "servicenow_client_secret": "csecret"}
+        cli_args={
+            **common_config_values,
+            "servicenow_client_id": "cid",
+            "servicenow_client_secret": "csecret",
+            "servicenow_oauth_scope": "workspace openid",
+        }
     )
     assert config.servicenow_token is not None
     assert config.servicenow_client_id == "cid"
