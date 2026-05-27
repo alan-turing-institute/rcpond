@@ -107,11 +107,12 @@ class PostTemplatedNoteTool(Tool):
         return vars
 
     def to_openai_dict(self) -> dict:
+        """Templates prefixed '_' are omitted from the template_name enum but their variables are still surfaced to the LLM."""
         llm_vars = self._llm_vars()
         properties: dict = {
             "template_name": {
                 "type": "string",
-                "enum": list(self._templates.keys()),
+                "enum": [k for k in self._templates if not k.startswith("_")],
             }
         }
         for var in sorted(llm_vars):
