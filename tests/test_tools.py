@@ -7,6 +7,7 @@ from rcpond.servicenow import FullTicket, ServiceNow, Ticket
 from rcpond.tools import PostFreeformNoteTool, PostTemplatedNoteTool, get_available_tools
 
 _WORKING_TEMPLATES_DIR = Path("tests/fixtures/working_templates")
+_PREFIX_TEMPLATES_DIR = Path("tests/fixtures/prefix_templates")
 
 
 def _make_config(email_templates_dir=_WORKING_TEMPLATES_DIR):
@@ -125,6 +126,46 @@ def test_post_templated_note_execute_renders_and_posts():
     rendered = service_now.post_note.call_args[1]["note"]
     assert "HPC access" in rendered
     assert "been waiting" in rendered
+
+
+# --- underscore-prefix template filtering ---
+
+
+def test_underscore_prefix_template_excluded_from_schema():
+    tool = PostTemplatedNoteTool(_make_config(_PREFIX_TEMPLATES_DIR))
+    result = tool.to_openai_dict()
+
+    template_enum = result["function"]["parameters"]["properties"]["template_name"]["enum"]
+    assert "mock_main_template.yaml.j2" in template_enum
+    assert "_mock_partial.j2" not in template_enum
+
+
+def test_underscore_prefix_template_vars_included_in_schema():
+    tool = PostTemplatedNoteTool(_make_config(_PREFIX_TEMPLATES_DIR))
+    result = tool.to_openai_dict()
+
+    properties = result["function"]["parameters"]["properties"]
+    ## variable from _mock_partial.j2 must be surfaced so the LLM can supply it
+    assert "partial_footer_text" in properties
+
+
+def test_underscore_prefix_template_available_to_jinja_renderer():
+    service_now = MagicMock(spec=ServiceNow)
+    ticket = MagicMock(spec=FullTicket)
+
+    PostTemplatedNoteTool(_make_config(_PREFIX_TEMPLATES_DIR)).execute(
+        service_now,
+        ticket,
+        template_name="mock_main_template.yaml.j2",
+        main_subject="Test Subject",
+        partial_footer_text="Partial footer",
+    )
+
+    service_now.post_note.assert_called_once()
+    rendered = service_now.post_note.call_args[1]["note"]
+    assert "Test Subject" in rendered
+    assert "I am included from the partial" in rendered  # hardcoded in partial template
+    assert "Partial footer" in rendered
 
 
 # --- get_available_tools ---

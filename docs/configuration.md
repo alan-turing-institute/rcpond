@@ -217,6 +217,16 @@ body: |
   before we can proceed: {{ additional_info_request }}.
 ```
 
+### Partial templates
+
+Template files whose names begin with `_` (e.g. `_sign_off.j2`) are treated as *(partials)[https://jinja.palletsprojects.com/en/stable/templates/#include]*. They are not offered to the LLM as selectable templates, but they are available to the Jinja renderer and can be pulled into other templates using the `{% include %}` directive:
+
+```jinja
+{% include '_sign_off.j2' %}
+```
+
+Any variables defined inside a partial are still surfaced to the LLM as required parameters, so the LLM can supply values that flow through to the included fragment. This makes partials useful for shared content — such as a common sign-off block — that should appear in multiple templates without duplication.
+
 ### How the LLM uses the templates
 
 The LLM prompt includes the 'Rules' file and the full ticket information, as well as the following information about the templates:
