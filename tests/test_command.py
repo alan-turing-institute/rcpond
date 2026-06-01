@@ -9,18 +9,44 @@ Each command has a specific policy:
 - batch_process_tickets:    only ever processes unassigned tickets
 """
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from rcpond import command
+from rcpond.command import ReplyMode, _process_ticket
 from rcpond.config import Config
-from rcpond.servicenow import Ticket
+from rcpond.llm import LLM, LLMResponse
+from rcpond.servicenow import FullTicket, Ticket, _note_prefix
+
+_WORKING_TEMPLATES_DIR = Path("tests/fixtures/working_templates")
+
+
+@pytest.fixture(autouse=True)
+def _isolated_xdg_config(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
 
 
 @pytest.fixture()
-def cfg():
-    return MagicMock(spec=Config)
+def cfg(tmp_path):
+    rules = tmp_path / "RULES.md"
+    rules.write_text("Rule 1: Be helpful.")
+    template = tmp_path / "system_prompt_template.txt"
+    template.write_text("You are an assistant.\n\nRules:\n{rules}")
+    return Config(
+        cli_args={
+            "llm_chat_completions_url": "https://api.example.com",
+            "llm_api_key": "test-key",
+            "llm_model": "gpt-4",
+            "servicenow_token": "sn-token",
+            "servicenow_url": "https://snow.example.com",
+            "servicenow_web_url": "https://example.com",
+            "rules_path": str(rules),
+            "system_prompt_template_path": str(template),
+            "email_templates_dir": str(_WORKING_TEMPLATES_DIR),
+        }
+    )
 
 
 @pytest.fixture()
@@ -66,3 +92,178 @@ def test_display_single_ticket_uses_get_ticket(cfg, ticket):
         MockSN.return_value.get_ticket.return_value = ticket
         command.display_single_ticket(ticket_number="RES0001000", config=cfg)
     MockSN.return_value.get_ticket.assert_called_once_with("RES0001000")
+
+
+## ── _process_ticket reply_mode ──────────────────────────────────────────────
+
+
+@pytest.fixture()
+def mock_llm():
+    llm = MagicMock(spec=LLM)
+    llm.generate.return_value = LLMResponse(
+        response_text="LLM reply", planned_tool_call=None, ticket_number="RES0001000", llm_model="mock-model"
+    )
+    return llm
+
+
+## ── helpers ─────────────────────────────────────────────────────────────────
+
+_FT_DEFAULTS = {
+    "sys_id": "abc123",
+    "number": "RES0001000",
+    "opened_at": "01/01/2026 09:00:00",
+    "requested_for": "Test User",
+    "u_category": "HPC",
+    "u_sub_category": "New",
+    "short_description": "Request access to HPC and cloud computing facilities",
+    "state": "New",
+    "assigned_to": "",
+    "comments": "",
+    "project_title": "",
+    "research_area_programme": "",
+    "if_other_please_specify": "",
+    "pi_supervisor_name": "",
+    "pi_supervisor_email": "",
+    "which_service": "",
+    "subscription_type": "",
+    "which_finance_code": "",
+    "pmu_contact_email": "",
+    "credits_requested": "",
+    "which_facility": "",
+    "if_other_please_specify_facility": "",
+    "cpu_hours_required": "",
+    "gpu_hours_required": "",
+    "new_or_existing_allocation": "",
+    "azure_subscription_id_or_hpc_group_project_id": "",
+    "start_date": "",
+    "end_date": "",
+    "data_sensitivity": "",
+    "platform_justification": "",
+    "research_justification": "",
+    "computational_requirements": "",
+    "users_who_require_access_names_and_emails": "",
+    "cost_compute_time_breakdown": "",
+}
+
+
+## note_prefix() reads rcpond.__version__, so this must be computed at test time
+def _rcpond_work_notes(timestamp: str = "01/01/2026 08:00:00") -> str:
+    return f"{timestamp} - RCPond Bot (Work notes)\n{_note_prefix()}Generated response"
+
+
+def _human_work_notes(timestamp: str = "01/01/2026 09:00:00") -> str:
+    return f"{timestamp} - Human User (Work notes)\nHuman response"
+
+
+def _make_full_ticket(*, is_processed: bool, is_most_recent: bool) -> FullTicket:
+    """Return a real FullTicket whose work_notes drive the actual check methods."""
+    if not is_processed:
+        work_notes = ""
+    elif is_most_recent:
+        work_notes = _rcpond_work_notes()
+    else:
+        ## RCPond posted earlier, human posted more recently
+        work_notes = _rcpond_work_notes("01/01/2026 07:00:00") + "\n\n" + _human_work_notes()
+    return FullTicket(**_FT_DEFAULTS, work_notes=work_notes)
+
+
+def _no_change_fetch(ft: FullTicket) -> dict[str, str]:
+    """Return a _fetch_fields dict that leaves the ticket unchanged after refresh."""
+    return {"work_notes": ft.work_notes, "comments": ft.comments, "state": ft.state, "assigned_to": ft.assigned_to}
+
+
+## ── parametrised pre-check ──────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("mode", "is_processed", "is_most_recent", "expect_llm_called"),
+    [
+        ## cautious: skip as soon as rcpond has ever posted
+        (ReplyMode.cautious, True, True, False),
+        (ReplyMode.cautious, True, False, False),
+        (ReplyMode.cautious, False, False, True),
+        ## default: skip only when rcpond's note is the most recent
+        (ReplyMode.default, True, True, False),
+        (ReplyMode.default, True, False, True),  ## human posted after rcpond → proceed
+        (ReplyMode.default, False, False, True),
+        ## always: never skip regardless of ticket state
+        (ReplyMode.always, True, True, True),
+        (ReplyMode.always, True, False, True),
+    ],
+)
+def test_reply_mode_pre_check(mode, is_processed, is_most_recent, expect_llm_called, ticket, cfg, mock_llm):
+    service_now = MagicMock()
+    ft = _make_full_ticket(is_processed=is_processed, is_most_recent=is_most_recent)
+    service_now.get_full_ticket.return_value = ft
+    ## Ensure refresh doesn't change ticket state (no post-refresh skip interference)
+    service_now._fetch_fields.return_value = _no_change_fetch(ft)
+
+    result = _process_ticket(ticket, dry_run=False, config=cfg, service_now=service_now, llm=mock_llm, reply_mode=mode)
+
+    assert mock_llm.generate.called == expect_llm_called
+    ## A skip response always has llm_model=None; an LLM response has llm_model set
+    if expect_llm_called:
+        assert result.llm_model == "mock-model"
+    else:
+        assert result.llm_model is None
+
+
+## ── post-refresh race-condition ─────────────────────────────────────────────
+## Another process posts while the LLM is working; the mode applies symmetrically.
+
+
+def test_cautious_post_refresh_skips_if_now_processed(ticket, cfg, mock_llm):
+    service_now = MagicMock()
+    ## Initial state: not processed → passes pre-check
+    ft = _make_full_ticket(is_processed=False, is_most_recent=False)
+    service_now.get_full_ticket.return_value = ft
+    ## After refresh: an RCPond note has appeared (concurrent run posted)
+    service_now._fetch_fields.return_value = {
+        "work_notes": _rcpond_work_notes(),
+        "comments": "",
+        "state": "New",
+        "assigned_to": "",
+    }
+
+    result = _process_ticket(
+        ticket, dry_run=False, config=cfg, service_now=service_now, llm=mock_llm, reply_mode=ReplyMode.cautious
+    )
+
+    assert mock_llm.generate.called  ## pre-check passed
+    assert result.llm_model is None  ## post-refresh triggered a skip
+
+
+def test_default_post_refresh_skips_if_now_most_recent(ticket, cfg, mock_llm):
+    service_now = MagicMock()
+    ## Initial state: rcpond posted but human is most recent → passes pre-check
+    ft = _make_full_ticket(is_processed=True, is_most_recent=False)
+    service_now.get_full_ticket.return_value = ft
+    ## After refresh: a concurrent RCPond run posted, so rcpond is now most recent
+    service_now._fetch_fields.return_value = {
+        "work_notes": _rcpond_work_notes(),
+        "comments": "",
+        "state": "New",
+        "assigned_to": "",
+    }
+
+    result = _process_ticket(
+        ticket, dry_run=False, config=cfg, service_now=service_now, llm=mock_llm, reply_mode=ReplyMode.default
+    )
+
+    assert mock_llm.generate.called  ## pre-check passed
+    assert result.llm_model is None  ## post-refresh triggered a skip
+
+
+def test_always_post_refresh_never_skips(ticket, cfg, mock_llm):
+    service_now = MagicMock()
+    ## Even when both checks would skip, always mode ignores them entirely
+    ft = _make_full_ticket(is_processed=True, is_most_recent=True)
+    service_now.get_full_ticket.return_value = ft
+    service_now._fetch_fields.return_value = _no_change_fetch(ft)
+
+    result = _process_ticket(
+        ticket, dry_run=False, config=cfg, service_now=service_now, llm=mock_llm, reply_mode=ReplyMode.always
+    )
+
+    assert mock_llm.generate.called
+    assert result.llm_model == "mock-model"  ## no post-refresh skip

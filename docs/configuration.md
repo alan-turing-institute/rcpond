@@ -127,6 +127,26 @@ $ rcpond --env-file .env display-all
 > [!WARNING]
 > `--env-file` completely replaces `~/.config/rcpond/default.config` — it does **not** merge with it. The `.env` file must contain all required fields.
 
+## Reply mode
+
+The `process-next`, `process-ticket`, and `process-all` subcommands accept a `--reply-mode` option that controls when rcpond will skip a ticket it has already seen:
+
+| Mode | Behaviour |
+|------|-----------|
+| `default` | Skip if rcpond's note is the **most recent** activity on the ticket. Proceed if a human (or another tool) has posted since. |
+| `cautious` | Skip if rcpond has **ever** posted on the ticket, regardless of subsequent activity. |
+| `always` | **Never skip** — always send a reply regardless of the ticket's history. |
+
+`default` is the recommended mode for automated runs: it prevents duplicate replies when rcpond has already handled a ticket, but re-engages if a human asks a follow-up question.
+
+```bash
+$ rcpond process-next --reply-mode cautious
+$ rcpond process-ticket RES0001234 --reply-mode always
+$ rcpond process-all --yes-i-am-sure --reply-mode default
+```
+
+Both the pre-LLM skip check and the post-LLM race-condition guard (which detects concurrent rcpond runs) respect the chosen mode symmetrically.
+
 ## ServiceNow authentication
 
 RCPond supports two ways to authenticate with the ServiceNow API. If both are configured, OAuth takes precedence.

@@ -37,6 +37,7 @@ import typer
 from rich import print
 
 from rcpond import command
+from rcpond.command import ReplyMode
 from rcpond.config import Config
 
 cli = typer.Typer(name="rcpond", no_args_is_help=True)
@@ -153,15 +154,22 @@ def browse_ticket(ctx: typer.Context, ticket_number: str):
 
 
 @cli.command()
-def process_next(ctx: typer.Context, dry_run: bool = False):
+def process_next(ctx: typer.Context, dry_run: bool = False, reply_mode: ReplyMode = ReplyMode.default):
     """Review an arbitrarily selected unassigned ticket via the LLM."""
-    command.process_next_ticket(dry_run=dry_run, config=_config(ctx))
+    command.process_next_ticket(dry_run=dry_run, reply_mode=reply_mode, config=_config(ctx))
 
 
 @cli.command()
-def process_ticket(ctx: typer.Context, ticket_number: str, dry_run: bool = False):
+def process_ticket(
+    ctx: typer.Context,
+    ticket_number: str,
+    dry_run: bool = False,
+    reply_mode: ReplyMode = ReplyMode.default,
+):
     """Review a specific ticket (e.g. RES0001234) via the LLM."""
-    command.process_specific_ticket(ticket_number=ticket_number, dry_run=dry_run, config=_config(ctx))
+    command.process_specific_ticket(
+        ticket_number=ticket_number, dry_run=dry_run, reply_mode=reply_mode, config=_config(ctx)
+    )
 
 
 try:
@@ -202,6 +210,7 @@ except ImportError:
 def process_all(
     ctx: typer.Context,
     dry_run: bool = False,
+    reply_mode: ReplyMode = ReplyMode.default,
     ## Single flag name (no "--flag/--no-flag" form) suppresses Typer's auto-generated
     ## negative, which would otherwise produce the unreadable `--no-yes-i-am-sure`.
     yes_i_am_sure: Annotated[
@@ -210,7 +219,7 @@ def process_all(
 ):
     """Review all unassigned tickets via the LLM."""
     if yes_i_am_sure:
-        command.batch_process_tickets(dry_run=dry_run, config=_config(ctx))
+        command.batch_process_tickets(dry_run=dry_run, reply_mode=reply_mode, config=_config(ctx))
     else:
         msg = "The [bold cyan]--yes-i-am-sure[/bold cyan] option MUST be specified when using the [bold]process-all[/bold] subcommand."
         print(msg)
