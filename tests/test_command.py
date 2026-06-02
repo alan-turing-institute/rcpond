@@ -177,60 +177,34 @@ def test_reply_mode_pre_check(mode, is_processed, is_most_recent, expect_llm_cal
 
 ## ── post-refresh race-condition ─────────────────────────────────────────────
 ## Another process posts while the LLM is working; the mode applies symmetrically.
+## Columns: mode | initial state (passes pre-check) | work_notes after refresh | expect skip
 
 
-def test_cautious_post_refresh_skips_if_now_processed(ticket, cfg, mock_llm):
+@pytest.mark.parametrize(
+    ("mode", "initial_is_processed", "initial_is_most_recent", "refresh_work_notes", "expect_skip"),
+    [
+        ## cautious: concurrent run posts → is_rcpond_processed becomes True → skip
+        (ReplyMode.cautious, False, False, _rcpond_work_notes(), True),
+        ## default: concurrent run posts → is_rcpond_most_recent_process becomes True → skip
+        (ReplyMode.default, True, False, _rcpond_work_notes(), True),
+        ## always: no skip even when state changes after refresh
+        (ReplyMode.always, True, True, None, False),
+    ],
+)
+def test_post_refresh_race_condition(
+    mode, initial_is_processed, initial_is_most_recent, refresh_work_notes, expect_skip, ticket, cfg, mock_llm
+):
     service_now = MagicMock()
-    ## Initial state: not processed → passes pre-check
-    ft = _make_full_ticket(ticket, is_processed=False, is_most_recent=False)
+    ft = _make_full_ticket(ticket, is_processed=initial_is_processed, is_most_recent=initial_is_most_recent)
     service_now.get_full_ticket.return_value = ft
-    ## After refresh: an RCPond note has appeared (concurrent run posted)
-    service_now._fetch_fields.return_value = {
-        "work_notes": _rcpond_work_notes(),
-        "comments": "",
-        "state": "New",
-        "assigned_to": "",
-    }
-
-    result = _process_ticket(
-        ticket, dry_run=False, config=cfg, service_now=service_now, llm=mock_llm, reply_mode=ReplyMode.cautious
+    ## None → ticket state unchanged after refresh; otherwise simulate a concurrent post
+    service_now._fetch_fields.return_value = (
+        {"work_notes": refresh_work_notes, "comments": "", "state": "New", "assigned_to": ""}
+        if refresh_work_notes is not None
+        else _no_change_fetch(ft)
     )
 
-    assert mock_llm.generate.called  ## pre-check passed
-    assert result.llm_model is None  ## post-refresh triggered a skip
+    result = _process_ticket(ticket, dry_run=False, config=cfg, service_now=service_now, llm=mock_llm, reply_mode=mode)
 
-
-def test_default_post_refresh_skips_if_now_most_recent(ticket, cfg, mock_llm):
-    service_now = MagicMock()
-    ## Initial state: rcpond posted but human is most recent → passes pre-check
-    ft = _make_full_ticket(ticket, is_processed=True, is_most_recent=False)
-    service_now.get_full_ticket.return_value = ft
-    ## After refresh: a concurrent RCPond run posted, so rcpond is now most recent
-    service_now._fetch_fields.return_value = {
-        "work_notes": _rcpond_work_notes(),
-        "comments": "",
-        "state": "New",
-        "assigned_to": "",
-    }
-
-    result = _process_ticket(
-        ticket, dry_run=False, config=cfg, service_now=service_now, llm=mock_llm, reply_mode=ReplyMode.default
-    )
-
-    assert mock_llm.generate.called  ## pre-check passed
-    assert result.llm_model is None  ## post-refresh triggered a skip
-
-
-def test_always_post_refresh_never_skips(ticket, cfg, mock_llm):
-    service_now = MagicMock()
-    ## Even when both checks would skip, always mode ignores them entirely
-    ft = _make_full_ticket(ticket, is_processed=True, is_most_recent=True)
-    service_now.get_full_ticket.return_value = ft
-    service_now._fetch_fields.return_value = _no_change_fetch(ft)
-
-    result = _process_ticket(
-        ticket, dry_run=False, config=cfg, service_now=service_now, llm=mock_llm, reply_mode=ReplyMode.always
-    )
-
-    assert mock_llm.generate.called
-    assert result.llm_model == "mock-model"  ## no post-refresh skip
+    assert mock_llm.generate.called  ## pre-check always passes in these cases
+    assert result.llm_model is (None if expect_skip else "mock-model")
