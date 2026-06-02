@@ -50,7 +50,7 @@ def _process_ticket(
     config: Config,
     service_now: ServiceNow,
     llm: LLM,
-    reply_mode: ReplyMode = ReplyMode.default,
+    reply_mode: ReplyMode,
 ) -> LLMResponse:
     """Core logic for processing a single ticket via the LLM.
 
@@ -71,7 +71,7 @@ def _process_ticket(
         The LLM client.
     reply_mode : ReplyMode
         Controls when to skip a ticket based on prior RCPond activity.
-        See ``ReplyMode`` for the three options. Defaults to ``ReplyMode.default``.
+        See ``ReplyMode`` for the options.
     """
     full_ticket: FullTicket = service_now.get_full_ticket(ticket)
     if _should_skip(full_ticket, reply_mode):
@@ -145,7 +145,7 @@ def get_ticket_url(ticket_number: str, config: Config | None = None) -> str:
     return service_now.web_url(ticket)
 
 
-def process_next_ticket(dry_run: bool, reply_mode: ReplyMode = ReplyMode.default, config: Config | None = None):
+def process_next_ticket(dry_run: bool, reply_mode: ReplyMode, config: Config | None = None):
     """Process an arbitrarily selected ServiceNow ticket via the LLM.
 
     The LLM response and reasoning are displayed to the user. If the LLM
@@ -170,9 +170,7 @@ def process_next_ticket(dry_run: bool, reply_mode: ReplyMode = ReplyMode.default
     display_response(resp)
 
 
-def process_specific_ticket(
-    ticket_number: str, dry_run: bool, reply_mode: ReplyMode = ReplyMode.default, config: Config | None = None
-):
+def process_specific_ticket(ticket_number: str, dry_run: bool, reply_mode: ReplyMode, config: Config | None = None):
     """Process the given ServiceNow ticket via the LLM.
 
     The LLM response and reasoning are displayed to the user. If the LLM
@@ -198,7 +196,7 @@ def process_specific_ticket(
     display_response(resp)
 
 
-def batch_process_tickets(dry_run: bool, reply_mode: ReplyMode = ReplyMode.default, config: Config | None = None):
+def batch_process_tickets(dry_run: bool, reply_mode: ReplyMode, config: Config | None = None):
     """Process all unassigned ServiceNow tickets via the LLM.
 
     Each ticket is reviewed individually. The LLM response and reasoning are
@@ -276,7 +274,14 @@ def batch_evaluate_tickets(in_dir: Path, out_file: Path, num_runs: int = 1, conf
     for run in range(num_runs):
         print(f"\n--- Run {run + 1}/{num_runs} ---")
         for ticket in azure_tickets:
-            resp = _process_ticket(ticket=ticket, dry_run=True, config=config, service_now=service_now, llm=llm)
+            resp = _process_ticket(
+                ticket=ticket,
+                dry_run=True,
+                config=config,
+                service_now=service_now,
+                llm=llm,
+                reply_mode=ReplyMode.always,
+            )
             results[ticket.number].append(resp)
             print()
 

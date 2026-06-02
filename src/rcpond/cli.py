@@ -153,8 +153,20 @@ def browse_ticket(ctx: typer.Context, ticket_number: str):
     webbrowser.open(url)
 
 
+_REPLY_MODE_HELP = (
+    "Controls when to skip a ticket based on prior rcpond activity. "
+    "'default': skip if rcpond's note is the most recent activity (re-engages after human follow-ups). "
+    "'cautious': skip if rcpond has ever posted on the ticket. "
+    "'always': never skip."
+)
+
+
 @cli.command()
-def process_next(ctx: typer.Context, dry_run: bool = False, reply_mode: ReplyMode = ReplyMode.default):
+def process_next(
+    ctx: typer.Context,
+    dry_run: bool = False,
+    reply_mode: Annotated[ReplyMode, typer.Option(help=_REPLY_MODE_HELP)] = ReplyMode.default,
+):
     """Review an arbitrarily selected unassigned ticket via the LLM."""
     command.process_next_ticket(dry_run=dry_run, reply_mode=reply_mode, config=_config(ctx))
 
@@ -164,7 +176,7 @@ def process_ticket(
     ctx: typer.Context,
     ticket_number: str,
     dry_run: bool = False,
-    reply_mode: ReplyMode = ReplyMode.default,
+    reply_mode: Annotated[ReplyMode, typer.Option(help=_REPLY_MODE_HELP)] = ReplyMode.default,
 ):
     """Review a specific ticket (e.g. RES0001234) via the LLM."""
     command.process_specific_ticket(
