@@ -11,6 +11,7 @@ The four main entry points are:
 """
 
 import json
+from enum import Enum
 from pathlib import Path
 
 from rcpond.config import Config
@@ -21,7 +22,36 @@ from rcpond.servicenow import FullTicket, ServiceNow, Ticket
 from rcpond.tools import get_available_tools
 
 
-def _process_ticket(ticket: Ticket, dry_run: bool, config: Config, service_now: ServiceNow, llm: LLM) -> LLMResponse:
+class ReplyMode(str, Enum):
+    """Controls which tickets _process_ticket will skip.
+
+    cautious: skip if RCPond has ever posted on the ticket.
+    default:  skip only when RCPond's comment or work note is the most recent activity.
+    always:   never skip regardless of ticket state.
+    """
+
+    cautious = "cautious"
+    default = "default"
+    always = "always"
+
+
+def _should_skip(full_ticket: FullTicket, reply_mode: ReplyMode) -> bool:
+    """Return True if the ticket should be skipped given the reply mode."""
+    if reply_mode == ReplyMode.cautious:
+        return full_ticket.is_rcpond_processed()
+    if reply_mode == ReplyMode.default:
+        return full_ticket.is_rcpond_most_recent_process()
+    return False  ## always
+
+
+def _process_ticket(
+    ticket: Ticket,
+    dry_run: bool,
+    config: Config,
+    service_now: ServiceNow,
+    llm: LLM,
+    reply_mode: ReplyMode,
+) -> LLMResponse:
     """Core logic for processing a single ticket via the LLM.
 
     Fetches full ticket details, constructs the prompt, calls the LLM, and
@@ -39,14 +69,15 @@ def _process_ticket(ticket: Ticket, dry_run: bool, config: Config, service_now: 
         The ServiceNow client.
     llm : LLM
         The LLM client.
+    reply_mode : ReplyMode
+        Controls when to skip a ticket based on prior RCPond activity.
+        See ``ReplyMode`` for the options.
     """
     full_ticket: FullTicket = service_now.get_full_ticket(ticket)
-    if full_ticket.is_rcpond_processed():
+    if _should_skip(full_ticket, reply_mode):
         prev_time = full_ticket.get_combined_notes()[-1].datetime_stamp
         msg = f"Skipping: There has been no new activity on ticket '{full_ticket.number}' since RCPond's previous review on {prev_time}"
-        # We use a LLMResponse obj for ease of downstream display etc
-        # Setting the llm_model=None indicates that the response was
-        # deterministic, and not LLM generated.
+        ## llm_model=None signals a deterministic (non-LLM) response
         return LLMResponse(
             response_text="", reasoning=msg, planned_tool_call=None, ticket_number=full_ticket.number, llm_model=None
         )
@@ -57,14 +88,12 @@ def _process_ticket(ticket: Ticket, dry_run: bool, config: Config, service_now: 
         system_prompt, user_prompt, config.llm_model, tools=tools, ticket_number=ticket.number
     )
 
-    # Check that no-one else has replied whilst the LLM was working
+    ## Check that no-one else has replied whilst the LLM was working
     full_ticket.refresh(service_now)
-    if full_ticket.is_rcpond_processed():
+    if _should_skip(full_ticket, reply_mode):
         prev_msg = full_ticket.get_combined_notes()[-1]
-        msg = f"Skipping: Another user has comments on ticket '{full_ticket.number}' whilst RCPond was working. There message is\n'{prev_msg}'"
-        # We use a LLMResponse obj for ease of downstream display etc
-        # Setting the llm_model=None indicates that the response was
-        # deterministic, and not LLM generated.
+        msg = f"Skipping: Another user has comments on ticket '{full_ticket.number}' whilst RCPond was working. Their message is\n'{prev_msg}'"
+        ## llm_model=None signals a deterministic (non-LLM) response
         return LLMResponse(
             response_text="", reasoning=msg, planned_tool_call=None, ticket_number=full_ticket.number, llm_model=None
         )
@@ -116,7 +145,7 @@ def get_ticket_url(ticket_number: str, config: Config | None = None) -> str:
     return service_now.web_url(ticket)
 
 
-def process_next_ticket(dry_run: bool, config: Config | None = None):
+def process_next_ticket(dry_run: bool, reply_mode: ReplyMode, config: Config | None = None):
     """Process an arbitrarily selected ServiceNow ticket via the LLM.
 
     The LLM response and reasoning are displayed to the user. If the LLM
@@ -126,6 +155,8 @@ def process_next_ticket(dry_run: bool, config: Config | None = None):
     ----------
     dry_run : bool
         If True, planned tool calls are not executed.
+    reply_mode : ReplyMode
+        Controls when to skip a ticket based on prior RCPond activity.
     config : Config | None
         Configuration to use. If None, Config() is constructed from the environment.
     """
@@ -134,12 +165,12 @@ def process_next_ticket(dry_run: bool, config: Config | None = None):
     llm: LLM = LLM(config)
     tickets: list[Ticket] = service_now.get_tickets()
     next_ticket = tickets.pop()
-    resp: LLMResponse = _process_ticket(next_ticket, dry_run, config, service_now, llm)
+    resp: LLMResponse = _process_ticket(next_ticket, dry_run, config, service_now, llm, reply_mode)
     display_short_ticket(next_ticket)
     display_response(resp)
 
 
-def process_specific_ticket(ticket_number: str, dry_run: bool, config: Config | None = None):
+def process_specific_ticket(ticket_number: str, dry_run: bool, reply_mode: ReplyMode, config: Config | None = None):
     """Process the given ServiceNow ticket via the LLM.
 
     The LLM response and reasoning are displayed to the user. If the LLM
@@ -151,6 +182,8 @@ def process_specific_ticket(ticket_number: str, dry_run: bool, config: Config | 
         The ticket number (e.g. ``"RES0001234"``) to process.
     dry_run : bool
         If True, planned tool calls are not executed.
+    reply_mode : ReplyMode
+        Controls when to skip a ticket based on prior RCPond activity.
     config : Config | None
         Configuration to use. If None, Config() is constructed from the environment.
     """
@@ -158,12 +191,12 @@ def process_specific_ticket(ticket_number: str, dry_run: bool, config: Config | 
     service_now: ServiceNow = ServiceNow(config)
     llm: LLM = LLM(config)
     ticket = service_now.get_ticket(ticket_number)
-    resp: LLMResponse = _process_ticket(ticket, dry_run, config, service_now, llm)
+    resp: LLMResponse = _process_ticket(ticket, dry_run, config, service_now, llm, reply_mode)
     display_short_ticket(ticket)
     display_response(resp)
 
 
-def batch_process_tickets(dry_run: bool, config: Config | None = None):
+def batch_process_tickets(dry_run: bool, reply_mode: ReplyMode, config: Config | None = None):
     """Process all unassigned ServiceNow tickets via the LLM.
 
     Each ticket is reviewed individually. The LLM response and reasoning are
@@ -174,6 +207,8 @@ def batch_process_tickets(dry_run: bool, config: Config | None = None):
     ----------
     dry_run : bool
         If True, planned tool calls are not executed.
+    reply_mode : ReplyMode
+        Controls when to skip a ticket based on prior RCPond activity.
     config : Config | None
         Configuration to use. If None, Config() is constructed from the environment.
     """
@@ -185,7 +220,7 @@ def batch_process_tickets(dry_run: bool, config: Config | None = None):
     if len(all_tickets) > 0:
         for num, ticket in enumerate(all_tickets, start=1):
             print(f"Processing ticket {num} of {len(all_tickets)}")
-            resp: LLMResponse = _process_ticket(ticket, dry_run, config, service_now, llm)
+            resp: LLMResponse = _process_ticket(ticket, dry_run, config, service_now, llm, reply_mode)
             display_short_ticket(ticket)
             display_response(resp)
     else:
@@ -239,7 +274,14 @@ def batch_evaluate_tickets(in_dir: Path, out_file: Path, num_runs: int = 1, conf
     for run in range(num_runs):
         print(f"\n--- Run {run + 1}/{num_runs} ---")
         for ticket in azure_tickets:
-            resp = _process_ticket(ticket=ticket, dry_run=True, config=config, service_now=service_now, llm=llm)
+            resp = _process_ticket(
+                ticket=ticket,
+                dry_run=True,
+                config=config,
+                service_now=service_now,
+                llm=llm,
+                reply_mode=ReplyMode.always,
+            )
             results[ticket.number].append(resp)
             print()
 

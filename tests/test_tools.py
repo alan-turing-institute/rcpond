@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from rcpond.command import ReplyMode
 from rcpond.servicenow import FullTicket, ServiceNow, Ticket
 from rcpond.tools import PostFreeformNoteTool, PostTemplatedNoteTool, get_available_tools
 
@@ -234,4 +235,6 @@ def test_call_tool_unknown_tool_raises():
     )
 
     with pytest.raises(ValueError, match="nonexistent_tool"):
-        _process_ticket(ticket, dry_run=False, config=config, service_now=service_now, llm=llm)
+        _process_ticket(
+            ticket, dry_run=False, config=config, service_now=service_now, llm=llm, reply_mode=ReplyMode.default
+        )
