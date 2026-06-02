@@ -9,6 +9,7 @@ Each command has a specific policy:
 - batch_process_tickets:    only ever processes unassigned tickets
 """
 
+import dataclasses
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -108,42 +109,8 @@ def mock_llm():
 
 ## ── helpers ─────────────────────────────────────────────────────────────────
 
-_FT_DEFAULTS = {
-    "sys_id": "abc123",
-    "number": "RES0001000",
-    "opened_at": "01/01/2026 09:00:00",
-    "requested_for": "Test User",
-    "u_category": "HPC",
-    "u_sub_category": "New",
-    "short_description": "Request access to HPC and cloud computing facilities",
-    "state": "New",
-    "assigned_to": "",
-    "comments": "",
-    "project_title": "",
-    "research_area_programme": "",
-    "if_other_please_specify": "",
-    "pi_supervisor_name": "",
-    "pi_supervisor_email": "",
-    "which_service": "",
-    "subscription_type": "",
-    "which_finance_code": "",
-    "pmu_contact_email": "",
-    "credits_requested": "",
-    "which_facility": "",
-    "if_other_please_specify_facility": "",
-    "cpu_hours_required": "",
-    "gpu_hours_required": "",
-    "new_or_existing_allocation": "",
-    "azure_subscription_id_or_hpc_group_project_id": "",
-    "start_date": "",
-    "end_date": "",
-    "data_sensitivity": "",
-    "platform_justification": "",
-    "research_justification": "",
-    "computational_requirements": "",
-    "users_who_require_access_names_and_emails": "",
-    "cost_compute_time_breakdown": "",
-}
+_ticket_field_names = {f.name for f in dataclasses.fields(Ticket)}
+_FT_EXTRA_DEFAULTS = {f.name: "" for f in dataclasses.fields(FullTicket) if f.name not in _ticket_field_names}
 
 
 ## note_prefix() reads rcpond.__version__, so this must be computed at test time
@@ -155,7 +122,7 @@ def _human_work_notes(timestamp: str = "01/01/2026 09:00:00") -> str:
     return f"{timestamp} - Human User (Work notes)\nHuman response"
 
 
-def _make_full_ticket(*, is_processed: bool, is_most_recent: bool) -> FullTicket:
+def _make_full_ticket(ticket: Ticket, *, is_processed: bool, is_most_recent: bool) -> FullTicket:
     """Return a real FullTicket whose work_notes drive the actual check methods."""
     if not is_processed:
         work_notes = ""
@@ -164,7 +131,7 @@ def _make_full_ticket(*, is_processed: bool, is_most_recent: bool) -> FullTicket
     else:
         ## RCPond posted earlier, human posted more recently
         work_notes = _rcpond_work_notes("01/01/2026 07:00:00") + "\n\n" + _human_work_notes()
-    return FullTicket(**_FT_DEFAULTS, work_notes=work_notes)
+    return FullTicket.from_Ticket(ticket, **_FT_EXTRA_DEFAULTS, work_notes=work_notes)
 
 
 def _no_change_fetch(ft: FullTicket) -> dict[str, str]:
@@ -193,7 +160,7 @@ def _no_change_fetch(ft: FullTicket) -> dict[str, str]:
 )
 def test_reply_mode_pre_check(mode, is_processed, is_most_recent, expect_llm_called, ticket, cfg, mock_llm):
     service_now = MagicMock()
-    ft = _make_full_ticket(is_processed=is_processed, is_most_recent=is_most_recent)
+    ft = _make_full_ticket(ticket, is_processed=is_processed, is_most_recent=is_most_recent)
     service_now.get_full_ticket.return_value = ft
     ## Ensure refresh doesn't change ticket state (no post-refresh skip interference)
     service_now._fetch_fields.return_value = _no_change_fetch(ft)
@@ -215,7 +182,7 @@ def test_reply_mode_pre_check(mode, is_processed, is_most_recent, expect_llm_cal
 def test_cautious_post_refresh_skips_if_now_processed(ticket, cfg, mock_llm):
     service_now = MagicMock()
     ## Initial state: not processed → passes pre-check
-    ft = _make_full_ticket(is_processed=False, is_most_recent=False)
+    ft = _make_full_ticket(ticket, is_processed=False, is_most_recent=False)
     service_now.get_full_ticket.return_value = ft
     ## After refresh: an RCPond note has appeared (concurrent run posted)
     service_now._fetch_fields.return_value = {
@@ -236,7 +203,7 @@ def test_cautious_post_refresh_skips_if_now_processed(ticket, cfg, mock_llm):
 def test_default_post_refresh_skips_if_now_most_recent(ticket, cfg, mock_llm):
     service_now = MagicMock()
     ## Initial state: rcpond posted but human is most recent → passes pre-check
-    ft = _make_full_ticket(is_processed=True, is_most_recent=False)
+    ft = _make_full_ticket(ticket, is_processed=True, is_most_recent=False)
     service_now.get_full_ticket.return_value = ft
     ## After refresh: a concurrent RCPond run posted, so rcpond is now most recent
     service_now._fetch_fields.return_value = {
@@ -257,7 +224,7 @@ def test_default_post_refresh_skips_if_now_most_recent(ticket, cfg, mock_llm):
 def test_always_post_refresh_never_skips(ticket, cfg, mock_llm):
     service_now = MagicMock()
     ## Even when both checks would skip, always mode ignores them entirely
-    ft = _make_full_ticket(is_processed=True, is_most_recent=True)
+    ft = _make_full_ticket(ticket, is_processed=True, is_most_recent=True)
     service_now.get_full_ticket.return_value = ft
     service_now._fetch_fields.return_value = _no_change_fetch(ft)
 
