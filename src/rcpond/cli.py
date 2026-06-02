@@ -155,7 +155,7 @@ def browse_ticket(ctx: typer.Context, ticket_number: str):
 
 _REPLY_MODE_HELP = (
     "Controls when to skip a ticket based on prior rcpond activity. "
-    "'default': skip if rcpond's note is the most recent activity (re-engages after human follow-ups). "
+    "'default': skip if rcpond's comment or work note is the most recent activity (re-engages after human follow-ups). "
     "'cautious': skip if rcpond has ever posted on the ticket. "
     "'always': never skip."
 )

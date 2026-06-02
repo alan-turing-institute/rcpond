@@ -149,7 +149,7 @@ def _no_change_fetch(ft: FullTicket) -> dict[str, str]:
         (ReplyMode.cautious, True, True, False),
         (ReplyMode.cautious, True, False, False),
         (ReplyMode.cautious, False, False, True),
-        ## default: skip only when rcpond's note is the most recent
+        ## default: skip only when rcpond's comment or work note is the most recent
         (ReplyMode.default, True, True, False),
         (ReplyMode.default, True, False, True),  ## human posted after rcpond → proceed
         (ReplyMode.default, False, False, True),

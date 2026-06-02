@@ -133,7 +133,7 @@ The `process-next`, `process-ticket`, and `process-all` subcommands accept a `--
 
 | Mode | Behaviour |
 |------|-----------|
-| `default` | Skip if rcpond's note is the **most recent** activity on the ticket. Proceed if a human (or another tool) has posted since. |
+| `default` | Skip if rcpond's comment or work note is the **most recent** activity on the ticket. Proceed if a human (or another tool) has posted since. |
 | `cautious` | Skip if rcpond has **ever** posted on the ticket, regardless of subsequent activity. |
 | `always` | **Never skip** — always send a reply regardless of the ticket's history. |
 

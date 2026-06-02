@@ -26,7 +26,7 @@ class ReplyMode(str, Enum):
     """Controls which tickets _process_ticket will skip.
 
     cautious: skip if RCPond has ever posted on the ticket.
-    default:  skip only when RCPond's note is the most recent activity.
+    default:  skip only when RCPond's comment or work note is the most recent activity.
     always:   never skip regardless of ticket state.
     """
 
