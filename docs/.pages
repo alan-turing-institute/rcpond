@@ -5,6 +5,7 @@ nav:
     - command_reference.md
   - Development:
     - contributing.md
+    - changelog.md
     - licence.md
     - code_of_conduct.md
   - API:

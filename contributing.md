@@ -117,7 +117,7 @@ This renders the entire `rcpond` package recursively. Docstrings should follow
 [NumPy style](https://numpydoc.readthedocs.io/en/latest/format.html).
 
 
-## Verifiying and serving the docs locally
+## Verifying and serving the docs locally
 
 Install the docs dependencies and start the MkDocs development server:
 
@@ -137,3 +137,11 @@ mkdocs serve
 ```
 
 The site is then available at `http://127.0.0.1:8000`.
+
+# Changelog
+
+Notable changes should be recorded in `CHANGELOG.md`, following the
+[Keep a Changelog](https://keepachangelog.com/en/1.0.0/) format. Add an entry
+under the `[Unreleased]` section for any user-facing change: new features go
+under `Added`, behaviour changes under `Changed`, and bug fixes under `Fixed`.
+Version sections are created when a release is tagged.
