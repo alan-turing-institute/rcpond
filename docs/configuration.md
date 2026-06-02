@@ -145,7 +145,7 @@ $ rcpond process-ticket RES0001234 --reply-mode always
 $ rcpond process-all --yes-i-am-sure --reply-mode default
 ```
 
-Both the pre-LLM skip check and the post-LLM race-condition guard (which detects concurrent rcpond runs) respect the chosen mode symmetrically.
+The reply mode is used in two places; Prior to calling the LLM, to check for previous replies, and again after the LLM has responded to guard against concurrent runs.
 
 ## ServiceNow authentication
 
