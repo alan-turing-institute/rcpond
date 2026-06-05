@@ -7,7 +7,7 @@ import pytest
 import requests as _requests  ## used by test_token_introspection
 
 from rcpond import config, servicenow
-from rcpond.servicenow import FullTicket, NoteEntry, ServiceNow, Ticket
+from rcpond.servicenow import ComputeAllocationRequestTicket, NoteEntry, ServiceNow, Ticket
 
 
 def _make_jwt(sub: str) -> str:
@@ -225,9 +225,9 @@ def test_parse_comment_display_values():
 ## ── is_rcpond_processed / is_rcpond_most_recent_process ─────────────────────
 
 
-def _make_ticket(work_notes: str = "", comments: str = "") -> FullTicket:
-    """Minimal FullTicket with controllable note strings; all other fields are empty."""
-    return FullTicket(
+def _make_ticket(work_notes: str = "", comments: str = "") -> ComputeAllocationRequestTicket:
+    """Minimal ComputeAllocationRequestTicket with controllable note strings; all other fields are empty."""
+    return ComputeAllocationRequestTicket(
         sys_id="abc",
         number="RES0001000",
         opened_at="",

@@ -11,7 +11,7 @@ API. The only methods are:
 - `post_note()` (Not implemented) Post a “work note” to a ticket.
 
 Tickets are returned as instances of a `Ticket` dataclass which
-contains a few, high-level details. The subclass `FullTicket` contains
+contains a few, high-level details. The subclass `ComputeAllocationRequestTicket` contains
 ,in addition, the fields submitted by the requestor on the request form.
 
 The URL of the ServiceNow API is hardcoded, but you will need to
@@ -134,7 +134,7 @@ class NoteEntry:
 
 
 @dataclass
-class FullTicket(Ticket):
+class ComputeAllocationRequestTicket(Ticket):
     """A ticket; includes full details from the original submission."""
 
     project_title: str
@@ -164,7 +164,7 @@ class FullTicket(Ticket):
 
     @classmethod
     def from_Ticket(cls, t: Ticket, **extras):
-        """Create a new FullTicket starting from a Ticket and passing
+        """Create a new ComputeAllocationRequestTicket starting from a Ticket and passing
         only the additional fields.
         """
         base = dataclasses.asdict(t)
@@ -350,11 +350,11 @@ class ServiceNow:
         """
         return f"{self._web_base_url.rstrip('/')}/{self._TABLE}.do?sys_id={tkt.sys_id}"
 
-    def get_full_ticket(self, tkt: Ticket) -> FullTicket:
+    def get_full_ticket(self, tkt: Ticket) -> ComputeAllocationRequestTicket:
         """Get full ticket details."""
 
         ## Get details from ServiceNow as JSON
-        extra_fields = {field.name for field in dataclasses.fields(FullTicket)} - {
+        extra_fields = {field.name for field in dataclasses.fields(ComputeAllocationRequestTicket)} - {
             field.name for field in dataclasses.fields(Ticket)
         }
 
@@ -370,12 +370,12 @@ class ServiceNow:
         resp.raise_for_status()
 
         ## Parse the returned JSON, stripping the "variables." prefix so the keys
-        ## match FullTicket field names.
+        ## match ComputeAllocationRequestTicket field names.
         result = {
             (k[len("variables.") :] if k.startswith("variables.") else k): v for k, v in resp.json()["result"].items()
         }
 
-        return FullTicket.from_Ticket(tkt, **_extract_ticket_fields(result, extra_fields))
+        return ComputeAllocationRequestTicket.from_Ticket(tkt, **_extract_ticket_fields(result, extra_fields))
 
     def _fetch_fields(self, sys_id: str, fields: set[str]) -> dict[str, str]:
         """Fetch display values for the specified fields from a single record.

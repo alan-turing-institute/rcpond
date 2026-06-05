@@ -1,10 +1,10 @@
 Treat `Ticket` in `src/rcpond/servicenow.py` as the common base for all ticket types.
-Treat the current `FullTicket` as canonical for `Compute Allocation Request` tickets.
+Treat the current `ComputeAllocationRequestTicket` as canonical for `Compute Allocation Request` tickets.
 Use `temp/reg_workspace_service_now_fields.csv` to define additional fields for non-Compute ticket types (and as metadata such as `question_text`).
 
 * Some fields (like `work_notes`) are common to all ticket types and are not listed in the spreadsheet.
 * Each value of `cat_item` represents a ticket type.
-* At present rcpond is implemented around a single `FullTicket` shape (the canonical Compute Allocation Request schema).
+* At present rcpond is implemented around a single `ComputeAllocationRequestTicket` shape (the canonical Compute Allocation Request schema).
 * In future we will want rcpond to handle all ticket types.
 * For page scraping, `question_text` from the CSV can still help map labels in HTML.
 * Different ticket types will use a different rules file and different directory of email templates
@@ -13,14 +13,13 @@ Use `temp/reg_workspace_service_now_fields.csv` to define additional fields for 
 
 Ideas for how to implement multiple ticket types:
 
-The spreadsheet could be included in config directories and used as runtime metadata for non-Compute ticket types. Keep code-level typed dataclasses as the implementation target. The current `FullTicket` could be renamed to `ComputeAllocationRequestTicket`, and additional typed subclasses could be generated from (or aligned to) CSV data for other ticket categories.
+The spreadsheet could be included in config directories and used as runtime metadata for non-Compute ticket types. Keep code-level typed dataclasses as the implementation target. `ComputeAllocationRequestTicket` should remain the canonical type for Compute Allocation Request, and additional typed subclasses could be generated from (or aligned to) CSV data for other ticket categories.
 
 ---
 
 ## Option A — Typed subclasses with a registry (recommended)
 
-Keep the current dataclass pattern. Rename `FullTicket` to `ComputeAllocationRequestTicket` (or
-keep `FullTicket` as an alias during transition). For each new ticket type, define a sibling
+Keep the current dataclass pattern. Use `ComputeAllocationRequestTicket` as the canonical class for Compute Allocation Request. For each new ticket type, define a sibling
 dataclass with exactly its own fields:
 
 ```python
@@ -29,7 +28,7 @@ class ComputeAllocationRequestTicket(Ticket):
     work_notes: str
     project_title: str
     which_service: str
-    # ... current FullTicket fields
+    # ... current ComputeAllocationRequestTicket fields
 
 @dataclass
 class GeneralComputeSupportTicket(Ticket):
@@ -60,11 +59,11 @@ changes.
 
 ## Option B — `variables: dict[str, str]` on a single generic ticket class
 
-Replace the typed FullTicket fields with a single `variables` dict and a `cat_item` field:
+Replace the typed ComputeAllocationRequestTicket fields with a single `variables` dict and a `cat_item` field:
 
 ```python
 @dataclass
-class FullTicket(Ticket):
+class ComputeAllocationRequestTicket(Ticket):
     cat_item: str
     work_notes: str
     variables: dict[str, str]  # keyed by ServiceNow field name
@@ -106,7 +105,7 @@ configured ticket type(s):
 ```python
 # In Config.__post_init__:
 fields_for_type = _read_fields_from_csv(csv_path, cat_item="Compute Allocation Request")
-TicketClass = dataclasses.make_dataclass("FullTicket", fields_for_type, bases=(Ticket,))
+TicketClass = dataclasses.make_dataclass("ComputeAllocationRequestTicket", fields_for_type, bases=(Ticket,))
 ```
 
 **Pros:** Completely data-driven — changing field names or adding new ticket types requires only
@@ -129,7 +128,7 @@ The main effort is:
 3. Extend `Config` so users can configure which types they handle, and point each type to its
    rules file, email templates directory, and ServiceNow query filter.
 
-The field data for step 1 should come from: (a) current code for shared/base fields (`Ticket`) and the Compute Allocation Request schema (`FullTicket`), and (b) CSV + verified ServiceNow payloads for other ticket types.
+The field data for step 1 should come from: (a) current code for shared/base fields (`Ticket`) and the Compute Allocation Request schema (`ComputeAllocationRequestTicket`), and (b) CSV + verified ServiceNow payloads for other ticket types.
 
 **Option B** becomes attractive if the field sets are unstable (ServiceNow admins regularly rename
 or add fields) and maintaining code per ticket type is impractical. The cost is losing type-checked
@@ -232,9 +231,9 @@ A variation on option B: each ticket type gets a directory with fixed internal s
 
 ## Q: Implementation design decisions for Option A
 
-**1. Should `FullTicket` be renamed to `ComputeAllocationRequestTicket`?**
+**1. Should `ComputeAllocationRequestTicket` keep this name?**
 
-Yes, once multi-type support lands. Treat `FullTicket` as the canonical Compute Allocation Request schema during transition, then rename to `ComputeAllocationRequestTicket` (optionally keeping an alias briefly for compatibility).
+Yes. Keep `ComputeAllocationRequestTicket` as the canonical Compute Allocation Request schema name going forward.
 
 **2. How should per-type config filenames be derived?**
 

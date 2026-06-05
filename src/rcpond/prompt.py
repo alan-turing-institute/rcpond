@@ -11,13 +11,13 @@ import dataclasses
 import json
 
 from rcpond.config import Config
-from rcpond.servicenow import FullTicket
+from rcpond.servicenow import ComputeAllocationRequestTicket
 
 ## --------------------------------------------------------------------------------
 ## Interface to this module
 
 
-def construct_prompt(full_ticket: FullTicket, config: Config) -> tuple[str, str]:
+def construct_prompt(full_ticket: ComputeAllocationRequestTicket, config: Config) -> tuple[str, str]:
     """Construct the system and user prompts for the LLM given a full ticket and config.
 
     Reads the rules file and renders it into the system prompt template. Serialises
@@ -25,7 +25,7 @@ def construct_prompt(full_ticket: FullTicket, config: Config) -> tuple[str, str]
 
     Parameters
     ----------
-    full_ticket : FullTicket
+    full_ticket : ComputeAllocationRequestTicket
         The full ServiceNow ticket to construct the prompt for.
     config : Config
         The loaded configuration. ``config.rules_path`` and

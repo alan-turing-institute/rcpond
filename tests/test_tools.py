@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from rcpond.command import ReplyMode
-from rcpond.servicenow import FullTicket, ServiceNow, Ticket
+from rcpond.servicenow import ComputeAllocationRequestTicket, ServiceNow, Ticket
 from rcpond.tools import PostFreeformNoteTool, PostTemplatedNoteTool, get_available_tools
 
 _WORKING_TEMPLATES_DIR = Path("tests/fixtures/working_templates")
@@ -77,7 +77,7 @@ def test_post_templated_note_schema_includes_llm_vars():
 
 def test_post_templated_note_execute_renders_and_posts():
     service_now = MagicMock(spec=ServiceNow)
-    ticket = FullTicket(
+    ticket = ComputeAllocationRequestTicket(
         sys_id="abc",
         number="RES001",
         opened_at="01/01/2025 09:00:00",
@@ -152,7 +152,7 @@ def test_underscore_prefix_template_vars_included_in_schema():
 
 def test_underscore_prefix_template_available_to_jinja_renderer():
     service_now = MagicMock(spec=ServiceNow)
-    ticket = MagicMock(spec=FullTicket)
+    ticket = MagicMock(spec=ComputeAllocationRequestTicket)
 
     PostTemplatedNoteTool(_make_config(_PREFIX_TEMPLATES_DIR)).execute(
         service_now,
@@ -196,7 +196,7 @@ def test_call_tool_unknown_tool_raises():
         response_text="ok",
         planned_tool_call={"function": {"name": "nonexistent_tool", "arguments": {}}},
     )
-    service_now.get_full_ticket.return_value = FullTicket(
+    service_now.get_full_ticket.return_value = ComputeAllocationRequestTicket(
         sys_id="abc",
         number="RES001",
         opened_at="01/01/2025 09:00:00",
