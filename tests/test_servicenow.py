@@ -10,6 +10,16 @@ from rcpond import config, servicenow
 from rcpond.servicenow import ComputeAllocationRequestTicket, NoteEntry, ServiceNow, Ticket
 
 
+def test_fullticket_alias_warns_and_resolves_to_new_class():
+    with pytest.warns(DeprecationWarning, match="FullTicket is deprecated"):
+        alias = servicenow.FullTicket
+    assert alias is ComputeAllocationRequestTicket
+
+
+def test_fullticket_alias_is_listed_in_dir():
+    assert "FullTicket" in dir(servicenow)
+
+
 def _make_jwt(sub: str) -> str:
     """Build a minimal JWT with the given sub claim (no real signature)."""
     header = base64.urlsafe_b64encode(b'{"alg":"RS256"}').rstrip(b"=").decode()

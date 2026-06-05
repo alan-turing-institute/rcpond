@@ -34,6 +34,7 @@ import base64
 import dataclasses
 import json
 import re
+import warnings
 from dataclasses import dataclass
 from datetime import datetime
 from typing import ClassVar
@@ -170,6 +171,24 @@ class ComputeAllocationRequestTicket(Ticket):
         base = dataclasses.asdict(t)
         base.update(extras)
         return cls(**base)
+
+
+## Backward compatibility alias for pre-rename imports.
+def __getattr__(name: str):
+    if name == "FullTicket":
+        warnings.warn(
+            "FullTicket is deprecated and will be removed in a future release; "
+            "use ComputeAllocationRequestTicket instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return ComputeAllocationRequestTicket
+    msg = f"module {__name__!r} has no attribute {name!r}"
+    raise AttributeError(msg)
+
+
+def __dir__() -> list[str]:
+    return sorted(globals().keys() | {"FullTicket"})
 
 
 ## --------------------------------------------------------------------------------

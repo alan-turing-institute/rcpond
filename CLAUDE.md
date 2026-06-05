@@ -44,3 +44,5 @@ RCPond is a tool to partly automate RCP (Research Computing Platform) requests. 
 ## Notes
 
 - Backup files (ending in `~`) exist in the repo — avoid committing these.
+- Changelog hygiene: when making user-visible or behavior-changing updates, add an entry to `CHANGELOG.md` under `## [Unreleased]` in the appropriate section (`Added`, `Changed`, `Deprecated`, `Fixed`, etc.).
+- If substantial work has happened without a changelog update for too long (for example, several meaningful changes or a long coding session), proactively prompt the user to confirm whether `CHANGELOG.md` should be updated now.
