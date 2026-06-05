@@ -26,7 +26,7 @@ Example use
 
 from abc import ABC, abstractmethod
 
-from rcpond.servicenow import ComputeAllocationRequestTicket, ServiceNow
+from rcpond.servicenow import ServiceNow, Ticket
 
 ## --------------------------------------------------------------------------------
 ## Tool ABC
@@ -61,14 +61,14 @@ class Tool(ABC):
         """
 
     @abstractmethod
-    def execute(self, service_now: ServiceNow, ticket: ComputeAllocationRequestTicket, **kwargs) -> None:
+    def execute(self, service_now: ServiceNow, ticket: Ticket, **kwargs) -> None:
         """Execute this tool's action.
 
         Parameters
         ----------
         service_now : ServiceNow
             The ServiceNow client used to perform the action.
-        ticket : ComputeAllocationRequestTicket
+        ticket : Ticket
             The ticket the action should be applied to.
         **kwargs
             Arguments supplied by the LLM.

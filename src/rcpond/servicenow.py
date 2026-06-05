@@ -37,7 +37,7 @@ import re
 import warnings
 from dataclasses import dataclass
 from datetime import datetime
-from typing import ClassVar
+from typing import ClassVar, Self
 
 import requests
 
@@ -119,6 +119,21 @@ class Ticket:
         for field, value in values.items():
             setattr(self, field, value)
 
+    @classmethod
+    def from_Ticket(cls, t: Ticket, **extras) -> Self:
+        """Create an instance of this class starting from a base ``Ticket``, passing only the additional fields.
+
+        Parameters
+        ----------
+        t : Ticket
+            The base ticket whose fields are copied.
+        **extras
+            Any additional fields required by the subclass.
+        """
+        base = dataclasses.asdict(t)
+        base.update(extras)
+        return cls(**base)
+
 
 @dataclass(frozen=True)
 class NoteEntry:
@@ -163,14 +178,11 @@ class ComputeAllocationRequestTicket(Ticket):
     users_who_require_access_names_and_emails: str
     cost_compute_time_breakdown: str
 
-    @classmethod
-    def from_Ticket(cls, t: Ticket, **extras):
-        """Create a new ComputeAllocationRequestTicket starting from a Ticket and passing
-        only the additional fields.
-        """
-        base = dataclasses.asdict(t)
-        base.update(extras)
-        return cls(**base)
+
+## Maps each ticket's short_description to the dataclass that represents it.
+_TICKET_TYPES: dict[str, type[Ticket]] = {
+    "Request access to HPC and cloud computing facilities": ComputeAllocationRequestTicket,
+}
 
 
 ## Backward compatibility alias for pre-rename imports.
@@ -369,13 +381,32 @@ class ServiceNow:
         """
         return f"{self._web_base_url.rstrip('/')}/{self._TABLE}.do?sys_id={tkt.sys_id}"
 
-    def get_full_ticket(self, tkt: Ticket) -> ComputeAllocationRequestTicket:
-        """Get full ticket details."""
+    def get_full_ticket(self, tkt: Ticket) -> Ticket:
+        """Get full ticket details, dispatching to the correct subclass by ``short_description``.
 
-        ## Get details from ServiceNow as JSON
-        extra_fields = {field.name for field in dataclasses.fields(ComputeAllocationRequestTicket)} - {
-            field.name for field in dataclasses.fields(Ticket)
-        }
+        Parameters
+        ----------
+        tkt : Ticket
+            A base ticket, as returned by ``get_ticket`` or ``get_tickets``.
+
+        Returns
+        -------
+        Ticket
+            An instance of the registered subclass for this ticket's ``short_description``.
+
+        Raises
+        ------
+        ValueError
+            If ``tkt.short_description`` is not in the ``_TICKET_TYPES`` registry.
+        """
+        ticket_class = _TICKET_TYPES.get(tkt.short_description)
+        if ticket_class is None:
+            known = ", ".join(f"{k!r}" for k in _TICKET_TYPES)
+            msg = f"Unknown ticket type {tkt.short_description!r}. Known types: {known}"
+            raise ValueError(msg)
+
+        base_fields = {field.name for field in dataclasses.fields(Ticket)}
+        extra_fields = {field.name for field in dataclasses.fields(ticket_class)} - base_fields
 
         ## All extra fields are ServiceNow catalogue variables and must be requested
         ## with the "variables." prefix — they are not top-level record fields.
@@ -385,16 +416,14 @@ class ServiceNow:
             f"{self._base_api_url}/{self._TABLE}/{tkt.sys_id}",
             params={"sysparm_fields": ",".join(requested_fields), "sysparm_display_value": "all"},
         )
-
         resp.raise_for_status()
 
-        ## Parse the returned JSON, stripping the "variables." prefix so the keys
-        ## match ComputeAllocationRequestTicket field names.
+        ## Strip the "variables." prefix so keys match the dataclass field names.
         result = {
             (k[len("variables.") :] if k.startswith("variables.") else k): v for k, v in resp.json()["result"].items()
         }
 
-        return ComputeAllocationRequestTicket.from_Ticket(tkt, **_extract_ticket_fields(result, extra_fields))
+        return ticket_class.from_Ticket(tkt, **_extract_ticket_fields(result, extra_fields))
 
     def _fetch_fields(self, sys_id: str, fields: set[str]) -> dict[str, str]:
         """Fetch display values for the specified fields from a single record.

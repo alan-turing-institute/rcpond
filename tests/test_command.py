@@ -89,8 +89,10 @@ def test_display_all_tickets_can_use_longlist(cfg):
 
 def test_display_single_ticket_uses_get_ticket(cfg, ticket):
     """display_single_ticket delegates lookup to get_ticket(), which searches all tickets."""
+    full_ticket = ComputeAllocationRequestTicket.from_Ticket(ticket, **_FT_EXTRA_DEFAULTS)
     with patch("rcpond.command.ServiceNow") as MockSN, patch("rcpond.command.display_full_ticket"):
         MockSN.return_value.get_ticket.return_value = ticket
+        MockSN.return_value.get_full_ticket.return_value = full_ticket
         command.display_single_ticket(ticket_number="RES0001000", config=cfg)
     MockSN.return_value.get_ticket.assert_called_once_with("RES0001000")
 
