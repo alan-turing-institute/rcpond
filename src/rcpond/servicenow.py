@@ -420,8 +420,10 @@ class ServiceNow:
             None,
         )
         if ticket_class is None:
+            all_criteria_fields = {f for cls in _TICKET_TYPES.values() for f in cls.MATCH_CRITERIA}
+            ticket_values = {f: getattr(tkt, f, "<missing>") for f in sorted(all_criteria_fields)}
             known = ", ".join(f"{k!r}" for k in _TICKET_TYPES)
-            msg = f"No registered ticket type matches this ticket (short_description={tkt.short_description!r}). Known types: {known}"
+            msg = f"No registered ticket type matches this ticket {ticket_values}. Known types: {known}"
             raise ValueError(msg)
 
         base_fields = {field.name for field in dataclasses.fields(Ticket)}
