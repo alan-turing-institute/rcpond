@@ -7,6 +7,13 @@ Use `temp/reg_workspace_service_now_fields.csv` to define additional fields for 
   `cat_item` does **not** exist on this table (confirmed via the REST API); `u_category` and
   `u_sub_category` are always `"Research Services"` / `"Research Computing Services"` regardless of
   ticket type, so they carry no discriminating information.
+* `short_description` alone is not guaranteed to remain a 1:1 match with rcpond "ticket type" going
+  forward: it's free text an admin can reword at any time, and a single `short_description` could
+  in future need to split into multiple rcpond types discriminated by another field as well (e.g.
+  `which_service=Azure` vs `which_service=HPC` under the same "Request access to HPC and cloud
+  computing facilities" short_description). Because of this, neither the `_TICKET_TYPES` registry key
+  nor the per-type config filename should be derived from `short_description` text — see
+  "Implementation design decisions for Option A" below.
 * At present rcpond is implemented around a single `ComputeAllocationRequestTicket` shape (the canonical Compute Allocation Request schema).
 * In future we will want rcpond to handle all ticket types.
 * For page scraping, `question_text` from the CSV can still help map labels in HTML.
@@ -28,29 +35,46 @@ dataclass with exactly its own fields:
 ```python
 @dataclass
 class ComputeAllocationRequestTicket(Ticket):
-    work_notes: str
+    MATCH_CRITERIA: ClassVar[MappingProxyType[str, str]] = MappingProxyType({
+        "short_description": "Request access to HPC and cloud computing facilities"
+    })
     project_title: str
-    which_service: str
     # ... current ComputeAllocationRequestTicket fields
 
 @dataclass
 class GeneralComputeSupportTicket(Ticket):
-    work_notes: str
+    MATCH_CRITERIA: ClassVar[MappingProxyType[str, str]] = MappingProxyType({
+        "short_description": "General Compute Support Request"
+    })
     which_service: str
     which_facility: str
     please_give_details_of_your_query: str
 
-# Registry: short_description value → class
+# Registry: arbitrary, developer-chosen key → dataclass.
+# The key is never derived from ticket data; dispatch uses each class's MATCH_CRITERIA.
+# The key also serves as the per-type config filename stem.
 _TICKET_TYPES: dict[str, type[Ticket]] = {
-    "Request access to HPC and cloud computing facilities": ComputeAllocationRequestTicket,
-    "General Compute Support Request": GeneralComputeSupportTicket,
+    "compute_allocation_request": ComputeAllocationRequestTicket,
+    "general_compute_support": GeneralComputeSupportTicket,
     ...
+    # Future, once a single short_description needs to split by another field, each class
+    # declares its own MATCH_CRITERIA with both short_description and which_service:
+    # "compute_allocation_request_azure": AzureComputeAllocationRequestTicket,
+    # "compute_allocation_request_hpc":   HpcComputeAllocationRequestTicket,
 }
 ```
 
-`ServiceNow.get_full_ticket` (or a small wrapper around it) should inspect the ticket's `short_description` and dispatch to the right class.
-`Config` gains a list of per-type configs mapping `short_description` → `(rules_path, email_templates_dir,
+`ServiceNow.get_full_ticket` finds the first `_TICKET_TYPES` class whose `MATCH_CRITERIA` all hold
+against the ticket's own fields, and dispatches to that class. The registry *key* (not any ticket
+field) then identifies which per-type config to load.
+`Config` gains a list of per-type configs mapping that same key → `(rules_path, email_templates_dir,
 servicenow_query)`.
+
+Note: today `MATCH_CRITERIA` only ever needs `short_description`, since that's the only base-`Ticket`
+field available before the type is resolved. Matching on a field like `which_service` (a catalogue
+variable only fetched once the class and its extra-field list are known) would require fetching a
+set of common discriminator fields before dispatch. That fetch-ordering change is not needed yet
+and is left as a follow-up design question for when a `which_service`-style split is required.
 
 **Pros:** Preserves type safety, IDE completion, template validation, and the JSON the LLM sees
 stays flat and cleanly named. Nothing in `prompt.py` or `tools.py` needs to change.
@@ -126,9 +150,11 @@ currently in use.
 The main effort is:
 
 1. Define typed dataclasses for currently supported `short_description` values.
-2. Add a registry mapping `short_description` → dataclass.
-3. Extend `Config` so users can configure which types they handle, and point each type to its
-   rules file, email templates directory, and ServiceNow query filter.
+2. Add a registry mapping an arbitrary, developer-chosen key → match criteria (today just
+   `short_description`) + dataclass. The key must never be derived from `short_description` or any
+   other ticket field — see "Implementation design decisions" below for why.
+3. Extend `Config` so users can configure which types they handle, and point each type (by that same
+   key) to its rules file, email templates directory, and ServiceNow query filter.
 
 The field data for step 1 should come from: (a) current code for shared/base fields (`Ticket`) and the Compute Allocation Request schema (`ComputeAllocationRequestTicket`), and (b) CSV + verified ServiceNow payloads for other ticket types.
 
@@ -240,15 +266,37 @@ Yes. Keep `ComputeAllocationRequestTicket` as the canonical Compute Allocation R
 
 **2. How should per-type config filenames be derived?**
 
-The filename is the slugified `short_description` value — spaces replaced with underscores, lowercased — plus `.config`. Examples:
+Not by slugifying `short_description`. Two problems with that:
+
+- `short_description` is free text on the ServiceNow catalogue item and can be reworded by an admin
+  at any time. A filename (and registry key) derived from it would silently orphan the matching
+  config file on the next reword, with no error until a ticket of that type next arrives.
+- A single `short_description` may in future need to map to *multiple* rcpond ticket types,
+  discriminated by an additional field (e.g. `which_service=Azure` vs `which_service=HPC` under the
+  same "Request access to HPC and cloud computing facilities" short_description). There is no way to
+  slugify one `short_description` value into two distinct, stable filenames.
+
+Instead, each `_TICKET_TYPES` entry is keyed by an arbitrary key chosen once by the developer when
+the type is added — never recomputed from ServiceNow data. The `short_description` (and, in future,
+any other discriminating field) is stored as `match` data on the entry, not as the key. The same key
+is reused as the per-type config filename stem:
 
 ```
-~/.config/rcpond/ticket_types/request_access_to_hpc_and_cloud_computing_facilities.config
-~/.config/rcpond/ticket_types/general_compute_support_request.config
-~/.config/rcpond/ticket_types/requesting_membership_of_turing_github_organisation.config
+~/.config/rcpond/ticket_types/compute_allocation_request.config
+~/.config/rcpond/ticket_types/general_compute_support.config
+~/.config/rcpond/ticket_types/turing_github_org_membership.config
 ```
 
-This makes the mapping between ServiceNow `short_description` values and config files unambiguous and derivable programmatically. The filenames are longer than they would be with an artificial `cat_item` key, but they are fully self-describing.
+and, once a `short_description` needs to split further:
+
+```
+~/.config/rcpond/ticket_types/compute_allocation_request_azure.config
+~/.config/rcpond/ticket_types/compute_allocation_request_hpc.config
+```
+
+This keeps filenames short and stable, and means a `short_description` reword — or a future split
+into multiple types — is a change to the matching registry entry, not a file rename plus an update
+to everything that pointed at the old filename.
 
 **3. Should the ServiceNow query filter be in the per-type config file?**
 
@@ -265,4 +313,5 @@ RCPOND_SERVICENOW_QUERY=assigned_toISEMPTY^short_description=Request access to H
 ## Other Notes
 
 * It is possible that a ServiceNow query could return multiple ticket types if the filters are not mutually exclusive.
-* RCPond should always assert that a newly read/retrieved ticket is of the type expected, and not rely on the query to be completely correct. RCPond should use the `short_description` field of the ticket to determine which type it is and select the rules/templates accordingly. Still need to decide how to handle a ticket whose `short_description` does not match any of the active types in config.
+* RCPond should always assert that a newly read/retrieved ticket is of the type expected, and not rely on the query to be completely correct. RCPond should evaluate each `_TICKET_TYPES` entry's `match` criteria against the ticket's own fields to determine which type it is and select the rules/templates accordingly. Still need to decide how to handle a ticket that matches no active type in config.
+* `RCPOND_SERVICENOW_QUERY` (which tickets get fetched) and a registry entry's `match` criteria (how a fetched ticket is dispatched) express overlapping intent independently and could drift out of sync — e.g. a query broadened to fetch more tickets without updating `match` to discriminate them. Not a blocker for the single-field (`short_description`-only) case, but worth keeping in mind once `match` grows additional fields.

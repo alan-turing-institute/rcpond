@@ -37,6 +37,7 @@ import re
 import warnings
 from dataclasses import dataclass
 from datetime import datetime
+from types import MappingProxyType
 from typing import ClassVar, Self
 
 import requests
@@ -69,6 +70,9 @@ class Ticket:
     """Raw display_value string for additional comments, as returned by the ServiceNow API."""
 
     _REFRESHABLE_FIELDS: ClassVar[frozenset[str]] = frozenset({"state", "assigned_to", "work_notes", "comments"})
+
+    MATCH_CRITERIA: ClassVar[MappingProxyType[str, str]] = MappingProxyType({})
+    """Field/value pairs that identify this ticket type. Subclasses must override with a non-empty mapping."""
 
     def assign_to_me(self, service_now: ServiceNow) -> None:
         """Assign this ticket to the currently authenticated OAuth user.
@@ -153,6 +157,11 @@ class NoteEntry:
 class ComputeAllocationRequestTicket(Ticket):
     """A ticket; includes full details from the original submission."""
 
+    MATCH_CRITERIA: ClassVar[MappingProxyType[str, str]] = MappingProxyType(
+        {"short_description": "Request access to HPC and cloud computing facilities"}
+    )
+    """Field/value pairs that a base ``Ticket`` must satisfy to be classified as this type."""
+
     project_title: str
     research_area_programme: str
     if_other_please_specify: str
@@ -179,9 +188,12 @@ class ComputeAllocationRequestTicket(Ticket):
     cost_compute_time_breakdown: str
 
 
-## Maps each ticket's short_description to the dataclass that represents it.
+## Maps an arbitrary, developer-chosen key to the dataclass that represents that ticket type.
+## The key is never derived from ticket data (e.g. not a slugified short_description) — it serves
+## as a stable identifier and is reused as the per-type config filename stem.
+## Dispatch uses each class's MATCH_CRITERIA, not the key. See planning/multiple-ticket-types.md.
 _TICKET_TYPES: dict[str, type[Ticket]] = {
-    "Request access to HPC and cloud computing facilities": ComputeAllocationRequestTicket,
+    "compute_allocation_request": ComputeAllocationRequestTicket,
 }
 
 
@@ -382,7 +394,7 @@ class ServiceNow:
         return f"{self._web_base_url.rstrip('/')}/{self._TABLE}.do?sys_id={tkt.sys_id}"
 
     def get_full_ticket(self, tkt: Ticket) -> Ticket:
-        """Get full ticket details, dispatching to the correct subclass by ``short_description``.
+        """Get full ticket details, dispatching to the correct subclass via ``_TICKET_TYPES``.
 
         Parameters
         ----------
@@ -392,17 +404,24 @@ class ServiceNow:
         Returns
         -------
         Ticket
-            An instance of the registered subclass for this ticket's ``short_description``.
+            An instance of the registered subclass whose ``MATCH_CRITERIA`` all match ``tkt``.
 
         Raises
         ------
         ValueError
-            If ``tkt.short_description`` is not in the ``_TICKET_TYPES`` registry.
+            If no entry in ``_TICKET_TYPES`` has ``MATCH_CRITERIA`` that match ``tkt``.
         """
-        ticket_class = _TICKET_TYPES.get(tkt.short_description)
+        ticket_class = next(
+            (
+                cls
+                for cls in _TICKET_TYPES.values()
+                if all(getattr(tkt, field, None) == value for field, value in cls.MATCH_CRITERIA.items())
+            ),
+            None,
+        )
         if ticket_class is None:
             known = ", ".join(f"{k!r}" for k in _TICKET_TYPES)
-            msg = f"Unknown ticket type {tkt.short_description!r}. Known types: {known}"
+            msg = f"No registered ticket type matches this ticket (short_description={tkt.short_description!r}). Known types: {known}"
             raise ValueError(msg)
 
         base_fields = {field.name for field in dataclasses.fields(Ticket)}
