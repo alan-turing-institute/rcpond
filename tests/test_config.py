@@ -353,7 +353,7 @@ def test_email_templates_dir_valid_j2_passes(common_config_values):
 
 
 ## ticket field validation — templates may reference ticket.<field>, but only
-## fields that actually exist on FullTicket are permitted
+## fields that actually exist on ComputeAllocationRequestTicket are permitted
 
 
 def test_email_templates_dir_unknown_ticket_field_raises(common_config_values, tmp_path):
@@ -381,7 +381,7 @@ def test_email_templates_dir_unknown_ticket_field_lists_all(common_config_values
 
 
 def test_email_templates_dir_valid_ticket_fields_pass(common_config_values, tmp_path):
-    ## Templates using real FullTicket fields should pass validation
+    ## Templates using real ComputeAllocationRequestTicket fields should pass validation
     good_dir = tmp_path / "good_templates"
     good_dir.mkdir()
     (good_dir / "good.yaml.j2").write_text("subject: {{ ticket.number }} - {{ ticket.project_title }}")

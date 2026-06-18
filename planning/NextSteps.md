@@ -8,7 +8,7 @@
 
 - **`llm.py`** — LLM client that calls an OpenAI-compatible chat completions API via raw `requests`. Sends system/user messages, passes tool schemas, and parses the response into a structured `LLMResponse` (text, reasoning, planned tool call). (14 tests)
 
-- **`prompt.py`** — Reads a rules file and a system prompt template, renders them with `str.format`, and serialises a `FullTicket` as JSON for the user prompt. (6 tests)
+- **`prompt.py`** — Reads a rules file and a system prompt template, renders them with `str.format`, and serialises a `ComputeAllocationRequestTicket` as JSON for the user prompt. (6 tests)
 
 - **`tool.py`** — Generic wrapper that introspects a Python callable to auto-generate an OpenAI function-calling schema. (2 tests)
 

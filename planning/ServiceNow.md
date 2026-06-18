@@ -31,7 +31,7 @@ Get the full ticket information for a given ticket
 ```python
 the_sn.get_full_ticket(ticket)
 ```
-where ticket is a `Ticket`. Returns a `FullTicket`.
+where ticket is a `Ticket`. Returns a `ComputeAllocationRequestTicket`.
 
 ### Posting a work note
 
@@ -66,7 +66,7 @@ class Ticket:
     short_description: str # Should always be Request access to HPC and cloud compute
 
 @dataclass
-class FullTicket(Ticket):
+class ComputeAllocationRequestTicket(Ticket):
     work_notes: str
     project_title: str                                 
     research_area_programme: str                       

@@ -19,7 +19,7 @@ from rcpond import command
 from rcpond.command import ReplyMode, _process_ticket
 from rcpond.config import Config
 from rcpond.llm import LLM, LLMResponse
-from rcpond.servicenow import FullTicket, Ticket, _note_prefix
+from rcpond.servicenow import ComputeAllocationRequestTicket, Ticket, _note_prefix
 
 _WORKING_TEMPLATES_DIR = Path("tests/fixtures/working_templates")
 
@@ -89,8 +89,10 @@ def test_display_all_tickets_can_use_longlist(cfg):
 
 def test_display_single_ticket_uses_get_ticket(cfg, ticket):
     """display_single_ticket delegates lookup to get_ticket(), which searches all tickets."""
+    full_ticket = ComputeAllocationRequestTicket.from_Ticket(ticket, **_FT_EXTRA_DEFAULTS)
     with patch("rcpond.command.ServiceNow") as MockSN, patch("rcpond.command.display_full_ticket"):
         MockSN.return_value.get_ticket.return_value = ticket
+        MockSN.return_value.get_full_ticket.return_value = full_ticket
         command.display_single_ticket(ticket_number="RES0001000", config=cfg)
     MockSN.return_value.get_ticket.assert_called_once_with("RES0001000")
 
@@ -110,7 +112,9 @@ def mock_llm():
 ## ── helpers ─────────────────────────────────────────────────────────────────
 
 _ticket_field_names = {f.name for f in dataclasses.fields(Ticket)}
-_FT_EXTRA_DEFAULTS = {f.name: "" for f in dataclasses.fields(FullTicket) if f.name not in _ticket_field_names}
+_FT_EXTRA_DEFAULTS = {
+    f.name: "" for f in dataclasses.fields(ComputeAllocationRequestTicket) if f.name not in _ticket_field_names
+}
 
 
 ## note_prefix() reads rcpond.__version__, so this must be computed at test time
@@ -122,8 +126,8 @@ def _human_work_notes(timestamp: str = "01/01/2026 09:00:00") -> str:
     return f"{timestamp} - Human User (Work notes)\nHuman response"
 
 
-def _make_full_ticket(ticket: Ticket, *, is_processed: bool, is_most_recent: bool) -> FullTicket:
-    """Return a real FullTicket whose work_notes drive the actual check methods."""
+def _make_full_ticket(ticket: Ticket, *, is_processed: bool, is_most_recent: bool) -> ComputeAllocationRequestTicket:
+    """Return a real ComputeAllocationRequestTicket whose work_notes drive the actual check methods."""
     if not is_processed:
         work_notes = ""
     elif is_most_recent:
@@ -131,10 +135,10 @@ def _make_full_ticket(ticket: Ticket, *, is_processed: bool, is_most_recent: boo
     else:
         ## RCPond posted earlier, human posted more recently
         work_notes = _rcpond_work_notes("01/01/2026 07:00:00") + "\n\n" + _human_work_notes()
-    return FullTicket.from_Ticket(ticket, **_FT_EXTRA_DEFAULTS, work_notes=work_notes)
+    return ComputeAllocationRequestTicket.from_Ticket(ticket, **_FT_EXTRA_DEFAULTS, work_notes=work_notes)
 
 
-def _no_change_fetch(ft: FullTicket) -> dict[str, str]:
+def _no_change_fetch(ft: ComputeAllocationRequestTicket) -> dict[str, str]:
     """Return a _fetch_fields dict that leaves the ticket unchanged after refresh."""
     return {"work_notes": ft.work_notes, "comments": ft.comments, "state": ft.state, "assigned_to": ft.assigned_to}
 

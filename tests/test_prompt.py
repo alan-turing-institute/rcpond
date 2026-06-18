@@ -5,7 +5,7 @@ import pytest
 
 from rcpond.config import Config
 from rcpond.prompt import construct_prompt
-from rcpond.servicenow import FullTicket
+from rcpond.servicenow import ComputeAllocationRequestTicket
 
 _WORKING_TEMPLATES_DIR = Path("tests/fixtures/working_templates")
 
@@ -55,7 +55,7 @@ def config(tmp_path, rules_text, template_text):
 
 @pytest.fixture()
 def full_ticket():
-    return FullTicket(
+    return ComputeAllocationRequestTicket(
         sys_id="abc123",
         number="RES0001234",
         opened_at="01/01/2025 09:00:00",

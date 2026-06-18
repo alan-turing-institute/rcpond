@@ -1,4 +1,5 @@
 import base64
+import dataclasses
 import json
 from datetime import datetime
 from unittest.mock import MagicMock, call, patch
@@ -7,7 +8,17 @@ import pytest
 import requests as _requests  ## used by test_token_introspection
 
 from rcpond import config, servicenow
-from rcpond.servicenow import FullTicket, NoteEntry, ServiceNow, Ticket
+from rcpond.servicenow import ComputeAllocationRequestTicket, NoteEntry, ServiceNow, Ticket
+
+
+def test_fullticket_alias_warns_and_resolves_to_new_class():
+    with pytest.warns(DeprecationWarning, match="FullTicket is deprecated"):
+        alias = servicenow.FullTicket
+    assert alias is ComputeAllocationRequestTicket
+
+
+def test_fullticket_alias_is_listed_in_dir():
+    assert "FullTicket" in dir(servicenow)
 
 
 def _make_jwt(sub: str) -> str:
@@ -225,9 +236,9 @@ def test_parse_comment_display_values():
 ## ── is_rcpond_processed / is_rcpond_most_recent_process ─────────────────────
 
 
-def _make_ticket(work_notes: str = "", comments: str = "") -> FullTicket:
-    """Minimal FullTicket with controllable note strings; all other fields are empty."""
-    return FullTicket(
+def _make_ticket(work_notes: str = "", comments: str = "") -> ComputeAllocationRequestTicket:
+    """Minimal ComputeAllocationRequestTicket with controllable note strings; all other fields are empty."""
+    return ComputeAllocationRequestTicket(
         sys_id="abc",
         number="RES0001000",
         opened_at="",
@@ -511,6 +522,39 @@ def test_get_tickets_oauth_longlist_combinations(sn_instance, oauth, long_list, 
 #     sn_instance._is_oauth = False
 #     tickets = sn_instance.get_tickets(long_list=True)
 #     assert len(tickets) == 1
+
+
+## ── get_full_ticket dispatch ────────────────────────────────────────────────
+
+_BASE_FIELD_NAMES = {f.name for f in dataclasses.fields(Ticket)}
+_CART_EXTRA_FIELDS = {f.name for f in dataclasses.fields(ComputeAllocationRequestTicket)} - _BASE_FIELD_NAMES
+
+
+def test_get_full_ticket_dispatches_to_correct_class(sn_instance, ticket):
+    """A ticket matching ComputeAllocationRequestTicket.MATCH_CRITERIA is returned as that type,
+    with base fields preserved and extra fields populated from the API response."""
+    api_fields = {f"variables.{f}": "" for f in _CART_EXTRA_FIELDS}
+    api_fields["variables.project_title"] = "My Research Project"
+    sn_instance.session.get.return_value.json.return_value = {"result": api_fields}
+    sn_instance.session.get.return_value.raise_for_status = MagicMock()
+
+    result = sn_instance.get_full_ticket(ticket)
+
+    assert isinstance(result, ComputeAllocationRequestTicket)
+    assert result.number == ticket.number  # Assert the value was passed from the Base Ticket
+    assert result.short_description == ticket.short_description  # Assert the value was passed from the Base Ticket
+    assert result.project_title == "My Research Project"  # Assert the value was passed from the (mocked) API call
+
+
+def test_get_full_ticket_raises_for_unknown_type(sn_instance, ticket):
+    """A ticket matching no MATCH_CRITERIA raises ValueError naming the criteria values and known type keys."""
+    unknown = dataclasses.replace(ticket, short_description="Unknown ticket type")
+
+    with pytest.raises(ValueError) as excinfo:  # noqa: PT011 - the value is tested below
+        sn_instance.get_full_ticket(unknown)
+
+    assert "Unknown ticket type" in str(excinfo.value)  # Value is from the 'short_description' in the ticket
+    assert "compute_allocation_request" in str(excinfo.value)  # Value is from the key in _TICKET_TYPES
 
 
 ## ── _current_user_sys_id / _current_user_display_name ──────────────────────

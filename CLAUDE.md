@@ -30,7 +30,7 @@ RCPond is a tool to partly automate RCP (Research Computing Platform) requests. 
 
 - **Config pattern**: Modules accept a config object rather than reading environment variables directly. Config is loaded via the `Config` constructor (see `config.py`).
 - **LLM API**: Uses the OpenAI-compatible chat completions API via raw `requests` (not the openai SDK). The `response.json()` call returns a parsed Python dict. Tool call `function.arguments` comes as a JSON string from the API and is parsed to a dict in `_parse_response`.
-- **Dataclasses**: Used throughout for data structures (`Ticket`, `FullTicket`, `LLMResponse`).
+- **Dataclasses**: Used throughout for data structures (`Ticket`, `ComputeAllocationRequestTicket`, `LLMResponse`).
 - **System prompt template**: Uses Python `str.format(rules=rules_text)` — not Jinja2. The template path comes from `config.system_prompt_template_path`. The user prompt is the full ticket serialised as JSON.
 - **Tool architecture**: Generic `Tool` class in `tool.py` wraps any callable and auto-generates OpenAI function-calling schemas via introspection (name, docstring, type-annotated params). rcpond-specific tool functions and their implementations live in `tools.py`, with an `_IMPLEMENTATIONS` dict mapping tool names to lambdas that accept `(service_now, ticket, **kwargs)`.
 - **Documentation style**: Each module should have lightweight inline docs following this pattern:
@@ -44,3 +44,5 @@ RCPond is a tool to partly automate RCP (Research Computing Platform) requests. 
 ## Notes
 
 - Backup files (ending in `~`) exist in the repo — avoid committing these.
+- Changelog hygiene: when making user-visible or behavior-changing updates, add an entry to `CHANGELOG.md` under `## [Unreleased]` in the appropriate section (`Added`, `Changed`, `Deprecated`, `Fixed`, etc.).
+- If substantial work has happened without a changelog update for too long (for example, several meaningful changes or a long coding session), proactively prompt the user to confirm whether `CHANGELOG.md` should be updated now.

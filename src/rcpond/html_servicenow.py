@@ -15,7 +15,7 @@ Public API
 
 Return types
 ------------
-Same as ``ServiceNow``: ``list[Ticket]``, ``Ticket``, ``FullTicket``, ``list[str]``.
+Same as ``ServiceNow``: ``list[Ticket]``, ``Ticket``, ``ComputeAllocationRequestTicket``, ``list[str]``.
 
 Configuration
 -------------
@@ -26,7 +26,7 @@ from datetime import datetime
 from pathlib import Path
 
 from rcpond.parse_html import extract_key_facts, parse_ticket_html
-from rcpond.servicenow import FullTicket, NoteEntry, ServiceNow, Ticket
+from rcpond.servicenow import ComputeAllocationRequestTicket, NoteEntry, ServiceNow, Ticket
 
 ## ---- Interface to this module ----
 
@@ -87,7 +87,7 @@ class HtmlServiceNow(ServiceNow):
     ## ---- Read methods ----
 
     def get_tickets(self, long_list: bool = False) -> list[Ticket]:
-        """Return a ``FullTicket`` for each HTML file in ``html_dir``.
+        """Return a ``ComputeAllocationRequestTicket`` for each HTML file in ``html_dir``.
 
         Parameters
         ----------
@@ -98,7 +98,7 @@ class HtmlServiceNow(ServiceNow):
         Returns
         -------
         list[Ticket]
-            Each element is actually a ``FullTicket``.
+            Each element is actually a ``ComputeAllocationRequestTicket``.
         """
         tickets: list[Ticket] = []
         for f in sorted(self._html_dir.glob("*.html")):
@@ -109,10 +109,10 @@ class HtmlServiceNow(ServiceNow):
             tickets.append(parse_ticket_html(f))
         return tickets
 
-    def get_full_ticket(self, tkt: Ticket) -> FullTicket:
-        """Return a ``FullTicket`` for ``tkt``.
+    def get_full_ticket(self, tkt: Ticket) -> ComputeAllocationRequestTicket:
+        """Return a ``ComputeAllocationRequestTicket`` for ``tkt``.
 
-        If ``tkt`` is already a ``FullTicket`` (as returned by ``get_tickets``),
+        If ``tkt`` is already a ``ComputeAllocationRequestTicket`` (as returned by ``get_tickets``),
         it is returned directly. Otherwise the HTML file is parsed.
 
         Parameters
@@ -122,9 +122,9 @@ class HtmlServiceNow(ServiceNow):
 
         Returns
         -------
-        FullTicket
+        ComputeAllocationRequestTicket
         """
-        if isinstance(tkt, FullTicket):
+        if isinstance(tkt, ComputeAllocationRequestTicket):
             return tkt
         html_file = self._find_html_for_ticket(tkt)
         return parse_ticket_html(html_file)

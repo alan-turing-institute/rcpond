@@ -11,7 +11,7 @@ API. The only methods are:
 - `post_note()` (Not implemented) Post a “work note” to a ticket.
 
 Tickets are returned as instances of a `Ticket` dataclass which
-contains a few, high-level details. The subclass `FullTicket` contains
+contains a few, high-level details. The subclass `ComputeAllocationRequestTicket` contains
 ,in addition, the fields submitted by the requestor on the request form.
 
 The URL of the ServiceNow API is hardcoded, but you will need to
@@ -34,9 +34,11 @@ import base64
 import dataclasses
 import json
 import re
+import warnings
 from dataclasses import dataclass
 from datetime import datetime
-from typing import ClassVar
+from types import MappingProxyType
+from typing import ClassVar, Self
 
 import requests
 
@@ -68,6 +70,9 @@ class Ticket:
     """Raw display_value string for additional comments, as returned by the ServiceNow API."""
 
     _REFRESHABLE_FIELDS: ClassVar[frozenset[str]] = frozenset({"state", "assigned_to", "work_notes", "comments"})
+
+    MATCH_CRITERIA: ClassVar[MappingProxyType[str, str]] = MappingProxyType({})
+    """Field/value pairs that identify this ticket type. Subclasses must override with a non-empty mapping."""
 
     def assign_to_me(self, service_now: ServiceNow) -> None:
         """Assign this ticket to the currently authenticated OAuth user.
@@ -118,6 +123,21 @@ class Ticket:
         for field, value in values.items():
             setattr(self, field, value)
 
+    @classmethod
+    def from_Ticket(cls, t: Ticket, **extras) -> Self:
+        """Create an instance of this class starting from a base ``Ticket``, passing only the additional fields.
+
+        Parameters
+        ----------
+        t : Ticket
+            The base ticket whose fields are copied.
+        **extras
+            Any additional fields required by the subclass.
+        """
+        base = dataclasses.asdict(t)
+        base.update(extras)
+        return cls(**base)
+
 
 @dataclass(frozen=True)
 class NoteEntry:
@@ -134,8 +154,13 @@ class NoteEntry:
 
 
 @dataclass
-class FullTicket(Ticket):
+class ComputeAllocationRequestTicket(Ticket):
     """A ticket; includes full details from the original submission."""
+
+    MATCH_CRITERIA: ClassVar[MappingProxyType[str, str]] = MappingProxyType(
+        {"short_description": "Request access to HPC and cloud computing facilities"}
+    )
+    """Field/value pairs that a base ``Ticket`` must satisfy to be classified as this type."""
 
     project_title: str
     research_area_programme: str
@@ -162,14 +187,32 @@ class FullTicket(Ticket):
     users_who_require_access_names_and_emails: str
     cost_compute_time_breakdown: str
 
-    @classmethod
-    def from_Ticket(cls, t: Ticket, **extras):
-        """Create a new FullTicket starting from a Ticket and passing
-        only the additional fields.
-        """
-        base = dataclasses.asdict(t)
-        base.update(extras)
-        return cls(**base)
+
+## Maps an arbitrary, developer-chosen key to the dataclass that represents that ticket type.
+## The key is never derived from ticket data (e.g. not a slugified short_description) — it serves
+## as a stable identifier and is reused as the per-type config filename stem.
+## Dispatch uses each class's MATCH_CRITERIA, not the key. See planning/multiple-ticket-types.md.
+_TICKET_TYPES: dict[str, type[Ticket]] = {
+    "compute_allocation_request": ComputeAllocationRequestTicket,
+}
+
+
+## Backward compatibility alias for pre-rename imports.
+def __getattr__(name: str):
+    if name == "FullTicket":
+        warnings.warn(
+            "FullTicket is deprecated and will be removed in a future release; "
+            "use ComputeAllocationRequestTicket instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return ComputeAllocationRequestTicket
+    msg = f"module {__name__!r} has no attribute {name!r}"
+    raise AttributeError(msg)
+
+
+def __dir__() -> list[str]:
+    return sorted(globals().keys() | {"FullTicket"})
 
 
 ## --------------------------------------------------------------------------------
@@ -350,13 +393,41 @@ class ServiceNow:
         """
         return f"{self._web_base_url.rstrip('/')}/{self._TABLE}.do?sys_id={tkt.sys_id}"
 
-    def get_full_ticket(self, tkt: Ticket) -> FullTicket:
-        """Get full ticket details."""
+    def get_full_ticket(self, tkt: Ticket) -> Ticket:
+        """Get full ticket details, dispatching to the correct subclass via ``_TICKET_TYPES``.
 
-        ## Get details from ServiceNow as JSON
-        extra_fields = {field.name for field in dataclasses.fields(FullTicket)} - {
-            field.name for field in dataclasses.fields(Ticket)
-        }
+        Parameters
+        ----------
+        tkt : Ticket
+            A base ticket, as returned by ``get_ticket`` or ``get_tickets``.
+
+        Returns
+        -------
+        Ticket
+            An instance of the registered subclass whose ``MATCH_CRITERIA`` all match ``tkt``.
+
+        Raises
+        ------
+        ValueError
+            If no entry in ``_TICKET_TYPES`` has ``MATCH_CRITERIA`` that match ``tkt``.
+        """
+        ticket_class = next(
+            (
+                cls
+                for cls in _TICKET_TYPES.values()
+                if all(getattr(tkt, field, None) == value for field, value in cls.MATCH_CRITERIA.items())
+            ),
+            None,
+        )
+        if ticket_class is None:
+            all_criteria_fields = {f for cls in _TICKET_TYPES.values() for f in cls.MATCH_CRITERIA}
+            ticket_values = {f: getattr(tkt, f, "<missing>") for f in sorted(all_criteria_fields)}
+            known = ", ".join(f"{k!r}" for k in _TICKET_TYPES)
+            msg = f"No registered ticket type matches this ticket {ticket_values}. Known types: {known}"
+            raise ValueError(msg)
+
+        base_fields = {field.name for field in dataclasses.fields(Ticket)}
+        extra_fields = {field.name for field in dataclasses.fields(ticket_class)} - base_fields
 
         ## All extra fields are ServiceNow catalogue variables and must be requested
         ## with the "variables." prefix — they are not top-level record fields.
@@ -366,16 +437,14 @@ class ServiceNow:
             f"{self._base_api_url}/{self._TABLE}/{tkt.sys_id}",
             params={"sysparm_fields": ",".join(requested_fields), "sysparm_display_value": "all"},
         )
-
         resp.raise_for_status()
 
-        ## Parse the returned JSON, stripping the "variables." prefix so the keys
-        ## match FullTicket field names.
+        ## Strip the "variables." prefix so keys match the dataclass field names.
         result = {
             (k[len("variables.") :] if k.startswith("variables.") else k): v for k, v in resp.json()["result"].items()
         }
 
-        return FullTicket.from_Ticket(tkt, **_extract_ticket_fields(result, extra_fields))
+        return ticket_class.from_Ticket(tkt, **_extract_ticket_fields(result, extra_fields))
 
     def _fetch_fields(self, sys_id: str, fields: set[str]) -> dict[str, str]:
         """Fetch display values for the specified fields from a single record.

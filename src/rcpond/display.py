@@ -14,7 +14,7 @@ from rich.table import Table
 from rich.text import Text
 
 from rcpond.llm import LLMResponse
-from rcpond.servicenow import FullTicket, NoteEntry, Ticket
+from rcpond.servicenow import ComputeAllocationRequestTicket, NoteEntry, Ticket
 
 _console = Console()
 
@@ -93,12 +93,12 @@ def display_short_ticket(ticket: Ticket, *, console: Console | None = None) -> N
     con.print(_header_panel(ticket))
 
 
-def display_full_ticket(ticket: FullTicket, *, console: Console | None = None) -> None:
+def display_full_ticket(ticket: ComputeAllocationRequestTicket, *, console: Console | None = None) -> None:
     """Display the full details of a ticket using Rich formatting.
 
     Parameters
     ----------
-    ticket : FullTicket
+    ticket : ComputeAllocationRequestTicket
         The ticket to display.
     console : Console | None
         Rich Console to write to. Defaults to the module-level console (stdout).

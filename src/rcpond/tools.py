@@ -30,7 +30,7 @@ import jinja2
 import jinja2.meta
 
 from rcpond.config import Config
-from rcpond.servicenow import FullTicket, ServiceNow
+from rcpond.servicenow import ServiceNow, Ticket
 from rcpond.tool import Tool
 
 ## --------------------------------------------------------------------------------
@@ -66,7 +66,7 @@ class PostFreeformNoteTool(Tool):
             },
         }
 
-    def execute(self, service_now: ServiceNow, ticket: FullTicket, **kwargs) -> None:
+    def execute(self, service_now: ServiceNow, ticket: Ticket, **kwargs) -> None:
         service_now.post_note(ticket, note=kwargs["note"])
 
 
@@ -131,7 +131,7 @@ class PostTemplatedNoteTool(Tool):
             },
         }
 
-    def execute(self, service_now: ServiceNow, ticket: FullTicket, **kwargs) -> None:
+    def execute(self, service_now: ServiceNow, ticket: Ticket, **kwargs) -> None:
         template_name = kwargs.pop("template_name")
         jinja_env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(self._dir)))
         rendered = jinja_env.get_template(template_name).render(ticket=ticket, **kwargs)

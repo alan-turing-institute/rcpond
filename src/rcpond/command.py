@@ -18,7 +18,7 @@ from rcpond.config import Config
 from rcpond.display import display_full_ticket, display_multi_tickets, display_response, display_short_ticket
 from rcpond.llm import LLM, LLMResponse
 from rcpond.prompt import construct_prompt
-from rcpond.servicenow import FullTicket, ServiceNow, Ticket
+from rcpond.servicenow import ComputeAllocationRequestTicket, ServiceNow, Ticket
 from rcpond.tools import get_available_tools
 
 
@@ -35,7 +35,7 @@ class ReplyMode(str, Enum):
     always = "always"
 
 
-def _should_skip(full_ticket: FullTicket, reply_mode: ReplyMode) -> bool:
+def _should_skip(full_ticket: Ticket, reply_mode: ReplyMode) -> bool:
     """Return True if the ticket should be skipped given the reply mode."""
     if reply_mode == ReplyMode.cautious:
         return full_ticket.is_rcpond_processed()
@@ -73,7 +73,7 @@ def _process_ticket(
         Controls when to skip a ticket based on prior RCPond activity.
         See ``ReplyMode`` for the options.
     """
-    full_ticket: FullTicket = service_now.get_full_ticket(ticket)
+    full_ticket = service_now.get_full_ticket(ticket)
     if _should_skip(full_ticket, reply_mode):
         prev_time = full_ticket.get_combined_notes()[-1].datetime_stamp
         msg = f"Skipping: There has been no new activity on ticket '{full_ticket.number}' since RCPond's previous review on {prev_time}"
@@ -126,7 +126,9 @@ def display_single_ticket(ticket_number: str, config: Config | None = None):
     config = config or Config()
     service_now: ServiceNow = ServiceNow(config)
     ticket = service_now.get_ticket(ticket_number)
-    display_full_ticket(service_now.get_full_ticket(ticket))
+    full_ticket = service_now.get_full_ticket(ticket)
+    assert isinstance(full_ticket, ComputeAllocationRequestTicket)
+    display_full_ticket(full_ticket)
 
 
 def get_ticket_url(ticket_number: str, config: Config | None = None) -> str:

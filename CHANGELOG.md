@@ -10,6 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `--reply-mode {cautious|default|always}` option for the `process-next`, `process-ticket`, and `process-all` subcommands, controlling when rcpond skips a ticket based on prior activity.
+- Backward compatibility alias `rcpond.servicenow.FullTicket` for the renamed `ComputeAllocationRequestTicket` class.
+
+### Changed
+
+- Renamed ticket dataclass `FullTicket` to `ComputeAllocationRequestTicket` across code and docs.
+
+### Deprecated
+
+- `rcpond.servicenow.FullTicket` is deprecated and will be removed in a future release; use `ComputeAllocationRequestTicket` instead. Accessing `FullTicket` now emits a `DeprecationWarning`.
 
 ## [0.2.0] - 2026-05-27
 

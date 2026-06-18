@@ -285,11 +285,11 @@ def _validate_jinja_template(path: Path) -> None:
 
 
 def _unknown_ticket_attrs(path: Path) -> list[str]:
-    """Return any ``ticket.<attr>`` references in the template that are not fields on FullTicket."""
+    """Return any ``ticket.<attr>`` references in the template that are not fields on ComputeAllocationRequestTicket."""
     ## Import here to avoid a circular dependency (config <- servicenow <- config)
-    from rcpond.servicenow import FullTicket
+    from rcpond.servicenow import ComputeAllocationRequestTicket
 
-    valid_fields = {f.name for f in dataclasses.fields(FullTicket)}
+    valid_fields = {f.name for f in dataclasses.fields(ComputeAllocationRequestTicket)}
     env = jinja2.Environment()
     parsed = env.parse(path.read_text())
     bad = []
@@ -301,7 +301,7 @@ def _unknown_ticket_attrs(path: Path) -> list[str]:
 
 def _validate_email_templates_dir(dir_path: Path) -> None:
     """Raise ValueError if ``dir_path`` has no ``*.j2`` files, any are invalid Jinja2,
-    or any reference non-existent fields on FullTicket via ``ticket.<attr>``."""
+    or any reference non-existent fields on ComputeAllocationRequestTicket via ``ticket.<attr>``."""
     j2_files = list(dir_path.glob("*.j2"))
     if not j2_files:
         msg = f"No .j2 files found in email_templates_dir: {dir_path}"

@@ -217,7 +217,7 @@ The LLM will generate values for any variables in the template that do not have 
 
 Variables with the prefix `ticket.` are populated deterministically with the corresponding field from the ServiceNow ticket. For example, `{{ ticket.number }}` will be replaced with the ticket's number, and `{{ ticket.project_title }}` will be replaced with the title of the project associated with the ticket.
 
-If a template references a field with the `ticket.` prefix that is not part of the `FullTicket` class, a validation error will be raised when the template is loaded. For example `{{ ticket.fake_field }}` will cause an error. This ensures that all `ticket.*` variables in the template correspond to actual fields on the ticket. The full list of available fields is on the [`FullTicket`](api.md#rcpond.servicenow.FullTicket) class in the API reference.
+If a template references a field with the `ticket.` prefix that is not part of the `ComputeAllocationRequestTicket` class, a validation error will be raised when the template is loaded. For example `{{ ticket.fake_field }}` will cause an error. This ensures that all `ticket.*` variables in the template correspond to actual fields on the ticket. The full list of available fields is on the [`ComputeAllocationRequestTicket`](api.md#rcpond.servicenow.ComputeAllocationRequestTicket) class in the API reference.
 
 
 ### Adding a template

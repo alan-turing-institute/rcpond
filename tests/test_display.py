@@ -6,11 +6,11 @@ import pytest
 from rich.console import Console
 
 from rcpond.display import display_full_ticket
-from rcpond.servicenow import FullTicket, Ticket
+from rcpond.servicenow import ComputeAllocationRequestTicket, Ticket
 
 
 @pytest.fixture()
-def full_ticket() -> FullTicket:
+def full_ticket() -> ComputeAllocationRequestTicket:
     base = Ticket(
         sys_id="abc123",
         number="RES0001000",
@@ -24,7 +24,7 @@ def full_ticket() -> FullTicket:
         work_notes="",
         comments="",
     )
-    return FullTicket.from_Ticket(
+    return ComputeAllocationRequestTicket.from_Ticket(
         base,
         work_notes="01/01/2026 09:30:00 - RCP Team (Work notes)\nTicket received.",
         comments="",
@@ -55,7 +55,7 @@ def full_ticket() -> FullTicket:
     )
 
 
-def _capture(ticket: FullTicket) -> str:
+def _capture(ticket: ComputeAllocationRequestTicket) -> str:
     """Run display_full_ticket and return the plain-text output."""
     buf = io.StringIO()
     con = Console(file=buf, highlight=False, no_color=True)
