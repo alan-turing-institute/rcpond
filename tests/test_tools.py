@@ -169,6 +169,46 @@ def test_underscore_prefix_template_available_to_jinja_renderer():
     assert "Partial footer" in rendered
 
 
+# --- underscore-prefix template filtering (multi-dot filename, e.g. _mock_partial.yaml.j2) ---
+
+
+def test_underscore_prefix_multi_dot_template_excluded_from_schema():
+    tool = PostTemplatedNoteTool(_make_config(_PREFIX_TEMPLATES_DIR))
+    result = tool.to_openai_dict()
+
+    template_enum = result["function"]["parameters"]["properties"]["template_name"]["enum"]
+    assert "mock_main_template_multi_dot.yaml.j2" in template_enum
+    assert "_mock_partial.yaml.j2" not in template_enum
+
+
+def test_underscore_prefix_multi_dot_template_vars_included_in_schema():
+    tool = PostTemplatedNoteTool(_make_config(_PREFIX_TEMPLATES_DIR))
+    result = tool.to_openai_dict()
+
+    properties = result["function"]["parameters"]["properties"]
+    ## variable from _mock_partial.yaml.j2 must be surfaced so the LLM can supply it
+    assert "partial_yaml_footer_text" in properties
+
+
+def test_underscore_prefix_multi_dot_template_available_to_jinja_renderer():
+    service_now = MagicMock(spec=ServiceNow)
+    ticket = MagicMock(spec=ComputeAllocationRequestTicket)
+
+    PostTemplatedNoteTool(_make_config(_PREFIX_TEMPLATES_DIR)).execute(
+        service_now,
+        ticket,
+        template_name="mock_main_template_multi_dot.yaml.j2",
+        main_multi_dot_subject="Multi-dot Subject",
+        partial_yaml_footer_text="Yaml partial footer",
+    )
+
+    service_now.post_note.assert_called_once()
+    rendered = service_now.post_note.call_args[1]["note"]
+    assert "Multi-dot Subject" in rendered
+    assert "I am included from the yaml partial" in rendered  # hardcoded in _mock_partial.yaml.j2
+    assert "Yaml partial footer" in rendered
+
+
 # --- get_available_tools ---
 
 
