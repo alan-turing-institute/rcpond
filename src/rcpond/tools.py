@@ -84,6 +84,7 @@ class PostTemplatedNoteTool(Tool):
     def __init__(self, config: Config) -> None:
         self._dir = config.email_templates_dir
         self._templates: dict[str, Path] = {f.name: f for f in sorted(self._dir.glob("*.j2"))}
+        self._jinja_env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(self._dir)))
 
     @property
     def name(self) -> str:
@@ -105,6 +106,23 @@ class PostTemplatedNoteTool(Tool):
             vars |= jinja2.meta.find_undeclared_variables(ast)
         vars.discard("ticket")
         return vars
+
+    def _render(self, template_name: str, **kwargs) -> str:
+        """Render a template by name with the given context variables.
+
+        Parameters
+        ----------
+        template_name : str
+            Name of the template file (relative to the templates directory).
+        **kwargs
+            Context variables passed to the template.
+
+        Returns
+        -------
+        str
+            The rendered template string.
+        """
+        return self._jinja_env.get_template(template_name).render(**kwargs)
 
     def to_openai_dict(self) -> dict:
         """Templates prefixed '_' are omitted from the template_name enum but their variables are still surfaced to the LLM."""
@@ -133,13 +151,58 @@ class PostTemplatedNoteTool(Tool):
 
     def execute(self, service_now: ServiceNow, ticket: Ticket, **kwargs) -> None:
         template_name = kwargs.pop("template_name")
-        jinja_env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(self._dir)))
-        rendered = jinja_env.get_template(template_name).render(ticket=ticket, **kwargs)
+        rendered = self._render(template_name, ticket=ticket, **kwargs)
         service_now.post_note(ticket, note=rendered)
 
 
 ## --------------------------------------------------------------------------------
 ## Interface to this module
+
+
+def verify_render_all_templates(config: Config) -> list[tuple[str, bool, str]]:
+    """Render every top-level template with dummy variable values.
+
+    Used for CI checks to verify all templates and their includes render
+    without error via the same code path as production. Variables are filled
+    as ``<name>_placeholder``; files whose names start with ``_`` are treated
+    as partials and excluded from direct rendering.
+
+    Unlike ``_llm_vars``, the variable-collection step here tolerates syntax
+    errors so that each broken template is reported as a render failure rather
+    than aborting the entire check.
+
+    Returns
+    -------
+    list[tuple[str, bool, str]]
+        One entry per top-level template: ``(name, passed, error_message)``.
+        ``error_message`` is empty when ``passed`` is True.
+    """
+    template_tool = PostTemplatedNoteTool(config)
+
+    ## Collect variables tolerantly: skip templates that fail to parse so that
+    ## their syntax error is caught and recorded per-template at render time.
+    parse_env = jinja2.Environment()
+    all_vars: set[str] = set()
+    for path in template_tool._templates.values():
+        try:
+            ast = parse_env.parse(path.read_text())
+            all_vars |= jinja2.meta.find_undeclared_variables(ast)
+        except jinja2.TemplateSyntaxError:
+            pass
+    all_vars.discard("ticket")
+    dummy_context: dict = {var: f"{var}_placeholder" for var in all_vars}
+    ## ticket is supplied by execute() in production; provide a stub so that
+    ## {{ ticket.field }} expressions render without raising UndefinedError.
+    dummy_context["ticket"] = type("_DummyTicket", (), {"__getattr__": lambda _, name: f"{name}_placeholder"})()
+
+    results: list[tuple[str, bool, str]] = []
+    for name in (n for n in template_tool._templates if not n.startswith("_")):
+        try:
+            template_tool._render(name, **dummy_context)
+            results.append((name, True, ""))
+        except jinja2.TemplateError as e:
+            results.append((name, False, str(e)))
+    return results
 
 
 def get_available_tools(config: Config) -> list[Tool]:

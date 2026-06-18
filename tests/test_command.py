@@ -22,6 +22,14 @@ from rcpond.llm import LLM, LLMResponse
 from rcpond.servicenow import ComputeAllocationRequestTicket, Ticket, _note_prefix
 
 _WORKING_TEMPLATES_DIR = Path("tests/fixtures/working_templates")
+_MOCK_TEMPLATES_DIR = Path("tests/fixtures/mock_templates")
+_PREFIX_TEMPLATES_DIR = Path("tests/fixtures/prefix_templates")
+
+
+def _make_template_config(email_templates_dir):
+    config = MagicMock()
+    config.email_templates_dir = email_templates_dir
+    return config
 
 
 @pytest.fixture(autouse=True)
@@ -212,3 +220,18 @@ def test_post_refresh_race_condition(
 
     assert mock_llm.generate.called  ## pre-check always passes in these cases
     assert result.llm_model is (None if expect_skip else "mock-model")
+
+
+## ── check_templates ─────────────────────────────────────────────────────────
+
+
+def test_check_templates_returns_true_for_valid_templates():
+    assert command.check_templates(_make_template_config(_WORKING_TEMPLATES_DIR)) is True
+
+
+def test_check_templates_returns_false_when_a_template_is_malformed():
+    assert command.check_templates(_make_template_config(_MOCK_TEMPLATES_DIR)) is False
+
+
+def test_check_templates_returns_true_when_includes_resolve():
+    assert command.check_templates(_make_template_config(_PREFIX_TEMPLATES_DIR)) is True

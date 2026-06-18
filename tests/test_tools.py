@@ -5,7 +5,9 @@ import pytest
 
 from rcpond.command import ReplyMode
 from rcpond.servicenow import ComputeAllocationRequestTicket, ServiceNow, Ticket
-from rcpond.tools import PostFreeformNoteTool, PostTemplatedNoteTool, get_available_tools
+from rcpond.tools import PostFreeformNoteTool, PostTemplatedNoteTool, get_available_tools, verify_render_all_templates
+
+_MOCK_TEMPLATES_DIR = Path("tests/fixtures/mock_templates")
 
 _WORKING_TEMPLATES_DIR = Path("tests/fixtures/working_templates")
 _PREFIX_TEMPLATES_DIR = Path("tests/fixtures/prefix_templates")
@@ -207,6 +209,45 @@ def test_underscore_prefix_multi_dot_template_available_to_jinja_renderer():
     assert "Multi-dot Subject" in rendered
     assert "I am included from the yaml partial" in rendered  # hardcoded in _mock_partial.yaml.j2
     assert "Yaml partial footer" in rendered
+
+
+# --- verify_render_all_templates ---
+
+
+def test_verify_render_all_templates_passes_for_valid_templates():
+    results = verify_render_all_templates(_make_config())
+    assert all(passed for _, passed, _ in results)
+    assert any(name == "mock_working_template.yaml.j2" for name, _, _ in results)
+
+
+def test_verify_render_all_templates_fails_for_malformed_template():
+    results = verify_render_all_templates(_make_config(_MOCK_TEMPLATES_DIR))
+    failed = [name for name, passed, _ in results if not passed]
+    assert "mock_malformed_template.yaml.j2" in failed
+
+
+def test_verify_render_all_templates_resolves_includes():
+    ## Templates with {% include %} directives should render successfully
+    results = verify_render_all_templates(_make_config(_PREFIX_TEMPLATES_DIR))
+    assert all(passed for _, passed, _ in results)
+
+
+def test_verify_render_all_templates_excludes_partials_from_results():
+    results = verify_render_all_templates(_make_config(_PREFIX_TEMPLATES_DIR))
+    names = [name for name, _, _ in results]
+    assert "_mock_partial.j2" not in names
+    assert "_mock_partial.yaml.j2" not in names
+
+
+def test_verify_render_all_templates_uses_placeholder_suffix(tmp_path):
+    ## render_all fills variables as <name>_placeholder; confirm via _render directly
+    (tmp_path / "test.yaml.j2").write_text("subject: {{ email_subject }}")
+    results = verify_render_all_templates(_make_config(tmp_path))
+    assert results == [("test.yaml.j2", True, "")]
+    rendered = PostTemplatedNoteTool(_make_config(tmp_path))._render(
+        "test.yaml.j2", email_subject="email_subject_placeholder"
+    )
+    assert "email_subject_placeholder" in rendered
 
 
 # --- get_available_tools ---

@@ -219,6 +219,21 @@ except ImportError:
 
 
 @cli.command()
+def check_templates(
+    ctx: typer.Context,
+) -> None:
+    """Render all Jinja2 templates in a directory with dummy values (for CI).
+
+    This subcommand is to help those editing templates. It is not expected that most users will need to use this directly.
+
+    Exits with code 1 if any template fails to render. No ServiceNow or LLM
+    configuration is required.
+    """
+    if not command.check_templates(_config(ctx)):
+        raise typer.Exit(1)
+
+
+@cli.command()
 def process_all(
     ctx: typer.Context,
     dry_run: bool = False,

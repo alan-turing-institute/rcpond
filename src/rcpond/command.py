@@ -8,18 +8,21 @@ The four main entry points are:
 - `batch_process_tickets`: Review all unassigned tickets via the LLM.
 - `batch_evaluate_tickets`: Evaluate LLM performance against pre-downloaded HTML tickets.
   Requires the ``html`` optional dependency group (``pip install rcpond[html]``).
+- `check_templates`: Render all Jinja2 templates in a directory with dummy variable values (for CI).
 """
 
 import json
 from enum import Enum
 from pathlib import Path
 
+from rich import print
+
 from rcpond.config import Config
 from rcpond.display import display_full_ticket, display_multi_tickets, display_response, display_short_ticket
 from rcpond.llm import LLM, LLMResponse
 from rcpond.prompt import construct_prompt
 from rcpond.servicenow import ComputeAllocationRequestTicket, ServiceNow, Ticket
-from rcpond.tools import get_available_tools
+from rcpond.tools import get_available_tools, verify_render_all_templates
 
 
 class ReplyMode(str, Enum):
@@ -112,6 +115,34 @@ def _process_ticket(
 
 ## --------------------------------------------------------------------------------
 ## Interface to this module
+
+
+def check_templates(config: Config) -> bool:
+    """Render all non-partial Jinja2 templates in a directory with dummy variable values.
+
+    Delegates to ``PostTemplatedNoteTool.render_all`` so the same rendering code
+    path used in production is exercised. Intended for use as a CI check in the
+    templates repository.
+
+    Parameters
+    ----------
+    templates_dir : Path
+        Directory containing ``*.j2`` template files. Files whose names start
+        with ``_`` are treated as partials and not rendered directly.
+
+    Returns
+    -------
+    bool
+        True if every top-level template renders without error; False otherwise.
+        A pass/fail line is printed for each template.
+    """
+    results = verify_render_all_templates(config)
+    for name, passed, error in results:
+        if passed:
+            print(f"  [green]PASS[/green]  {name}")
+        else:
+            print(f"  [red]FAIL[/red]  {name}: {error}")
+    return all(passed for _, passed, _ in results)
 
 
 def display_all_tickets(long_list: bool, config: Config | None = None):
