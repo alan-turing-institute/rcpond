@@ -2,7 +2,7 @@
 
 Each command has a specific policy:
 
-- display_all_tickets:      honours an explicit long_list argument
+- display_all_tickets:      honours an explicit state argument (TicketState)
 - display_single_ticket:    uses get_ticket(), which always searches all tickets
 - process_next_ticket:      only ever selects from unassigned tickets
 - process_specific_ticket:  uses get_ticket(), which always searches all tickets
@@ -78,18 +78,19 @@ def ticket():
 ## ── display_all_tickets ─────────────────────────────────────────────────────
 
 
-def test_display_all_tickets_uses_user_focus_by_default(cfg):
-    """display_all_tickets uses TicketState.user_focus when long_list=False."""
+@pytest.mark.parametrize("state", list(TicketState))
+def test_display_all_tickets_passes_state_to_get_tickets(cfg, state):
+    """display_all_tickets passes the given TicketState through to get_tickets."""
     with patch("rcpond.command.ServiceNow") as MockSN:
-        command.display_all_tickets(long_list=False, config=cfg)
+        command.display_all_tickets(state=state, config=cfg)
+    MockSN.return_value.get_tickets.assert_called_once_with(state=state)
+
+
+def test_display_all_tickets_defaults_to_user_focus(cfg):
+    """display_all_tickets defaults to TicketState.user_focus when no state is given."""
+    with patch("rcpond.command.ServiceNow") as MockSN:
+        command.display_all_tickets(config=cfg)
     MockSN.return_value.get_tickets.assert_called_once_with(state=TicketState.user_focus)
-
-
-def test_display_all_tickets_uses_all_open_for_longlist(cfg):
-    """display_all_tickets uses TicketState.all_open when long_list=True."""
-    with patch("rcpond.command.ServiceNow") as MockSN:
-        command.display_all_tickets(long_list=True, config=cfg)
-    MockSN.return_value.get_tickets.assert_called_once_with(state=TicketState.all_open)
 
 
 ## ── display_single_ticket ───────────────────────────────────────────────────

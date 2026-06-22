@@ -855,101 +855,47 @@ def _setup_find_related(sn_instance, candidates: list[ComputeAllocationRequestTi
     sn_instance.get_full_ticket = MagicMock(side_effect=candidates)
 
 
-def test_find_related_by_finance_code(sn_instance):
-    source = _make_full_ticket(number="RES0001000", which_finance_code="TUR-2023-001")
-    match = _make_full_ticket(number="RES0002000", which_finance_code="TUR-2023-001")
-    no_match = _make_full_ticket(number="RES0003000", which_finance_code="TUR-9999-000")
+@pytest.mark.parametrize(
+    ("field", "source_value", "match_value", "no_match_value", "heuristic_substr"),
+    [
+        ("which_finance_code", "TUR-2023-001", "TUR-2023-001", "TUR-9999-000", "finance_code:TUR-2023-001"),
+        ("pi_supervisor_email", "pi@example.com", "pi@example.com", "other@example.com", "pi_email:pi@example.com"),
+        ("pmu_contact_email", "pmu@example.com", "pmu@example.com", "other@example.com", "pmu_email:pmu@example.com"),
+        (
+            "users_who_require_access_names_and_emails",
+            "Alice Smith alice@example.com, Bob Jones bob@example.com",
+            "Alice Smith alice@example.com, Carol carol@example.com",
+            "Dave dave@other.com",
+            "shared_user:alice@example.com",
+        ),
+        (
+            "project_title",
+            "Deep Learning for Climate Modelling",
+            "Deep Learning for Climate Modeling",
+            "Completely Different Research",
+            "project_title_similarity",
+        ),
+        (
+            "azure_subscription_id_or_hpc_group_project_id",
+            "12345678-1234-1234-1234-123456789abc",
+            "12345678-1234-1234-1234-123456789abc",
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            "12345678-1234-1234-1234-123456789abc",
+        ),
+    ],
+    ids=["finance_code", "pi_email", "pmu_email", "shared_user_email", "project_title", "azure_subscription_id"],
+)
+def test_find_related_by_heuristic(sn_instance, field, source_value, match_value, no_match_value, heuristic_substr):
+    source = _make_full_ticket(number="RES0001000", **{field: source_value})
+    match = _make_full_ticket(number="RES0002000", **{field: match_value})
+    no_match = _make_full_ticket(number="RES0003000", **{field: no_match_value})
     _setup_find_related(sn_instance, [match, no_match])
 
     results = sn_instance.find_related_tickets(source)
 
     assert len(results) == 1
     assert results[0].ticket.number == "RES0002000"
-    assert any("finance_code:TUR-2023-001" in h for h in results[0].matched_heuristics)
-
-
-def test_find_related_by_pi_email(sn_instance):
-    source = _make_full_ticket(number="RES0001000", pi_supervisor_email="pi@example.com")
-    match = _make_full_ticket(number="RES0002000", pi_supervisor_email="pi@example.com")
-    no_match = _make_full_ticket(number="RES0003000", pi_supervisor_email="other@example.com")
-    _setup_find_related(sn_instance, [match, no_match])
-
-    results = sn_instance.find_related_tickets(source)
-
-    assert len(results) == 1
-    assert results[0].ticket.number == "RES0002000"
-    assert any("pi_email:pi@example.com" in h for h in results[0].matched_heuristics)
-
-
-def test_find_related_by_pmu_email(sn_instance):
-    source = _make_full_ticket(number="RES0001000", pmu_contact_email="pmu@example.com")
-    match = _make_full_ticket(number="RES0002000", pmu_contact_email="pmu@example.com")
-    no_match = _make_full_ticket(number="RES0003000", pmu_contact_email="other@example.com")
-    _setup_find_related(sn_instance, [match, no_match])
-
-    results = sn_instance.find_related_tickets(source)
-
-    assert len(results) == 1
-    assert results[0].ticket.number == "RES0002000"
-    assert any("pmu_email:pmu@example.com" in h for h in results[0].matched_heuristics)
-
-
-def test_find_related_by_shared_user_email(sn_instance):
-    source = _make_full_ticket(
-        number="RES0001000",
-        users_who_require_access_names_and_emails="Alice Smith alice@example.com, Bob Jones bob@example.com",
-    )
-    match = _make_full_ticket(
-        number="RES0002000",
-        users_who_require_access_names_and_emails="Alice Smith alice@example.com, Carol carol@example.com",
-    )
-    no_match = _make_full_ticket(
-        number="RES0003000",
-        users_who_require_access_names_and_emails="Dave dave@other.com",
-    )
-    _setup_find_related(sn_instance, [match, no_match])
-
-    results = sn_instance.find_related_tickets(source)
-
-    assert len(results) == 1
-    assert results[0].ticket.number == "RES0002000"
-    assert any("shared_user:alice@example.com" in h for h in results[0].matched_heuristics)
-
-
-def test_find_related_by_similar_project_title(sn_instance):
-    source = _make_full_ticket(number="RES0001000", project_title="Deep Learning for Climate Modelling")
-    match = _make_full_ticket(number="RES0002000", project_title="Deep Learning for Climate Modeling")
-    no_match = _make_full_ticket(number="RES0003000", project_title="Completely Different Research")
-    _setup_find_related(sn_instance, [match, no_match])
-
-    results = sn_instance.find_related_tickets(source)
-
-    assert len(results) == 1
-    assert results[0].ticket.number == "RES0002000"
-    assert any("project_title_similarity" in h for h in results[0].matched_heuristics)
-
-
-def test_find_related_by_azure_subscription_id(sn_instance):
-    azure_id = "12345678-1234-1234-1234-123456789abc"
-    source = _make_full_ticket(
-        number="RES0001000",
-        azure_subscription_id_or_hpc_group_project_id=azure_id,
-    )
-    match = _make_full_ticket(
-        number="RES0002000",
-        azure_subscription_id_or_hpc_group_project_id=azure_id,
-    )
-    no_match = _make_full_ticket(
-        number="RES0003000",
-        azure_subscription_id_or_hpc_group_project_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
-    )
-    _setup_find_related(sn_instance, [match, no_match])
-
-    results = sn_instance.find_related_tickets(source)
-
-    assert len(results) == 1
-    assert results[0].ticket.number == "RES0002000"
-    assert any(azure_id in h for h in results[0].matched_heuristics)
+    assert any(heuristic_substr in h for h in results[0].matched_heuristics)
 
 
 def test_find_related_empty_fields_do_not_match(sn_instance):

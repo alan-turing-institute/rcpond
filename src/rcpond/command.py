@@ -151,11 +151,10 @@ def check_templates(config: Config) -> bool:
     return all(passed for _, passed, _ in results)
 
 
-def display_all_tickets(long_list: bool, config: Config | None = None):
-    """Display the list of unassigned tickets from ServiceNow to the user."""
+def display_all_tickets(state: TicketState = TicketState.user_focus, config: Config | None = None):
+    """Display tickets from ServiceNow filtered by state."""
     config = config or Config()
     service_now: ServiceNow = ServiceNow(config)
-    state = TicketState.all_open if long_list else TicketState.user_focus
     display_multi_tickets(service_now.get_tickets(state=state))
 
 

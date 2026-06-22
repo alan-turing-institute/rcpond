@@ -39,6 +39,7 @@ from rich import print
 from rcpond import command
 from rcpond.command import ReplyMode
 from rcpond.config import Config
+from rcpond.servicenow import TicketState
 
 cli = typer.Typer(name="rcpond", no_args_is_help=True)
 
@@ -134,9 +135,9 @@ def whoami(ctx: typer.Context) -> None:
 
 
 @cli.command()
-def display_all(ctx: typer.Context, long_list: bool = False):
-    """Display all unassigned tickets from ServiceNow."""
-    command.display_all_tickets(long_list=long_list, config=_config(ctx))
+def display_all(ctx: typer.Context, ticket_state: TicketState = TicketState.user_focus):
+    """Display tickets from ServiceNow filtered by --ticket-state."""
+    command.display_all_tickets(state=ticket_state, config=_config(ctx))
 
 
 @cli.command()
