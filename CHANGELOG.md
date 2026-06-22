@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Per-ticket-type configuration: create `$XDG_CONFIG_HOME/rcpond/ticket_types/{key}.config` with `RCPOND_RULES_PATH`, `RCPOND_EMAIL_TEMPLATES_DIR`, and `RCPOND_SERVICENOW_QUERY` to configure a ticket type. The key must match an entry in the `_TICKET_TYPES` registry.
 - `--ticket-type <key>` mandatory flag on `process-next` and `process-all` to specify which ticket type to process in batch commands.
 - `RCPOND_SERVICENOW_QUERY` config value replaces the previously hardcoded ServiceNow query filter; falls back to the built-in default when not set.
+- `find-related` subcommand: given a ticket number, lists all related tickets and which heuristic matched (finance code, PI email, PMU email, shared user email, similar project title, Azure subscription ID). Searches across all ticket states including closed and resolved.
+- `TicketState` enum (`user_focus` / `all_open` / `all_including_closed`) replaces the `long_list: bool` parameter on `ServiceNow.get_tickets()`.
+- `get_ticket()` now searches across all ticket states (including closed/resolved/cancelled), so that ticket numbers extracted from text fields are always resolvable.
 
 ### Changed
 

@@ -224,6 +224,16 @@ except ImportError:
 
 
 @cli.command()
+def find_related(ctx: typer.Context, ticket_number: str):
+    """List tickets related to the given ticket number.
+
+    Searches all ticket states (including closed and resolved) and reports which
+    heuristic matched each related ticket (finance code, PI email, project title, etc.).
+    """
+    command.find_related_tickets(ticket_number=ticket_number, config=_config(ctx))
+
+
+@cli.command()
 def check_templates(
     ctx: typer.Context,
 ) -> None:

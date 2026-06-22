@@ -18,10 +18,16 @@ from pathlib import Path
 from rich import print
 
 from rcpond.config import Config
-from rcpond.display import display_full_ticket, display_multi_tickets, display_response, display_short_ticket
+from rcpond.display import (
+    display_full_ticket,
+    display_multi_tickets,
+    display_related_tickets,
+    display_response,
+    display_short_ticket,
+)
 from rcpond.llm import LLM, LLMResponse
 from rcpond.prompt import construct_prompt
-from rcpond.servicenow import ComputeAllocationRequestTicket, ServiceNow, Ticket
+from rcpond.servicenow import ComputeAllocationRequestTicket, RelatedTicketMatch, ServiceNow, Ticket, TicketState
 from rcpond.tools import get_available_tools, verify_render_all_templates
 
 
@@ -149,7 +155,8 @@ def display_all_tickets(long_list: bool, config: Config | None = None):
     """Display the list of unassigned tickets from ServiceNow to the user."""
     config = config or Config()
     service_now: ServiceNow = ServiceNow(config)
-    display_multi_tickets(service_now.get_tickets(long_list=long_list))
+    state = TicketState.all_open if long_list else TicketState.user_focus
+    display_multi_tickets(service_now.get_tickets(state=state))
 
 
 def display_single_ticket(ticket_number: str, config: Config | None = None):
@@ -176,6 +183,30 @@ def get_ticket_url(ticket_number: str, config: Config | None = None) -> str:
     service_now: ServiceNow = ServiceNow(config)
     ticket = service_now.get_ticket(ticket_number)
     return service_now.web_url(ticket)
+
+
+def find_related_tickets(ticket_number: str, config: Config | None = None) -> list[RelatedTicketMatch]:
+    """Find tickets related to the given ticket number using field-matching heuristics.
+
+    Parameters
+    ----------
+    ticket_number : str
+        The ticket to search from (e.g. ``"RES0001234"``).
+    config : Config | None
+        Configuration to use. If None, Config() is constructed from the environment.
+
+    Returns
+    -------
+    list[RelatedTicketMatch]
+        Related tickets and the heuristics that matched.
+    """
+    config = config or Config()
+    service_now: ServiceNow = ServiceNow(config)
+    ticket = service_now.get_ticket(ticket_number)
+    full_ticket = service_now.get_full_ticket(ticket)
+    matches = service_now.find_related_tickets(full_ticket)
+    display_related_tickets(full_ticket, matches)
+    return matches
 
 
 def process_next_ticket(dry_run: bool, reply_mode: ReplyMode, config: Config | None = None):
@@ -290,7 +321,7 @@ def batch_evaluate_tickets(in_dir: Path, out_file: Path, num_runs: int = 1, conf
     llm: LLM = LLM(config)
 
     ## Pre-filter to Azure tickets only
-    all_tickets = service_now.get_tickets(long_list=True)
+    all_tickets = service_now.get_tickets(state=TicketState.all_open)
     azure_tickets = []
     for ticket in all_tickets:
         # TODO: Temporary, an messy way to limit tickets to only those related to Azure
