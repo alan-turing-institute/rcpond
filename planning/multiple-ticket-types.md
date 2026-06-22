@@ -214,10 +214,10 @@ For process-next and process-all, rcpond reads all config files in ticket_types/
 3. CLI overrides
 For single-ticket commands (display-ticket, process-ticket): the ticket's `short_description` is known after the first API call, so the correct rules/templates are selected automatically. A CLI override isn't really needed in the normal flow.
 
-For multi-ticket commands (process-all, process-next): 
-These should only operate on tickets of the same type as this reflected the users likely intention when call ing a batch command. The unanswered question is if and how the user can specify which type they want to operate on if they have multiple active types.
+For multi-ticket commands (process-all, process-next):
+These accept a mandatory `--ticket-type <key>` flag (e.g. `--ticket-type compute_allocation_request`). The key must match one of the active ticket types in config; rcpond errors clearly if the key is unrecognised or has no corresponding config file. This is mandatory rather than optional: silently processing all active types in a single batch run risks a user process ticket for which they are not the person primarily responsible. It makes the user's intent explicit in logs and audit trails.
 
-The design of the override options depends on how the ticket type is identified.
+Single-ticket commands (display-ticket, process-ticket) do not need this flag — the correct type is resolved automatically from the ticket's own fields after the first API call.
 
 ---
 
@@ -315,3 +315,5 @@ RCPOND_SERVICENOW_QUERY=assigned_toISEMPTY^short_description=Request access to H
 * It is possible that a ServiceNow query could return multiple ticket types if the filters are not mutually exclusive.
 * RCPond should always assert that a newly read/retrieved ticket is of the type expected, and not rely on the query to be completely correct. RCPond should evaluate each `_TICKET_TYPES` entry's `match` criteria against the ticket's own fields to determine which type it is and select the rules/templates accordingly. Still need to decide how to handle a ticket that matches no active type in config.
 * `RCPOND_SERVICENOW_QUERY` (which tickets get fetched) and a registry entry's `match` criteria (how a fetched ticket is dispatched) express overlapping intent independently and could drift out of sync — e.g. a query broadened to fetch more tickets without updating `match` to discriminate them. Not a blocker for the single-field (`short_description`-only) case, but worth keeping in mind once `match` grows additional fields.
+* `get_tickets()` will later gain a `TicketState` parameter (from the `combine-ticket-history` feature) to support fetching closed, resolved, and cancelled tickets. The function signature should be designed to accommodate this as an orthogonal parameter alongside the per-type query system — state filtering and type filtering are independent concerns.
+* The `_TICKET_TYPES` registry (or per-type config) should support declaring which ticket type combinations are considered potentially related, for use by the `find_related` subcommand (from the `combine-ticket-history` feature). Some combinations will never have related tickets (e.g. a GitHub organisation membership ticket and a compute allocation request) and this can be used as a cheap pre-filter before the more expensive field-matching heuristics are applied.
