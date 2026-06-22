@@ -289,8 +289,11 @@ def _note(ts: str, user: str, content: str, note_type: str = "Work notes") -> st
     return f"{ts} - {user} ({note_type})\n{content}"
 
 
-_RCPOND_OLD = _note("01/01/2026 09:00:00", "RCPond", servicenow._note_prefix("0.0.0") + "Old response")
-_RCPOND_CURRENT = _note("01/01/2026 10:00:00", "RCPond", servicenow._note_prefix() + "Response")
+## Simulate a note posted by an old version (pre-tool-name format, old version string).
+_RCPOND_OLD = _note(
+    "01/01/2026 09:00:00", "RCPond", "[code]<b>RCPond v0.0.0 generated response:</b>[/code]\n----\nOld response"
+)
+_RCPOND_CURRENT = _note("01/01/2026 10:00:00", "RCPond", servicenow._note_prefix("post_freeform_note") + "Response")
 _HUMAN_NOTE = _note("01/01/2026 11:00:00", "Alice", "A human work note")
 
 
@@ -340,6 +343,32 @@ def test_rcpond_note_detection_current_version_after_old():
     ticket = _make_ticket(work_notes=notes)
     assert ticket.is_rcpond_processed() is True
     assert ticket.is_rcpond_most_recent_process() is True
+
+
+## ── _note_prefix / _RCPOND_NOTE_RE ──────────────────────────────────────────
+
+
+def test_note_prefix_includes_tool_name():
+    prefix = servicenow._note_prefix("post_freeform_note")
+    assert "[post_freeform_note]" in prefix
+    assert prefix.startswith("[code]<b>RCPond v")
+
+
+def test_note_prefix_version_override():
+    prefix = servicenow._note_prefix("post_freeform_note", version="1.2.3")
+    assert "v1.2.3" in prefix
+    assert "[post_freeform_note]" in prefix
+
+
+def test_rcpond_note_re_matches_old_format_without_tool_name():
+    """Legacy notes without [tool_name] still match _RCPOND_NOTE_RE."""
+    old_prefix = "[code]<b>RCPond v0.0.0 generated response:</b>[/code]\n----\n"
+    assert servicenow._RCPOND_NOTE_RE.match(old_prefix)
+
+
+def test_rcpond_note_re_matches_new_format_with_tool_name():
+    new_prefix = servicenow._note_prefix("post_freeform_note", version="0.0.0")
+    assert servicenow._RCPOND_NOTE_RE.match(new_prefix)
 
 
 ## ── get_tickets filtering ───────────────────────────────────────────────────
@@ -740,8 +769,8 @@ def test_post_note(dev_instance_sn):
 
     before_work_note_count = len(dev_instance_sn.get_work_notes(my_tkt))
 
-    dev_instance_sn.post_note(my_tkt, "Test Work note A")
-    dev_instance_sn.post_note(my_tkt, "Test Work note B")
+    dev_instance_sn.post_note(my_tkt, "Test Work note A", tool_name="post_freeform_note")
+    dev_instance_sn.post_note(my_tkt, "Test Work note B", tool_name="post_freeform_note")
 
     after_work_note_count = len(dev_instance_sn.get_work_notes(my_tkt))
 

@@ -66,8 +66,9 @@ class PostFreeformNoteTool(Tool):
             },
         }
 
-    def execute(self, service_now: ServiceNow, ticket: Ticket, **kwargs) -> None:
-        service_now.post_note(ticket, note=kwargs["note"])
+    def execute(self, service_now: ServiceNow, ticket: Ticket, **kwargs) -> str | None:
+        service_now.post_note(ticket, note=kwargs["note"], tool_name=self.name)
+        return None
 
 
 class PostTemplatedNoteTool(Tool):
@@ -149,10 +150,11 @@ class PostTemplatedNoteTool(Tool):
             },
         }
 
-    def execute(self, service_now: ServiceNow, ticket: Ticket, **kwargs) -> None:
+    def execute(self, service_now: ServiceNow, ticket: Ticket, **kwargs) -> str | None:
         template_name = kwargs.pop("template_name")
         rendered = self._render(template_name, ticket=ticket, **kwargs)
-        service_now.post_note(ticket, note=rendered)
+        service_now.post_note(ticket, note=rendered, tool_name=f"{self.name}:{template_name}")
+        return None
 
 
 ## --------------------------------------------------------------------------------

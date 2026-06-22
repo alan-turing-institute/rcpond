@@ -127,7 +127,7 @@ _FT_EXTRA_DEFAULTS = {
 
 ## note_prefix() reads rcpond.__version__, so this must be computed at test time
 def _rcpond_work_notes(timestamp: str = "01/01/2026 08:00:00") -> str:
-    return f"{timestamp} - RCPond Bot (Work notes)\n{_note_prefix()}Generated response"
+    return f"{timestamp} - RCPond Bot (Work notes)\n{_note_prefix('post_freeform_note')}Generated response"
 
 
 def _human_work_notes(timestamp: str = "01/01/2026 09:00:00") -> str:

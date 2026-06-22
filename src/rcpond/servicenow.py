@@ -112,7 +112,7 @@ class Ticket:
     def is_rcpond_most_recent_process(self) -> bool:
         """Returns `True` if the current version of RCPond posted the most recent Comment or Work Note on this ticket. `False` otherwise."""
         notes = self.get_combined_notes()
-        return bool(notes) and notes[-1].content.startswith(_note_prefix())
+        return bool(notes) and bool(_RCPOND_CURRENT_VERSION_RE.match(notes[-1].content))
 
     def refresh(self, service_now: ServiceNow) -> None:
         """Refresh mutable fields by re-querying the ServiceNow API.
@@ -249,12 +249,18 @@ def __dir__() -> list[str]:
 ## Utilities
 
 
-def _note_prefix(version: str = rcpond_version) -> str:
-    return f"[code]<b>RCPond v{version} generated response:</b>[/code]\n----\n"
+def _note_prefix(tool_name: str, version: str = rcpond_version) -> str:
+    return f"[code]<b>RCPond v{version} [{tool_name}] generated response:</b>[/code]\n----\n"
 
 
-## Matches the RCPond prefix for any version.
-_RCPOND_NOTE_RE = re.compile(r"^\[code\]<b>RCPond v\S+ generated response:</b>\[/code\]")
+## Matches the RCPond prefix for any version and any tool name.
+## Also matches the legacy format (without [tool_name]) for backwards compatibility.
+_RCPOND_NOTE_RE = re.compile(r"^\[code\]<b>RCPond v\S+ (\[[^\]]+\] )?generated response:</b>\[/code\]")
+
+## Matches the RCPond prefix for the current version only (any tool name).
+_RCPOND_CURRENT_VERSION_RE = re.compile(
+    r"^\[code\]<b>RCPond v" + re.escape(rcpond_version) + r" \[[^\]]+\] generated response:</b>\[/code\]"
+)
 
 
 ## Extract, from the record returned from ServiceNow, the fields
@@ -632,14 +638,15 @@ class ServiceNow:
         resp.raise_for_status()
         return resp.json()["result"]["assigned_to"]
 
-    def post_note(self, tkt: Ticket, note: str) -> None:
+    def post_note(self, tkt: Ticket, note: str, tool_name: str) -> None:
         """Post a work note to a ticket.
 
         Params:
             tkt: The ticket
             note: The note to post
+            tool_name: Identifies the tool that posted this note, included in the prefix.
         """
-        prefix = _note_prefix()
+        prefix = _note_prefix(tool_name)
 
         ## This will append the `note` param to `work_notes` field
         resp = self.session.patch(

@@ -50,6 +50,15 @@ class Tool(ABC):
     def description(self) -> str:
         """The human-readable description exposed to the LLM."""
 
+    @property
+    def is_terminal(self) -> bool:
+        """True if this tool produces a final response; False if it is an intermediate step.
+
+        Non-terminal tools (e.g. ``CombineTicketHistory``) return a context string from
+        ``execute()`` that feeds the next LLM turn. Terminal tools return ``None``.
+        """
+        return True
+
     @abstractmethod
     def to_openai_dict(self) -> dict:
         """Return this tool's schema in OpenAI function-calling format.
@@ -61,7 +70,7 @@ class Tool(ABC):
         """
 
     @abstractmethod
-    def execute(self, service_now: ServiceNow, ticket: Ticket, **kwargs) -> None:
+    def execute(self, service_now: ServiceNow, ticket: Ticket, **kwargs) -> str | None:
         """Execute this tool's action.
 
         Parameters
@@ -72,4 +81,10 @@ class Tool(ABC):
             The ticket the action should be applied to.
         **kwargs
             Arguments supplied by the LLM.
+
+        Returns
+        -------
+        str | None
+            Non-terminal tools return a context string for the next LLM turn.
+            Terminal tools return ``None``.
         """

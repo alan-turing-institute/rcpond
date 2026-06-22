@@ -49,7 +49,9 @@ def test_post_freeform_note_execute():
         comments="",
     )
     PostFreeformNoteTool().execute(service_now, ticket, note="Please provide more information.")
-    service_now.post_note.assert_called_once_with(ticket, note="Please provide more information.")
+    service_now.post_note.assert_called_once_with(
+        ticket, note="Please provide more information.", tool_name="post_freeform_note"
+    )
 
 
 # --- PostTemplatedNoteTool ---
@@ -209,6 +211,40 @@ def test_underscore_prefix_multi_dot_template_available_to_jinja_renderer():
     assert "Multi-dot Subject" in rendered
     assert "I am included from the yaml partial" in rendered  # hardcoded in _mock_partial.yaml.j2
     assert "Yaml partial footer" in rendered
+
+
+# --- is_terminal ---
+
+
+def test_post_freeform_note_is_terminal():
+    assert PostFreeformNoteTool().is_terminal is True
+
+
+def test_post_templated_note_is_terminal():
+    assert PostTemplatedNoteTool(_make_config()).is_terminal is True
+
+
+# --- execute return type ---
+
+
+def test_post_freeform_note_execute_returns_none():
+    service_now = MagicMock()
+    ticket = MagicMock(spec=Ticket)
+    result = PostFreeformNoteTool().execute(service_now, ticket, note="Test note")
+    assert result is None
+
+
+def test_post_templated_note_execute_returns_none():
+    service_now = MagicMock(spec=ServiceNow)
+    ticket = MagicMock(spec=ComputeAllocationRequestTicket)
+    result = PostTemplatedNoteTool(_make_config(_PREFIX_TEMPLATES_DIR)).execute(
+        service_now,
+        ticket,
+        template_name="mock_main_template.yaml.j2",
+        main_subject="Subject",
+        partial_footer_text="Footer",
+    )
+    assert result is None
 
 
 # --- verify_render_all_templates ---

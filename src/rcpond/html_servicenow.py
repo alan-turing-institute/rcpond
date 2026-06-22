@@ -177,7 +177,7 @@ class HtmlServiceNow(ServiceNow):
 
     ## ---- Write no-ops ----
 
-    def post_note(self, _tkt: Ticket, _note: str) -> None:
+    def post_note(self, _tkt: Ticket, note: str = "", tool_name: str = "") -> None:
         """No-op — HTML source is read-only."""
 
     def _attempt_assign_to(self, _ticket: Ticket, _assignee: str) -> None:
