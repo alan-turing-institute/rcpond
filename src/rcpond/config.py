@@ -131,6 +131,11 @@ class Config:
     rules_path: Path = field(init=False)
     system_prompt_template_path: Path = field(init=False)
     email_templates_dir: Path = field(init=False)
+    ticket_type: str | None = field(init=False)
+    """Registry key identifying the active ticket type (e.g. ``'compute_allocation_request'``).
+    When set, per-type config is loaded from ``$XDG_CONFIG_HOME/rcpond/ticket_types/{ticket_type}.config``."""
+    servicenow_query: str | None = field(init=False)
+    """ServiceNow sysparm_query string used by ``get_tickets()``. Loaded from the per-type config file."""
 
     def __post_init__(self, env_path: str | None, cli_args: dict | None) -> None:
         values: dict[str, str] = {}
@@ -172,6 +177,31 @@ class Config:
                 if env_key in config_file_vars:
                     values[f.name] = config_file_vars[env_key]
 
+        ## 2. Load per-type config (sits between global file and env vars in precedence).
+        ## Peek at CLI args and env vars for ticket_type now so the per-type file is loaded
+        ## before env vars apply — env vars and CLI args should still win over per-type config.
+        _early_ticket_type = (
+            ((cli_args or {}).get("ticket_type"))
+            or os.environ.get(_env_var_name("ticket_type"))
+            or values.get("ticket_type")
+        )
+        if _early_ticket_type:
+            _per_type_path = xdg_config_home() / "rcpond" / "ticket_types" / f"{_early_ticket_type}.config"
+            if not _per_type_path.exists():
+                msg = (
+                    f"No config file found for ticket type '{_early_ticket_type}': {_per_type_path}\n"
+                    f"Create this file with RCPOND_RULES_PATH, RCPOND_EMAIL_TEMPLATES_DIR, "
+                    f"and RCPOND_SERVICENOW_QUERY to configure this ticket type."
+                )
+                raise ValueError(msg)
+            _per_type_vars = _parse_dotenv(_per_type_path)
+            _PER_TYPE_KEYS = frozenset({"rules_path", "email_templates_dir", "servicenow_query"})
+            for f in fields(self):
+                if f.name in _PER_TYPE_KEYS:
+                    env_key = _env_var_name(f.name)
+                    if env_key in _per_type_vars:
+                        values[f.name] = _per_type_vars[env_key]
+
         # 3. Override with actual environment variables
         for f in fields(self):
             env_key = _env_var_name(f.name)
@@ -185,7 +215,7 @@ class Config:
                     values[f.name] = cli_args[f.name]
 
         ## Fields that are always optional (may be absent or None)
-        _ALWAYS_OPTIONAL = {"servicenow_client_id", "servicenow_client_secret"}
+        _ALWAYS_OPTIONAL = {"servicenow_client_id", "servicenow_client_secret", "ticket_type", "servicenow_query"}
 
         _OAUTH_ONLY = {
             "servicenow_oauth_scope",
@@ -231,8 +261,18 @@ class Config:
                 setattr(self, f.name, raw)
 
         # Validate Jinja2 templates
+        ## Import here to avoid a circular dependency (config <- servicenow <- config)
+        from rcpond.servicenow import _TICKET_TYPES, ComputeAllocationRequestTicket
+
+        _ticket_type_val = values.get("ticket_type")
+        if _ticket_type_val and _ticket_type_val not in _TICKET_TYPES:
+            known = ", ".join(f"'{k}'" for k in _TICKET_TYPES)
+            msg = f"Unknown ticket_type '{_ticket_type_val}'. Known types: {known}"
+            raise ValueError(msg)
+        _ticket_class = _TICKET_TYPES[_ticket_type_val] if _ticket_type_val else ComputeAllocationRequestTicket
+
         _validate_jinja_template(self.system_prompt_template_path)
-        _validate_email_templates_dir(self.email_templates_dir)
+        _validate_email_templates_dir(self.email_templates_dir, _ticket_class)
 
 
 def _env_var_name(field_name: str) -> str:
@@ -284,12 +324,9 @@ def _validate_jinja_template(path: Path) -> None:
         raise ValueError(msg) from e
 
 
-def _unknown_ticket_attrs(path: Path) -> list[str]:
-    """Return any ``ticket.<attr>`` references in the template that are not fields on ComputeAllocationRequestTicket."""
-    ## Import here to avoid a circular dependency (config <- servicenow <- config)
-    from rcpond.servicenow import ComputeAllocationRequestTicket
-
-    valid_fields = {f.name for f in dataclasses.fields(ComputeAllocationRequestTicket)}
+def _unknown_ticket_attrs(path: Path, ticket_class: type) -> list[str]:
+    """Return any ``ticket.<attr>`` references in the template that are not fields on ``ticket_class``."""
+    valid_fields = {f.name for f in dataclasses.fields(ticket_class)}
     env = jinja2.Environment()
     parsed = env.parse(path.read_text())
     bad = []
@@ -299,9 +336,9 @@ def _unknown_ticket_attrs(path: Path) -> list[str]:
     return bad
 
 
-def _validate_email_templates_dir(dir_path: Path) -> None:
+def _validate_email_templates_dir(dir_path: Path, ticket_class: type) -> None:
     """Raise ValueError if ``dir_path`` has no ``*.j2`` files, any are invalid Jinja2,
-    or any reference non-existent fields on ComputeAllocationRequestTicket via ``ticket.<attr>``."""
+    or any reference non-existent fields on ``ticket_class`` via ``ticket.<attr>``."""
     j2_files = list(dir_path.glob("*.j2"))
     if not j2_files:
         msg = f"No .j2 files found in email_templates_dir: {dir_path}"
@@ -313,7 +350,7 @@ def _validate_email_templates_dir(dir_path: Path) -> None:
         except ValueError as e:
             errors.append(str(e))
             continue  ## skip attr check — template can't be parsed
-        bad_attrs = _unknown_ticket_attrs(f)
+        bad_attrs = _unknown_ticket_attrs(f, ticket_class)
         for attr in bad_attrs:
             errors.append(f"{f.name}: unknown ticket field '{attr}'")
     if errors:

@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `--reply-mode {cautious|default|always}` option for the `process-next`, `process-ticket`, and `process-all` subcommands, controlling when rcpond skips a ticket based on prior activity.
 - Backward compatibility alias `rcpond.servicenow.FullTicket` for the renamed `ComputeAllocationRequestTicket` class.
+- Per-ticket-type configuration: create `$XDG_CONFIG_HOME/rcpond/ticket_types/{key}.config` with `RCPOND_RULES_PATH`, `RCPOND_EMAIL_TEMPLATES_DIR`, and `RCPOND_SERVICENOW_QUERY` to configure a ticket type. The key must match an entry in the `_TICKET_TYPES` registry.
+- `--ticket-type <key>` mandatory flag on `process-next` and `process-all` to specify which ticket type to process in batch commands.
+- `RCPOND_SERVICENOW_QUERY` config value replaces the previously hardcoded ServiceNow query filter; falls back to the built-in default when not set.
 
 ### Changed
 

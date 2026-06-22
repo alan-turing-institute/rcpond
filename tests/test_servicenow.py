@@ -63,6 +63,7 @@ def sn_instance():
     sn._base_api_url = "https://example.com/api/now/table"
     sn._web_base_url = "https://example.com"
     sn._id_token = None
+    sn._query = "short_description=Request access to HPC and cloud computing facilities"
     sn.session = MagicMock()
     return sn
 

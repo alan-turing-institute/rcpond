@@ -161,14 +161,19 @@ _REPLY_MODE_HELP = (
 )
 
 
+_TICKET_TYPE_HELP = "Ticket type key to process (e.g. 'compute_allocation_request'). Must match a key in the ticket type registry and have a corresponding config file."
+
+
 @cli.command()
 def process_next(
     ctx: typer.Context,
+    ticket_type: Annotated[str, typer.Option("--ticket-type", help=_TICKET_TYPE_HELP)],
     dry_run: bool = False,
     reply_mode: Annotated[ReplyMode, typer.Option(help=_REPLY_MODE_HELP)] = ReplyMode.default,
 ):
     """Review an arbitrarily selected unassigned ticket via the LLM."""
-    command.process_next_ticket(dry_run=dry_run, reply_mode=reply_mode, config=_config(ctx))
+    cfg = Config(env_path=ctx.obj["env_path"], cli_args={**ctx.obj["cli_args"], "ticket_type": ticket_type})
+    command.process_next_ticket(dry_run=dry_run, reply_mode=reply_mode, config=cfg)
 
 
 @cli.command()
@@ -236,6 +241,7 @@ def check_templates(
 @cli.command()
 def process_all(
     ctx: typer.Context,
+    ticket_type: Annotated[str, typer.Option("--ticket-type", help=_TICKET_TYPE_HELP)],
     dry_run: bool = False,
     reply_mode: ReplyMode = ReplyMode.default,
     ## Single flag name (no "--flag/--no-flag" form) suppresses Typer's auto-generated
@@ -245,8 +251,9 @@ def process_all(
     ] = False,
 ):
     """Review all unassigned tickets via the LLM."""
+    cfg = Config(env_path=ctx.obj["env_path"], cli_args={**ctx.obj["cli_args"], "ticket_type": ticket_type})
     if yes_i_am_sure:
-        command.batch_process_tickets(dry_run=dry_run, reply_mode=reply_mode, config=_config(ctx))
+        command.batch_process_tickets(dry_run=dry_run, reply_mode=reply_mode, config=cfg)
     else:
         msg = "The [bold cyan]--yes-i-am-sure[/bold cyan] option MUST be specified when using the [bold]process-all[/bold] subcommand."
         print(msg)

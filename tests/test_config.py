@@ -81,6 +81,16 @@ def write_xdg_config(xdg_dir, values):
     return config_file
 
 
+def write_per_type_config(xdg_dir, ticket_type, values):
+    """Write a per-type config file at $XDG_CONFIG_HOME/rcpond/ticket_types/{ticket_type}.config."""
+    type_dir = xdg_dir / "rcpond" / "ticket_types"
+    type_dir.mkdir(parents=True, exist_ok=True)
+    config_file = type_dir / f"{ticket_type}.config"
+    lines = [f"RCPOND_{k.upper()}={v}" for k, v in values.items()]
+    config_file.write_text("\n".join(lines))
+    return config_file
+
+
 # --- Loading from a single source ---
 
 
@@ -447,6 +457,8 @@ def test_fields_are_config_values_only():
         "rules_path",
         "system_prompt_template_path",
         "email_templates_dir",
+        "ticket_type",
+        "servicenow_query",
     ]
 
 
@@ -552,3 +564,89 @@ def test_oauth_wins_when_both_configured(common_config_values):
     assert config.servicenow_token is not None
     assert config.servicenow_client_id == "cid"
     assert config.servicenow_client_secret == "csecret"
+
+
+# --- Per-type config loading ---
+
+
+def test_per_type_config_loads_rules_and_query(tmp_path, common_config_values, path_files):
+    """Per-type config file overrides rules_path, email_templates_dir, and servicenow_query."""
+    rules, sys_prompt_template, email_templates = path_files
+    per_type_rules = tmp_path / "per_type_rules.md"
+    per_type_rules.touch()
+
+    write_xdg_config(tmp_path, common_config_values)
+    write_per_type_config(
+        tmp_path,
+        "compute_allocation_request",
+        {
+            "rules_path": str(per_type_rules),
+            "email_templates_dir": str(email_templates),
+            "servicenow_query": "short_description=Request access to HPC and cloud computing facilities",
+        },
+    )
+
+    config = Config(cli_args={"ticket_type": "compute_allocation_request"})
+
+    assert config.ticket_type == "compute_allocation_request"
+    assert config.rules_path == per_type_rules.resolve()
+    assert config.servicenow_query == "short_description=Request access to HPC and cloud computing facilities"
+
+
+def test_per_type_config_missing_raises(tmp_path, common_config_values):
+    """Specifying a ticket_type with no corresponding config file raises ValueError."""
+    write_xdg_config(tmp_path, common_config_values)
+
+    with pytest.raises(ValueError, match="compute_allocation_request"):
+        Config(cli_args={"ticket_type": "compute_allocation_request"})
+
+
+def test_unknown_ticket_type_raises(tmp_path, common_config_values, path_files):
+    """A ticket_type key not in the _TICKET_TYPES registry raises ValueError."""
+    _, _, email_templates = path_files
+    rules = tmp_path / "rules.md"
+    rules.touch()
+
+    write_xdg_config(tmp_path, common_config_values)
+    write_per_type_config(
+        tmp_path,
+        "unknown_type",
+        {
+            "rules_path": str(rules),
+            "email_templates_dir": str(email_templates),
+        },
+    )
+
+    with pytest.raises(ValueError, match="Unknown ticket_type"):
+        Config(cli_args={"ticket_type": "unknown_type"})
+
+
+def test_env_var_overrides_per_type_config(tmp_path, monkeypatch, common_config_values, path_files):
+    """An env var for rules_path takes precedence over the per-type config file value."""
+    rules, sys_prompt_template, email_templates = path_files
+    per_type_rules = tmp_path / "per_type_rules.md"
+    per_type_rules.touch()
+    env_var_rules = tmp_path / "env_var_rules.md"
+    env_var_rules.touch()
+
+    write_xdg_config(tmp_path, common_config_values)
+    write_per_type_config(
+        tmp_path,
+        "compute_allocation_request",
+        {
+            "rules_path": str(per_type_rules),
+            "email_templates_dir": str(email_templates),
+        },
+    )
+    monkeypatch.setenv("RCPOND_RULES_PATH", str(env_var_rules))
+
+    config = Config(cli_args={"ticket_type": "compute_allocation_request"})
+
+    assert config.rules_path == env_var_rules.resolve()
+
+
+def test_ticket_type_and_servicenow_query_optional_without_ticket_type(common_config_values):
+    """ticket_type and servicenow_query are None when no ticket_type is set."""
+    config = Config(cli_args=common_config_values)
+    assert config.ticket_type is None
+    assert config.servicenow_query is None

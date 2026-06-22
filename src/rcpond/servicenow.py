@@ -282,6 +282,9 @@ def _parse_comment_display_values(input: str) -> list[NoteEntry]:
     return result
 
 
+## Default ServiceNow query used when no per-type config overrides it.
+_DEFAULT_SERVICENOW_QUERY = "short_description=Request access to HPC and cloud computing facilities"
+
 ## --------------------------------------------------------------------------------
 ## Interface to this module
 
@@ -296,6 +299,7 @@ class ServiceNow:
     def __init__(self, config: Config):
         self._base_api_url = config.servicenow_url
         self._web_base_url: str = config.servicenow_web_url
+        self._query: str = config.servicenow_query or _DEFAULT_SERVICENOW_QUERY
         self._id_token: str | None = None
         self._is_oauth = False
         self.session = requests.Session()
@@ -327,12 +331,11 @@ class ServiceNow:
             posted the most recent note; longlist: all non-closed/resolved tickets where
             RCPond has not posted the most recent note.
         """
-        _BASE_QUERY = "short_description=Request access to HPC and cloud computing facilities"
         _CLOSED_STATES = frozenset({"Closed", "Resolved", "Cancelled"})
 
         ticket_fields = {field.name for field in dataclasses.fields(Ticket)}
         resp = self.session.get(
-            f"{self._base_api_url}/{self._TABLE}", params={"sysparm_query": _BASE_QUERY, "sysparm_display_value": "all"}
+            f"{self._base_api_url}/{self._TABLE}", params={"sysparm_query": self._query, "sysparm_display_value": "all"}
         )
         resp.raise_for_status()
 
