@@ -114,6 +114,14 @@ class Ticket:
         notes = self.get_combined_notes()
         return bool(notes) and bool(_RCPOND_CURRENT_VERSION_RE.match(notes[-1].content))
 
+    def rcpond_most_recent_tool_name(self) -> str | None:
+        """Return the tool name from the most recent RCPond note prefix, or ``None`` if the last note is not from RCPond or uses the legacy format."""
+        notes = self.get_combined_notes()
+        if not notes:
+            return None
+        m = _RCPOND_TOOL_NAME_RE.match(notes[-1].content)
+        return m.group(1) if m else None
+
     def refresh(self, service_now: ServiceNow) -> None:
         """Refresh mutable fields by re-querying the ServiceNow API.
 
@@ -262,6 +270,9 @@ _RCPOND_CURRENT_VERSION_RE = re.compile(
     r"^\[code\]<b>RCPond v" + re.escape(rcpond_version) + r" \[[^\]]+\] generated response:</b>\[/code\]"
 )
 
+## Extracts the tool name from any new-format RCPond note prefix.
+_RCPOND_TOOL_NAME_RE = re.compile(r"^\[code\]<b>RCPond v\S+ \[([^\]]+)\] generated response:</b>\[/code\]")
+
 
 ## Extract, from the record returned from ServiceNow, the fields
 ## defined in Ticket. A value in the record is either a string,
@@ -353,8 +364,8 @@ def _match_heuristics(source: Ticket, candidate: Ticket) -> list[str]:
     matched: list[str] = []
 
     ## Finance code
-    src_fc = getattr(source, "which_finance_code", "").strip()
-    cand_fc = getattr(candidate, "which_finance_code", "").strip()
+    src_fc = getattr(source, "which_finance_code", "").strip().upper()
+    cand_fc = getattr(candidate, "which_finance_code", "").strip().upper()
     if src_fc and cand_fc and src_fc == cand_fc:
         matched.append(f"finance_code:{src_fc}")
 

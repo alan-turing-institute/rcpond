@@ -188,6 +188,24 @@ def test_reply_mode_pre_check(mode, is_processed, is_most_recent, expect_llm_cal
         assert result.llm_model is None
 
 
+## ── combine audit note never skips ─────────────────────────────────────────
+
+
+@pytest.mark.parametrize("mode", list(ReplyMode))
+def test_combine_audit_note_never_skips(mode, ticket, cfg, mock_llm):
+    """A combine_ticket_history audit as the most recent note must never trigger a skip."""
+    work_notes = f"01/01/2026 08:00:00 - RCPond Bot (Work notes)\n{_note_prefix('combine_ticket_history')}Audit"
+    ft = ComputeAllocationRequestTicket.from_Ticket(ticket, **_FT_EXTRA_DEFAULTS, work_notes=work_notes)
+    service_now = MagicMock()
+    service_now.get_full_ticket.return_value = ft
+    service_now._fetch_fields.return_value = _no_change_fetch(ft)
+
+    result = _process_ticket(ticket, dry_run=False, config=cfg, service_now=service_now, llm=mock_llm, reply_mode=mode)
+
+    assert mock_llm.generate.called
+    assert result.llm_model == "mock-model"
+
+
 ## ── post-refresh race-condition ─────────────────────────────────────────────
 ## Another process posts while the LLM is working; the mode applies symmetrically.
 ## Columns: mode | initial state (passes pre-check) | work_notes after refresh | expect skip

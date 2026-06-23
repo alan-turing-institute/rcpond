@@ -371,6 +371,32 @@ def test_rcpond_note_re_matches_new_format_with_tool_name():
     assert servicenow._RCPOND_NOTE_RE.match(new_prefix)
 
 
+## ── rcpond_most_recent_tool_name ─────────────────────────────────────────────
+
+
+def test_rcpond_most_recent_tool_name_returns_none_for_no_notes():
+    assert _make_ticket().rcpond_most_recent_tool_name() is None
+
+
+def test_rcpond_most_recent_tool_name_returns_none_for_human_note():
+    assert _make_ticket(work_notes=_HUMAN_NOTE).rcpond_most_recent_tool_name() is None
+
+
+def test_rcpond_most_recent_tool_name_returns_none_for_legacy_format():
+    """Old-format notes (no [tool_name]) return None."""
+    assert _make_ticket(work_notes=_RCPOND_OLD).rcpond_most_recent_tool_name() is None
+
+
+def test_rcpond_most_recent_tool_name_returns_tool_name():
+    ## _RCPOND_CURRENT uses _note_prefix("post_freeform_note")
+    assert _make_ticket(work_notes=_RCPOND_CURRENT).rcpond_most_recent_tool_name() == "post_freeform_note"
+
+
+def test_rcpond_most_recent_tool_name_combine_audit():
+    combine_note = _note("01/01/2026 10:00:00", "RCPond", servicenow._note_prefix("combine_ticket_history") + "Audit")
+    assert _make_ticket(work_notes=combine_note).rcpond_most_recent_tool_name() == "combine_ticket_history"
+
+
 ## ── get_tickets filtering ───────────────────────────────────────────────────
 
 

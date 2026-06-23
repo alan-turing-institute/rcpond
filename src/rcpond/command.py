@@ -44,8 +44,16 @@ class ReplyMode(str, Enum):
     always = "always"
 
 
+# TODO: this is required temporarily, until CombineTicketHistoryTool is created
+_COMBINE_TICKET_HISTORY = "combine_ticket_history"
+
+
 def _should_skip(full_ticket: Ticket, reply_mode: ReplyMode) -> bool:
     """Return True if the ticket should be skipped given the reply mode."""
+    ## Never skip if the most recent RCPond note is a CombineTicketHistory audit —
+    ## the expected follow-up response has not yet been posted.
+    if full_ticket.rcpond_most_recent_tool_name() == _COMBINE_TICKET_HISTORY:
+        return False
     if reply_mode == ReplyMode.cautious:
         return full_ticket.is_rcpond_processed()
     if reply_mode == ReplyMode.default:
