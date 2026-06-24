@@ -311,6 +311,66 @@ def test_max_iterations_guard(ticket, cfg, mock_llm):
     assert mock_llm.generate.call_count == _MAX_ITERATIONS
 
 
+## ── dry_run delegates to tools ──────────────────────────────────────────────
+## In a dry run the loop still drives tools; each tool suppresses its own writes.
+
+
+def _make_terminal_tool(name: str = "mock_post") -> MagicMock:
+    """Return a mock terminal tool whose execute() returns None."""
+    tool = MagicMock()
+    tool.name = name
+    tool.is_terminal = True
+    tool.to_openai_dict.return_value = {
+        "type": "function",
+        "function": {"name": name, "description": "", "parameters": {}},
+    }
+    tool.execute.return_value = None
+    return tool
+
+
+def test_dry_run_non_terminal_tool_still_loops_and_passes_dry_run(ticket, cfg, mock_llm):
+    """A dry run still executes a non-terminal tool (with dry_run=True) and feeds its result back."""
+    mock_tool = _make_non_terminal_tool()
+    mock_llm.generate.side_effect = [
+        _tool_call_response("mock_combine"),
+        LLMResponse(response_text="Final", planned_tool_call=None, ticket_number="RES0001000", llm_model="mock-model"),
+    ]
+    ft = _make_full_ticket(ticket, is_processed=False, is_most_recent=False)
+    service_now = MagicMock()
+    service_now.get_full_ticket.return_value = ft
+
+    with patch("rcpond.command.get_available_tools", return_value=[mock_tool]):
+        result = _process_ticket(
+            ticket, dry_run=True, config=cfg, service_now=service_now, llm=mock_llm, reply_mode=ReplyMode.always
+        )
+
+    assert mock_llm.generate.call_count == 2
+    assert mock_tool.execute.call_args.kwargs["dry_run"] is True
+    ## No concurrent-post refresh happens in a dry run.
+    service_now._fetch_fields.assert_not_called()
+    assert result.response_text == "Final"
+
+
+def test_dry_run_terminal_tool_executes_with_dry_run_and_skips_refresh(ticket, cfg, mock_llm):
+    """A dry run calls a terminal tool's execute (so it can no-op) without the concurrent-post refresh."""
+    mock_tool = _make_terminal_tool()
+    mock_llm.generate.return_value = _tool_call_response("mock_post")
+    ft = _make_full_ticket(ticket, is_processed=False, is_most_recent=False)
+    service_now = MagicMock()
+    service_now.get_full_ticket.return_value = ft
+
+    with patch("rcpond.command.get_available_tools", return_value=[mock_tool]):
+        result = _process_ticket(
+            ticket, dry_run=True, config=cfg, service_now=service_now, llm=mock_llm, reply_mode=ReplyMode.always
+        )
+
+    assert mock_llm.generate.call_count == 1
+    assert mock_tool.execute.call_args.kwargs["dry_run"] is True
+    service_now._fetch_fields.assert_not_called()
+    ## The planned terminal call is surfaced for display.
+    assert result.planned_tool_call["function"]["name"] == "mock_post"
+
+
 ## ── check_templates ─────────────────────────────────────────────────────────
 
 

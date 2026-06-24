@@ -28,7 +28,7 @@ from rcpond.display import (
 from rcpond.llm import LLM, LLMResponse
 from rcpond.prompt import construct_prompt
 from rcpond.servicenow import ComputeAllocationRequestTicket, RelatedTicketMatch, ServiceNow, Ticket, TicketState
-from rcpond.tools import get_available_tools, verify_render_all_templates
+from rcpond.tools import CombineTicketHistoryTool, get_available_tools, verify_render_all_templates
 
 
 class ReplyMode(str, Enum):
@@ -47,8 +47,8 @@ class ReplyMode(str, Enum):
 ## Maximum number of LLM turns before the loop is forcibly exited.
 _MAX_ITERATIONS = 3
 
-# TODO: this is required temporarily, until CombineTicketHistoryTool is created
-_COMBINE_TICKET_HISTORY = "combine_ticket_history"
+## Derived from the tool itself so the two cannot drift apart.
+_COMBINE_TICKET_HISTORY = CombineTicketHistoryTool().name
 
 
 def _should_skip(full_ticket: Ticket, reply_mode: ReplyMode) -> bool:
@@ -62,6 +62,49 @@ def _should_skip(full_ticket: Ticket, reply_mode: ReplyMode) -> bool:
     if reply_mode == ReplyMode.default:
         return full_ticket.is_rcpond_most_recent_process()
     return False  ## always
+
+
+def _concurrent_skip_response(
+    full_ticket: Ticket, service_now: ServiceNow, reply_mode: ReplyMode, dry_run: bool
+) -> LLMResponse | None:
+    """Re-check for concurrent activity before committing a write.
+
+    Refreshes the ticket and, if another party has posted since processing began,
+    returns a deterministic skip ``LLMResponse``; otherwise returns ``None``. In a
+    dry run nothing is written, so there is no race to guard against and ``None`` is
+    returned without a refresh. Keeping the dry-run guard here means ``_process_ticket``
+    needs no ``dry_run`` branching of its own.
+
+    Parameters
+    ----------
+    full_ticket : Ticket
+        The ticket being processed; refreshed in place when not a dry run.
+    service_now : ServiceNow
+        The ServiceNow client used to refresh the ticket.
+    reply_mode : ReplyMode
+        Controls when concurrent activity counts as a reason to skip.
+    dry_run : bool
+        When True, no write will occur, so the check is skipped.
+
+    Returns
+    -------
+    LLMResponse | None
+        A skip response if processing should be abandoned, else ``None``.
+    """
+    if dry_run:
+        return None
+    full_ticket.refresh(service_now)
+    if not _should_skip(full_ticket, reply_mode):
+        return None
+    prev_msg = full_ticket.get_combined_notes()[-1]
+    msg = f"Skipping: Another user has commented on ticket '{full_ticket.number}' whilst RCPond was working. Their message is\n'{prev_msg}'"
+    return LLMResponse(
+        response_text="",
+        reasoning=msg,
+        planned_tool_call=None,
+        ticket_number=full_ticket.number,
+        llm_model=None,
+    )
 
 
 def _process_ticket(
@@ -117,19 +160,9 @@ def _process_ticket(
         )
 
         if llm_response.planned_tool_call is None:
-            ## Text response — check for concurrent posts before returning
-            if not dry_run:
-                full_ticket.refresh(service_now)
-                if _should_skip(full_ticket, reply_mode):
-                    prev_msg = full_ticket.get_combined_notes()[-1]
-                    msg = f"Skipping: Another user has comments on ticket '{full_ticket.number}' whilst RCPond was working. Their message is\n'{prev_msg}'"
-                    return LLMResponse(
-                        response_text="",
-                        reasoning=msg,
-                        planned_tool_call=None,
-                        ticket_number=full_ticket.number,
-                        llm_model=None,
-                    )
+            ## Text response — abandon if another party posted while we were working.
+            if (skip := _concurrent_skip_response(full_ticket, service_now, reply_mode, dry_run)) is not None:
+                return skip
             break
 
         name = llm_response.planned_tool_call["function"]["name"]
@@ -140,27 +173,17 @@ def _process_ticket(
             raise ValueError(msg)
         tool = matched[0]
 
-        if dry_run:
-            break
-
+        ## Each tool honours dry_run internally (suppressing any ServiceNow writes),
+        ## so the loop itself never branches on dry_run.
         if tool.is_terminal:
-            ## Check for concurrent posts before committing the final note
-            full_ticket.refresh(service_now)
-            if _should_skip(full_ticket, reply_mode):
-                prev_msg = full_ticket.get_combined_notes()[-1]
-                msg = f"Skipping: Another user has comments on ticket '{full_ticket.number}' whilst RCPond was working. Their message is\n'{prev_msg}'"
-                return LLMResponse(
-                    response_text="",
-                    reasoning=msg,
-                    planned_tool_call=None,
-                    ticket_number=full_ticket.number,
-                    llm_model=None,
-                )
-            tool.execute(service_now, full_ticket, **args)
+            ## Terminal tools commit a final note; abandon first if another party posted.
+            if (skip := _concurrent_skip_response(full_ticket, service_now, reply_mode, dry_run)) is not None:
+                return skip
+            tool.execute(service_now, full_ticket, dry_run=dry_run, **args)
             break
 
-        ## Non-terminal: execute, inject result into the next LLM turn, and continue
-        result = tool.execute(service_now, full_ticket, **args)
+        ## Non-terminal: execute, inject the result into the next LLM turn, and continue.
+        result = tool.execute(service_now, full_ticket, dry_run=dry_run, **args)
         tool_call = llm_response.planned_tool_call
         extra_messages += [
             {

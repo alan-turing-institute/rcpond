@@ -70,7 +70,7 @@ class Tool(ABC):
         """
 
     @abstractmethod
-    def execute(self, service_now: ServiceNow, ticket: Ticket, **kwargs) -> str | None:
+    def execute(self, service_now: ServiceNow, ticket: Ticket, *, dry_run: bool = False, **kwargs) -> str | None:
         """Execute this tool's action.
 
         Parameters
@@ -79,6 +79,11 @@ class Tool(ABC):
             The ServiceNow client used to perform the action.
         ticket : Ticket
             The ticket the action should be applied to.
+        dry_run : bool
+            When True, the tool must suppress any side effects that write to
+            ServiceNow (e.g. posting a note), while still computing and returning
+            its result. Used by non-terminal tools so the agentic loop can be
+            previewed without making changes.
         **kwargs
             Arguments supplied by the LLM.
 

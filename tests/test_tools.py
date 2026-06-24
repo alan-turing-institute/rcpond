@@ -1,11 +1,38 @@
+import dataclasses
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
 from rcpond.command import ReplyMode
-from rcpond.servicenow import ComputeAllocationRequestTicket, ServiceNow, Ticket
-from rcpond.tools import PostFreeformNoteTool, PostTemplatedNoteTool, get_available_tools, verify_render_all_templates
+from rcpond.servicenow import ComputeAllocationRequestTicket, RelatedTicketMatch, ServiceNow, Ticket
+from rcpond.tools import (
+    CombineTicketHistoryTool,
+    PostFreeformNoteTool,
+    PostTemplatedNoteTool,
+    get_available_tools,
+    verify_render_all_templates,
+)
+
+
+def _make_cart(**overrides) -> ComputeAllocationRequestTicket:
+    """Build a ComputeAllocationRequestTicket with blank defaults, overriding named fields."""
+    base = {
+        "sys_id": "abc",
+        "number": "RES001",
+        "opened_at": "01/01/2025 09:00:00",
+        "requested_for": "Alice",
+        "u_category": "RC",
+        "u_sub_category": "Azure",
+        "short_description": "Request access",
+        "state": "New",
+        "assigned_to": "",
+        "work_notes": "",
+        "comments": "",
+    }
+    extra_fields = {f.name: "" for f in dataclasses.fields(ComputeAllocationRequestTicket) if f.name not in base}
+    return ComputeAllocationRequestTicket(**{**base, **extra_fields, **overrides})
+
 
 _MOCK_TEMPLATES_DIR = Path("tests/fixtures/mock_templates")
 
@@ -247,6 +274,102 @@ def test_post_templated_note_execute_returns_none():
     assert result is None
 
 
+# --- dry_run suppresses ServiceNow writes ---
+
+
+def test_post_freeform_note_execute_dry_run_does_not_post():
+    service_now = MagicMock()
+    ticket = MagicMock(spec=Ticket)
+    PostFreeformNoteTool().execute(service_now, ticket, dry_run=True, note="Test note")
+    service_now.post_note.assert_not_called()
+
+
+def test_post_templated_note_execute_dry_run_renders_but_does_not_post():
+    service_now = MagicMock(spec=ServiceNow)
+    ticket = MagicMock(spec=ComputeAllocationRequestTicket)
+    PostTemplatedNoteTool(_make_config(_PREFIX_TEMPLATES_DIR)).execute(
+        service_now,
+        ticket,
+        dry_run=True,
+        template_name="mock_main_template.yaml.j2",
+        main_subject="Subject",
+        partial_footer_text="Footer",
+    )
+    service_now.post_note.assert_not_called()
+
+
+# --- CombineTicketHistoryTool ---
+
+
+def test_combine_ticket_history_is_not_terminal():
+    assert CombineTicketHistoryTool().is_terminal is False
+
+
+def test_combine_ticket_history_schema_takes_no_params():
+    result = CombineTicketHistoryTool().to_openai_dict()
+    assert result["function"]["name"] == "combine_ticket_history"
+    params = result["function"]["parameters"]
+    assert params["properties"] == {}
+    assert params["required"] == []
+
+
+def test_combine_ticket_history_execute_posts_audit_note_and_returns_history():
+    source = _make_cart(number="RES0002000")
+    related = _make_cart(
+        number="RES0001000",
+        state="Closed",
+        opened_at="01/01/2024 09:00:00",
+        project_title="Genome Project",
+        work_notes="01/01/2024 10:00:00 - Jane Doe (Work notes)\nApproved last year.",
+    )
+    match = RelatedTicketMatch(ticket=related, matched_heuristics=("finance_code:TUR-2023-001",))
+
+    service_now = MagicMock(spec=ServiceNow)
+    service_now.find_related_tickets.return_value = [match]
+
+    result = CombineTicketHistoryTool().execute(service_now, source)
+
+    ## The combined history is posted as an audit note and also returned for the next LLM turn.
+    service_now.post_note.assert_called_once()
+    posted = service_now.post_note.call_args
+    assert posted.args[0] is source
+    assert posted.kwargs["tool_name"] == "combine_ticket_history"
+    assert posted.kwargs["note"] == result
+
+    assert "RES0001000" in result
+    assert "Closed" in result
+    assert "Genome Project" in result
+    assert "finance_code:TUR-2023-001" in result
+    assert "Approved last year." in result
+
+
+def test_combine_ticket_history_execute_no_matches_does_not_post():
+    source = _make_cart(number="RES0002000")
+    service_now = MagicMock(spec=ServiceNow)
+    service_now.find_related_tickets.return_value = []
+
+    result = CombineTicketHistoryTool().execute(service_now, source)
+
+    service_now.post_note.assert_not_called()
+    assert "No related tickets" in result
+    assert "RES0002000" in result
+
+
+def test_combine_ticket_history_execute_dry_run_returns_history_without_posting():
+    source = _make_cart(number="RES0002000")
+    related = _make_cart(number="RES0001000", state="Closed", project_title="Genome Project")
+    match = RelatedTicketMatch(ticket=related, matched_heuristics=("finance_code:TUR-2023-001",))
+
+    service_now = MagicMock(spec=ServiceNow)
+    service_now.find_related_tickets.return_value = [match]
+
+    result = CombineTicketHistoryTool().execute(service_now, source, dry_run=True)
+
+    ## Dry run still computes and returns the combined history, but writes nothing.
+    service_now.post_note.assert_not_called()
+    assert "RES0001000" in result
+
+
 # --- verify_render_all_templates ---
 
 
@@ -289,12 +412,12 @@ def test_verify_render_all_templates_uses_placeholder_suffix(tmp_path):
 # --- get_available_tools ---
 
 
-def test_get_available_tools_returns_two_tools():
+def test_get_available_tools_returns_all_tools():
     tools = get_available_tools(_make_config())
-    assert len(tools) == 2
     names = [t.name for t in tools]
     assert "post_freeform_note" in names
     assert "post_templated_note" in names
+    assert "combine_ticket_history" in names
 
 
 # --- unknown tool raises ---
