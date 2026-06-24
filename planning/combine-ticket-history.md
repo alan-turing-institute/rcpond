@@ -100,3 +100,18 @@ This approach avoids the circular dependency and recursion risk of Approach A. T
 Approach A is not recommended: `CombineTicketHistory.execute()` calling `_process_ticket` creates a coupling from tools into command logic, and the recursive structure creates an infinite-loop risk if the nested call also triggers `CombineTicketHistory`.
 
 
+## llm.generate() multi-turn extension
+
+To support the agentic loop above, `llm.generate()` needs to pass additional context to the LLM after a non-terminal tool call. Two options were considered:
+
+**Option A — `extra_messages` parameter on `generate()` (chosen)**
+
+Add `extra_messages: list[dict] | None = None` to `generate()`. When provided, these are appended after the initial system+user pair before calling the API. The agentic loop in `_process_ticket` builds the extra messages as `[assistant_turn, tool_result_turn]` for each non-terminal tool call, following the OpenAI tool-use protocol exactly. This preserves `tool_call_id` linkage, keeps conversation continuity, and is more general — any future non-terminal tool benefits automatically.
+
+**Option B — inject tool output into `construct_prompt()`**
+
+Pass the tool result back to `construct_prompt()` as additional context, which merges it into the user prompt before a second single-turn LLM call. Simpler to implement, and sufficient for `CombineTicketHistory` specifically (since the combined history is just context). However, it discards the structured tool-call/result protocol, loses conversation continuity, and would require revisiting if future tools needed the LLM to reason about its prior decision.
+
+**Decision: Option A.** The extra complexity is minimal (one parameter, two lines in `generate()`), and it correctly implements the OpenAI multi-turn tool-use protocol rather than approximating it.
+
+

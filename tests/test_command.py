@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from rcpond import command
-from rcpond.command import ReplyMode, _process_ticket
+from rcpond.command import _MAX_ITERATIONS, ReplyMode, _process_ticket
 from rcpond.config import Config
 from rcpond.llm import LLM, LLMResponse
 from rcpond.servicenow import ComputeAllocationRequestTicket, Ticket, TicketState, _note_prefix
@@ -239,6 +239,76 @@ def test_post_refresh_race_condition(
 
     assert mock_llm.generate.called  ## pre-check always passes in these cases
     assert result.llm_model is (None if expect_skip else "mock-model")
+
+
+## ── agentic loop ────────────────────────────────────────────────────────────
+
+
+def _make_non_terminal_tool(name: str = "mock_combine", result: str = "combined history") -> MagicMock:
+    """Return a mock non-terminal tool whose execute() returns a result string."""
+    tool = MagicMock()
+    tool.name = name
+    tool.is_terminal = False
+    tool.to_openai_dict.return_value = {
+        "type": "function",
+        "function": {"name": name, "description": "", "parameters": {}},
+    }
+    tool.execute.return_value = result
+    return tool
+
+
+def _tool_call_response(tool_name: str, call_id: str = "call_test123") -> LLMResponse:
+    return LLMResponse(
+        response_text="Using tool",
+        planned_tool_call={"id": call_id, "type": "function", "function": {"name": tool_name, "arguments": {}}},
+        ticket_number="RES0001000",
+        llm_model="mock-model",
+    )
+
+
+def test_non_terminal_tool_loops_and_injects_extra_messages(ticket, cfg, mock_llm):
+    """After a non-terminal tool call the result is injected and generate() is called again."""
+    mock_tool = _make_non_terminal_tool()
+    mock_llm.generate.side_effect = [
+        _tool_call_response("mock_combine"),
+        LLMResponse(response_text="Final", planned_tool_call=None, ticket_number="RES0001000", llm_model="mock-model"),
+    ]
+    ft = _make_full_ticket(ticket, is_processed=False, is_most_recent=False)
+    service_now = MagicMock()
+    service_now.get_full_ticket.return_value = ft
+    service_now._fetch_fields.return_value = _no_change_fetch(ft)
+
+    with patch("rcpond.command.get_available_tools", return_value=[mock_tool]):
+        result = _process_ticket(
+            ticket, dry_run=False, config=cfg, service_now=service_now, llm=mock_llm, reply_mode=ReplyMode.always
+        )
+
+    assert mock_llm.generate.call_count == 2
+    second_call_kwargs = mock_llm.generate.call_args_list[1].kwargs
+    extra = second_call_kwargs["extra_messages"]
+    assert extra is not None
+    assert len(extra) == 2
+    assert extra[0]["role"] == "assistant"
+    assert extra[1]["role"] == "tool"
+    assert extra[1]["content"] == "combined history"
+    assert result.response_text == "Final"
+
+
+def test_max_iterations_guard(ticket, cfg, mock_llm):
+    """The loop exits after _MAX_ITERATIONS calls even if the LLM never stops calling tools."""
+    mock_tool = _make_non_terminal_tool()
+    mock_llm.generate.return_value = _tool_call_response("mock_combine")
+    ft = _make_full_ticket(ticket, is_processed=False, is_most_recent=False)
+    service_now = MagicMock()
+    service_now.get_full_ticket.return_value = ft
+    service_now._fetch_fields.return_value = _no_change_fetch(ft)
+
+    with patch("rcpond.command.get_available_tools", return_value=[mock_tool]):
+        _process_ticket(
+            ticket, dry_run=False, config=cfg, service_now=service_now, llm=mock_llm, reply_mode=ReplyMode.always
+        )
+
+    assert mock_llm.generate.call_count == _MAX_ITERATIONS
 
 
 ## ── check_templates ─────────────────────────────────────────────────────────

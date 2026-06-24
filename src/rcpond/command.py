@@ -44,6 +44,9 @@ class ReplyMode(str, Enum):
     always = "always"
 
 
+## Maximum number of LLM turns before the loop is forcibly exited.
+_MAX_ITERATIONS = 3
+
 # TODO: this is required temporarily, until CombineTicketHistoryTool is created
 _COMBINE_TICKET_HISTORY = "combine_ticket_history"
 
@@ -101,28 +104,82 @@ def _process_ticket(
 
     tools = get_available_tools(config)
     system_prompt, user_prompt = construct_prompt(full_ticket, config)
-    llm_response: LLMResponse = llm.generate(
-        system_prompt, user_prompt, config.llm_model, tools=tools, ticket_number=ticket.number
-    )
+    extra_messages: list[dict] = []
 
-    ## Check that no-one else has replied whilst the LLM was working
-    full_ticket.refresh(service_now)
-    if _should_skip(full_ticket, reply_mode):
-        prev_msg = full_ticket.get_combined_notes()[-1]
-        msg = f"Skipping: Another user has comments on ticket '{full_ticket.number}' whilst RCPond was working. Their message is\n'{prev_msg}'"
-        ## llm_model=None signals a deterministic (non-LLM) response
-        return LLMResponse(
-            response_text="", reasoning=msg, planned_tool_call=None, ticket_number=full_ticket.number, llm_model=None
+    for _ in range(_MAX_ITERATIONS):
+        llm_response = llm.generate(
+            system_prompt,
+            user_prompt,
+            config.llm_model,
+            tools=tools,
+            ticket_number=ticket.number,
+            extra_messages=extra_messages or None,
         )
 
-    if not dry_run and llm_response.planned_tool_call is not None:
+        if llm_response.planned_tool_call is None:
+            ## Text response — check for concurrent posts before returning
+            if not dry_run:
+                full_ticket.refresh(service_now)
+                if _should_skip(full_ticket, reply_mode):
+                    prev_msg = full_ticket.get_combined_notes()[-1]
+                    msg = f"Skipping: Another user has comments on ticket '{full_ticket.number}' whilst RCPond was working. Their message is\n'{prev_msg}'"
+                    return LLMResponse(
+                        response_text="",
+                        reasoning=msg,
+                        planned_tool_call=None,
+                        ticket_number=full_ticket.number,
+                        llm_model=None,
+                    )
+            break
+
         name = llm_response.planned_tool_call["function"]["name"]
         args = llm_response.planned_tool_call["function"]["arguments"]
         matched = [t for t in tools if t.name == name]
         if not matched:
             msg = f"Unknown tool: {name!r}"
             raise ValueError(msg)
-        matched[0].execute(service_now, full_ticket, **args)
+        tool = matched[0]
+
+        if dry_run:
+            break
+
+        if tool.is_terminal:
+            ## Check for concurrent posts before committing the final note
+            full_ticket.refresh(service_now)
+            if _should_skip(full_ticket, reply_mode):
+                prev_msg = full_ticket.get_combined_notes()[-1]
+                msg = f"Skipping: Another user has comments on ticket '{full_ticket.number}' whilst RCPond was working. Their message is\n'{prev_msg}'"
+                return LLMResponse(
+                    response_text="",
+                    reasoning=msg,
+                    planned_tool_call=None,
+                    ticket_number=full_ticket.number,
+                    llm_model=None,
+                )
+            tool.execute(service_now, full_ticket, **args)
+            break
+
+        ## Non-terminal: execute, inject result into the next LLM turn, and continue
+        result = tool.execute(service_now, full_ticket, **args)
+        tool_call = llm_response.planned_tool_call
+        extra_messages += [
+            {
+                "role": "assistant",
+                "content": llm_response.response_text or "",
+                "tool_calls": [
+                    {
+                        "id": tool_call["id"],
+                        "type": "function",
+                        "function": {"name": name, "arguments": json.dumps(args)},
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": tool_call["id"],
+                "content": result or "",
+            },
+        ]
 
     return llm_response
 
