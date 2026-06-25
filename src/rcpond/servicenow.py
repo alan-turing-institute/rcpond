@@ -249,6 +249,36 @@ _TICKET_TYPES: dict[str, type[Ticket]] = {
 }
 
 
+def ticket_type_key(ticket: Ticket) -> str | None:
+    """Return the ``_TICKET_TYPES`` registry key whose ``MATCH_CRITERIA`` all match ``ticket``.
+
+    Dispatch is by each registered class's ``MATCH_CRITERIA`` (evaluated against the
+    base ``Ticket`` fields), not by the key — see planning/multiple-ticket-types.md.
+    The returned key is used for per-type analytics grouping and for tagging cached
+    tickets so they can be deserialised to the correct dataclass.
+
+    Parameters
+    ----------
+    ticket : Ticket
+        Any ticket (base or subclass) carrying the fields named in ``MATCH_CRITERIA``.
+
+    Returns
+    -------
+    str | None
+        The matching registry key, or ``None`` if no registered type matches.
+    """
+    return next(
+        (
+            key
+            for key, cls in _TICKET_TYPES.items()
+            ## Skip classes with empty criteria: an empty mapping would match everything.
+            if cls.MATCH_CRITERIA
+            and all(getattr(ticket, field, None) == value for field, value in cls.MATCH_CRITERIA.items())
+        ),
+        None,
+    )
+
+
 class TicketState(Enum):
     """Controls which tickets get_tickets() returns based on their state.
 
@@ -592,20 +622,14 @@ class ServiceNow:
         ValueError
             If no entry in ``_TICKET_TYPES`` has ``MATCH_CRITERIA`` that match ``tkt``.
         """
-        ticket_class = next(
-            (
-                cls
-                for cls in _TICKET_TYPES.values()
-                if all(getattr(tkt, field, None) == value for field, value in cls.MATCH_CRITERIA.items())
-            ),
-            None,
-        )
-        if ticket_class is None:
+        type_key = ticket_type_key(tkt)
+        if type_key is None:
             all_criteria_fields = {f for cls in _TICKET_TYPES.values() for f in cls.MATCH_CRITERIA}
             ticket_values = {f: getattr(tkt, f, "<missing>") for f in sorted(all_criteria_fields)}
             known = ", ".join(f"{k!r}" for k in _TICKET_TYPES)
             msg = f"No registered ticket type matches this ticket {ticket_values}. Known types: {known}"
             raise ValueError(msg)
+        ticket_class = _TICKET_TYPES[type_key]
 
         base_fields = {field.name for field in dataclasses.fields(Ticket)}
         extra_fields = {field.name for field in dataclasses.fields(ticket_class)} - base_fields

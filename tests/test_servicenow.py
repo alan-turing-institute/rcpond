@@ -684,7 +684,21 @@ def test_get_full_ticket_raises_for_unknown_type(sn_instance, ticket):
         sn_instance.get_full_ticket(unknown)
 
     assert "Unknown ticket type" in str(excinfo.value)  # Value is from the 'short_description' in the ticket
-    assert "compute_allocation_request" in str(excinfo.value)  # Value is from the key in _TICKET_TYPES
+    assert "compute_allocation_request" in str(excinfo.value)  # Known type keys are listed in the message
+
+
+## ── ticket_type_key resolver ─────────────────────────────────────────────────
+
+
+def test_ticket_type_key_matches_registered_type(ticket):
+    """A base ticket matching ComputeAllocationRequestTicket.MATCH_CRITERIA resolves to its registry key."""
+    assert servicenow.ticket_type_key(ticket) == "compute_allocation_request"
+
+
+def test_ticket_type_key_returns_none_for_unknown_type(ticket):
+    """A ticket matching no registered MATCH_CRITERIA resolves to None (no exception, no message)."""
+    unknown = dataclasses.replace(ticket, short_description="Unknown ticket type")
+    assert servicenow.ticket_type_key(unknown) is None
 
 
 ## ── _current_user_sys_id / _current_user_display_name ──────────────────────
