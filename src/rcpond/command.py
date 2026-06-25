@@ -12,11 +12,13 @@ The four main entry points are:
 """
 
 import json
+import sys
 from enum import Enum
 from pathlib import Path
 
 from rich import print
 
+from rcpond.analytics import compute_stage1_metrics, render_markdown
 from rcpond.config import Config
 from rcpond.display import (
     display_full_ticket,
@@ -294,6 +296,40 @@ def find_related_tickets(ticket_number: str, config: Config | None = None) -> li
     matches = service_now.find_related_tickets(full_ticket)
     display_related_tickets(full_ticket, matches)
     return matches
+
+
+def analytics(config: Config | None = None, refresh: bool = False) -> str:
+    """Generate the RCPond analytics report (Stage 1) as markdown, print it, and return it.
+
+    Fetches all tickets in every state (including closed, resolved, and cancelled)
+    in a single bulk call, computes the Stage 1 metrics per ticket type, writes the
+    markdown report to stdout verbatim (so it can be redirected to a ``.md`` file),
+    and returns it.
+
+    Parameters
+    ----------
+    config : Config | None
+        Configuration to use. If None, Config() is constructed from the environment.
+    refresh : bool
+        Reserved for the future ticket-history cache. The cache is not yet
+        implemented — a single bulk fetch is currently optimal — so this flag has
+        no effect today.
+
+    Returns
+    -------
+    str
+        The markdown report.
+    """
+    ## TODO: --refresh becomes meaningful once a stage needs per-ticket full fetches
+    ## and the ticket-history cache (see planning/analytics.md) is implemented.
+    _ = refresh
+    config = config or Config()
+    service_now: ServiceNow = ServiceNow(config)
+    tickets = service_now.get_tickets(state=TicketState.all_including_closed)
+    report = render_markdown(compute_stage1_metrics(tickets))
+    ## Write verbatim (not via rich.print, which would wrap/format the markdown table).
+    sys.stdout.write(report)
+    return report
 
 
 def process_next_ticket(dry_run: bool, reply_mode: ReplyMode, config: Config | None = None):

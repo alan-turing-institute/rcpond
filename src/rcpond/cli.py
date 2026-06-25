@@ -235,6 +235,26 @@ def find_related(ctx: typer.Context, ticket_number: str):
 
 
 @cli.command()
+def analytics(
+    ctx: typer.Context,
+    refresh: Annotated[
+        bool,
+        typer.Option(
+            "--refresh",
+            help="Force a full re-fetch, bypassing any cached ticket history (no effect yet; cache not implemented).",
+        ),
+    ] = False,
+):
+    """Generate a markdown analytics report on RCPond performance across all tickets.
+
+    Reports per ticket type: total tickets, how many were processed by RCPond, how
+    many were processed manually, and how many RCPond tickets saw subsequent manual
+    interaction. The markdown is written to stdout; redirect it to a file to save it.
+    """
+    command.analytics(config=_config(ctx), refresh=refresh)
+
+
+@cli.command()
 def check_templates(
     ctx: typer.Context,
 ) -> None:

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `analytics` subcommand: generates a markdown report (written to stdout) summarising RCPond performance across all tickets, per ticket type. Stage 1 metrics: total tickets, tickets processed by RCPond, tickets processed manually (without RCPond), and RCPond tickets that had a subsequent manual interaction. Notes authored by the automated `System` user (e.g. auto-close comments) are treated as automated, not manual.
+- `servicenow.ticket_type_key()`: resolves a ticket to its `_TICKET_TYPES` registry key via `MATCH_CRITERIA` (now also used by `get_full_ticket`'s dispatch).
+- `Ticket.rcpond_note_count()`, `Ticket.manual_note_count()`, and `Ticket.has_subsequent_manual_interaction()` note-classification helpers.
+
+### Notes
+
+- The `analytics --refresh` flag is accepted but currently has no effect: a single bulk fetch is sufficient for the Stage 1 metrics, so the ticket-history cache described in the design is deferred until a later stage needs per-ticket fetches.
+- Outcome-classification metrics (a later stage) rely on the work-note tool-name prefix; tickets processed before that prefix was deployed will fall into an "unknown outcome" category.
+
 ## [0.3.0] - 2026-06-24
 
 ### Summary of changes
