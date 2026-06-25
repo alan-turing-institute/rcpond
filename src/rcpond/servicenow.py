@@ -107,7 +107,7 @@ class Ticket:
 
     def is_rcpond_processed(self) -> bool:
         """Returns `True` if RCPond (any version) has ever posted a Comment or Work Note on this ticket. `False` otherwise."""
-        return any(_RCPOND_NOTE_RE.match(e.content) for e in self.get_combined_notes())
+        return any(_is_rcpond_note(e) for e in self.get_combined_notes())
 
     def is_rcpond_most_recent_process(self) -> bool:
         """Returns `True` if the current version of RCPond posted the most recent Comment or Work Note on this ticket. `False` otherwise."""
@@ -121,6 +121,47 @@ class Ticket:
             return None
         m = _RCPOND_TOOL_NAME_RE.match(notes[-1].content)
         return m.group(1) if m else None
+
+    def rcpond_note_count(self) -> int:
+        """Number of notes (work notes or comments) posted by RCPond, any version.
+
+        Returns
+        -------
+        int
+            Count of RCPond-authored notes across work notes and comments.
+        """
+        return sum(1 for e in self.get_combined_notes() if _is_rcpond_note(e))
+
+    def manual_note_count(self) -> int:
+        """Number of human (manual) notes on this ticket.
+
+        Excludes RCPond-authored notes and automated notes from the ServiceNow
+        ``System`` user (e.g. auto-close comments).
+
+        Returns
+        -------
+        int
+            Count of manual, human-authored notes.
+        """
+        return sum(1 for e in self.get_combined_notes() if _is_manual_note(e))
+
+    def has_subsequent_manual_interaction(self) -> bool:
+        """Return ``True`` if a human note follows RCPond's first note on this ticket.
+
+        Detects tickets where a person interacted after RCPond first became
+        involved. Automated ``System`` notes (e.g. auto-close comments) are not
+        counted. Returns ``False`` when RCPond never posted, or when no manual note
+        appears after its first note.
+
+        Returns
+        -------
+        bool
+        """
+        notes = self.get_combined_notes()
+        first_rcpond = next((i for i, e in enumerate(notes) if _is_rcpond_note(e)), None)
+        if first_rcpond is None:
+            return False
+        return any(_is_manual_note(e) for e in notes[first_rcpond + 1 :])
 
     def refresh(self, service_now: ServiceNow) -> None:
         """Refresh mutable fields by re-querying the ServiceNow API.
@@ -272,6 +313,24 @@ _RCPOND_CURRENT_VERSION_RE = re.compile(
 
 ## Extracts the tool name from any new-format RCPond note prefix.
 _RCPOND_TOOL_NAME_RE = re.compile(r"^\[code\]<b>RCPond v\S+ \[([^\]]+)\] generated response:</b>\[/code\]")
+
+## Display name of the automated ServiceNow account. Its notes (e.g. the comment
+## posted when a ticket is automatically closed) are treated as automated activity,
+## not human/manual interaction.
+_SYSTEM_NOTE_AUTHOR = "System"
+
+
+def _is_rcpond_note(note: NoteEntry) -> bool:
+    """Return ``True`` if ``note`` was posted by RCPond (any version), per its prefix."""
+    return bool(_RCPOND_NOTE_RE.match(note.content))
+
+
+def _is_manual_note(note: NoteEntry) -> bool:
+    """Return ``True`` if ``note`` represents a human (manual) interaction.
+
+    Excludes RCPond-authored notes and automated notes from the ``System`` user.
+    """
+    return not _is_rcpond_note(note) and note.user != _SYSTEM_NOTE_AUTHOR
 
 
 ## Extract, from the record returned from ServiceNow, the fields

@@ -397,6 +397,49 @@ def test_rcpond_most_recent_tool_name_combine_audit():
     assert _make_ticket(work_notes=combine_note).rcpond_most_recent_tool_name() == "combine_ticket_history"
 
 
+## ── note-classification counts (analytics) ──────────────────────────────────
+## A System-authored note (e.g. the auto-close comment) is automated, not manual.
+_SYSTEM_NOTE = _note(
+    "01/01/2026 12:00:00",
+    "System",
+    "This ticket was automatically closed by the system.",
+    note_type="Additional comments",
+)
+_EARLY_HUMAN = _note("01/01/2026 08:00:00", "Alice", "Initial human note")
+
+
+@pytest.mark.parametrize(
+    ("work_notes", "comments", "expected_rcpond", "expected_manual"),
+    [
+        ("", "", 0, 0),
+        ("\n".join([_RCPOND_OLD, _RCPOND_CURRENT]), "", 2, 0),
+        ("\n".join([_RCPOND_CURRENT, _HUMAN_NOTE]), "", 1, 1),
+        (_RCPOND_CURRENT, _SYSTEM_NOTE, 1, 0),
+    ],
+    ids=["empty", "two_rcpond_versions", "rcpond_and_human", "rcpond_and_system_comment"],
+)
+def test_note_counts(work_notes, comments, expected_rcpond, expected_manual):
+    ticket = _make_ticket(work_notes=work_notes, comments=comments)
+    assert ticket.rcpond_note_count() == expected_rcpond
+    assert ticket.manual_note_count() == expected_manual
+
+
+@pytest.mark.parametrize(
+    ("work_notes", "comments", "expected"),
+    [
+        (_HUMAN_NOTE, "", False),
+        (_RCPOND_CURRENT, "", False),
+        ("\n".join([_RCPOND_CURRENT, _HUMAN_NOTE]), "", True),
+        ("\n".join([_EARLY_HUMAN, _RCPOND_CURRENT]), "", False),
+        (_RCPOND_CURRENT, _SYSTEM_NOTE, False),
+    ],
+    ids=["no_rcpond", "rcpond_only", "human_after_rcpond", "human_before_rcpond", "system_after_rcpond"],
+)
+def test_has_subsequent_manual_interaction(work_notes, comments, expected):
+    ticket = _make_ticket(work_notes=work_notes, comments=comments)
+    assert ticket.has_subsequent_manual_interaction() is expected
+
+
 ## ── get_tickets filtering ───────────────────────────────────────────────────
 
 

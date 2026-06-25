@@ -19,7 +19,9 @@ Different outcomes from the RCPond tool can be detected in different ways:
     * Initially having an "unknown-outcome" category is acceptable, but we should aim to reduce the number of tickets in this category over time.
     * A future enhancement could be to use an LLM to classify the final outcome based on the text of the notes, but this is not a priority at present.
 
-If a ticket is closed, resolved, or cancelled, then the datetime of the final comment or work_note can be used as a proxy for the time of final resolution. If no notes exist, `opened_at` is used as a last-resort fallback. If a ticket is still open, then the time of final resolution is unknown. There is no known way to determine this from the ServiceNow API.
+If a ticket is closed, resolved, or cancelled, then the datetime of the final comment or work_note can be used as a proxy for the time of final resolution. When a ticket is closed, typically there is a comment (not work_note), posted by the `System` user, with a message similar to "This ticket was automatically closed by the system."
+
+If no notes exist, `opened_at` is used as a last-resort fallback. If a ticket is still open, then the time of final resolution is unknown. There is no known way to determine this from the ServiceNow API.
 
 Future enhancements: test the ServiceNow API to see if it is possible to retrieve the time of final resolution for closed tickets.
 
@@ -29,24 +31,31 @@ A sample of the kinds of metrics that we would like to include in the analytics 
 
 All metrics should be reported per ticket type. Most metrics would not be meaningful aggregated across types — e.g. time-to-resolution norms and outcome distributions differ fundamentally between a compute allocation request and a general support ticket. Where a cross-type summary is shown it should be clearly labelled as an aggregate.
 
-The list of metrics below is a starting point. In the future we will need to prioritise this list based on (a) complexity of implementation, (b) user consultation on what insights are useful, and (c) availability of the information in ServiceNow.
+The list of metrics below is a starting point. They have been given a approximate prioritisation, as stages. Implement Stage 1 initially to demonstrate the end-to-end analytics report generation. Stages 2-4 will be implemented in future iterations. 
 
+We should expect the prioritisation for Stages 2 and beyond to vary  based on (a) complexity of implementation, (b) user consultation on what insights are useful, and (c) availability of the information in ServiceNow. Were possible we should ensure flexibility to add additional metrics in future iterations.
+
+Stage 1:
 * total number of tickets processed by RCPond
 * total number of tickets processed manually (without RCPond)
 * total number of tickets processed by RCPond that included subsequent manual interaction
+
+Stage 2:
 * distribution of the number of RCPond interactions per ticket (eg 0, 1, 2, 3, ...)
 * distribution of the number of manual interactions per ticket (eg 0, 1, 2, 3, ...)
-
 * length of time between ticket creation and first RCPond interaction
 * length of time between ticket creation and first manual interaction
 * length of time between ticket creation and final resolution (closed, resolved, or cancelled)
 * length of time between first RCPond interaction and final resolution
 
+Stage 3:
+* How these metrics vary over time (eg by month, quarter, or year) to identify trends in RCPond performance and usage.
+
+Stage 4:
 * distribution of the outcomes produced by RCPond (indicated by the template name of the final note posted by RCPond)
 * distribution of the initial triage decisions made by RCPond (indicated by the template name of the first note posted by RCPond)
 * comparison of the final outcomes produced by RCPond vs the initial triage decisions made by RCPond (eg how often did the initial triage decision match the final outcome, and how often did it differ)
 
-* How these metrics vary over time (eg by month, quarter, or year) to identify trends in RCPond performance and usage.
 
 # Usage
 
