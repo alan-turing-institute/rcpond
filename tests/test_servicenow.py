@@ -440,6 +440,61 @@ def test_has_subsequent_manual_interaction(work_notes, comments, expected):
     assert ticket.has_subsequent_manual_interaction() is expected
 
 
+## ── note/resolution timestamps (analytics, Stage 2) ─────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("opened_at", "expected"),
+    [
+        ("01/01/2026 09:00:00", datetime(2026, 1, 1, 9, 0, 0)),
+        ("", None),
+        ("not a date", None),
+    ],
+    ids=["valid", "empty", "malformed"],
+)
+def test_opened_datetime(opened_at, expected):
+    ticket = dataclasses.replace(_make_ticket(), opened_at=opened_at)
+    assert ticket.opened_datetime() == expected
+
+
+def test_first_note_datetimes_pick_earliest_of_each_kind():
+    ticket = _make_ticket(work_notes="\n".join([_EARLY_HUMAN, _RCPOND_OLD, _RCPOND_CURRENT, _HUMAN_NOTE]))
+    ## earliest RCPond note is the old-version one at 09:00; earliest manual is 08:00
+    assert ticket.first_rcpond_note_datetime() == datetime(2026, 1, 1, 9, 0, 0)
+    assert ticket.first_manual_note_datetime() == datetime(2026, 1, 1, 8, 0, 0)
+
+
+def test_first_note_datetimes_none_when_absent():
+    assert _make_ticket(work_notes=_HUMAN_NOTE).first_rcpond_note_datetime() is None
+    assert _make_ticket(work_notes=_RCPOND_CURRENT).first_manual_note_datetime() is None
+
+
+@pytest.mark.parametrize("state", ["Closed", "Resolved", "Cancelled"])
+def test_is_closed_true_for_terminal_states(state):
+    assert dataclasses.replace(_make_ticket(), state=state).is_closed() is True
+
+
+@pytest.mark.parametrize("state", ["New", "In Progress", "On Hold"])
+def test_is_closed_false_for_active_states(state):
+    assert dataclasses.replace(_make_ticket(), state=state).is_closed() is False
+
+
+def test_resolution_datetime_none_when_open():
+    ticket = dataclasses.replace(_make_ticket(work_notes=_RCPOND_CURRENT), state="New")
+    assert ticket.resolution_datetime() is None
+
+
+def test_resolution_datetime_uses_final_note_for_closed():
+    ## Final note is the System auto-close comment at 12:00.
+    ticket = dataclasses.replace(_make_ticket(work_notes=_RCPOND_CURRENT, comments=_SYSTEM_NOTE), state="Closed")
+    assert ticket.resolution_datetime() == datetime(2026, 1, 1, 12, 0, 0)
+
+
+def test_resolution_datetime_falls_back_to_opened_at_when_no_notes():
+    ticket = dataclasses.replace(_make_ticket(), state="Cancelled", opened_at="01/01/2026 09:00:00")
+    assert ticket.resolution_datetime() == datetime(2026, 1, 1, 9, 0, 0)
+
+
 ## ── get_tickets filtering ───────────────────────────────────────────────────
 
 

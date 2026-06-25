@@ -9,9 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `analytics` subcommand: generates a markdown report (written to stdout) summarising RCPond performance across all tickets, per ticket type. Stage 1 metrics: total tickets, tickets processed by RCPond, tickets processed manually (without RCPond), and RCPond tickets that had a subsequent manual interaction. Notes authored by the automated `System` user (e.g. auto-close comments) are treated as automated, not manual.
+- `analytics` subcommand: generates a markdown report (written to stdout) summarising RCPond performance across all tickets, per ticket type. Notes authored by the automated `System` user (e.g. auto-close comments) are treated as automated, not manual.
+  - Stage 1 (processing mix): total tickets, tickets processed by RCPond, tickets processed manually (without RCPond), and RCPond tickets that had a subsequent manual interaction.
+  - Stage 2 (distributions and time intervals): distribution of RCPond and manual interactions per ticket; and time intervals (in days, summarised as n/median/mean/min/max) for creation→first RCPond, creation→first manual, creation→resolution, and first RCPond→resolution. Resolution time for closed/resolved/cancelled tickets is taken from the final note (falling back to the open date); open tickets have no resolution interval.
 - `servicenow.ticket_type_key()`: resolves a ticket to its `_TICKET_TYPES` registry key via `MATCH_CRITERIA` (now also used by `get_full_ticket`'s dispatch).
-- `Ticket.rcpond_note_count()`, `Ticket.manual_note_count()`, and `Ticket.has_subsequent_manual_interaction()` note-classification helpers.
+- Note-classification and timing helpers on `Ticket`: `rcpond_note_count()`, `manual_note_count()`, `has_subsequent_manual_interaction()`, `first_rcpond_note_datetime()`, `first_manual_note_datetime()`, `is_closed()`, `resolution_datetime()`, and `opened_datetime()`.
 
 ### Notes
 

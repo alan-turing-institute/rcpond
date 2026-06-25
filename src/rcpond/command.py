@@ -18,7 +18,7 @@ from pathlib import Path
 
 from rich import print
 
-from rcpond.analytics import compute_stage1_metrics, render_markdown
+from rcpond.analytics import compute_metrics, render_markdown
 from rcpond.config import Config
 from rcpond.display import (
     display_full_ticket,
@@ -326,7 +326,7 @@ def analytics(config: Config | None = None, refresh: bool = False) -> str:
     config = config or Config()
     service_now: ServiceNow = ServiceNow(config)
     tickets = service_now.get_tickets(state=TicketState.all_including_closed)
-    report = render_markdown(compute_stage1_metrics(tickets))
+    report = render_markdown(compute_metrics(tickets))
     ## Write verbatim (not via rich.print, which would wrap/format the markdown table).
     sys.stdout.write(report)
     return report

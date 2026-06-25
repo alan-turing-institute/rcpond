@@ -163,6 +163,46 @@ class Ticket:
             return False
         return any(_is_manual_note(e) for e in notes[first_rcpond + 1 :])
 
+    def opened_datetime(self) -> datetime | None:
+        """Parse ``opened_at`` into a datetime, or ``None`` if it is blank or unparseable."""
+        if not self.opened_at:
+            return None
+        try:
+            return datetime.strptime(self.opened_at, _TIMESTAMP_FORMAT)
+        except ValueError:
+            return None
+
+    def first_rcpond_note_datetime(self) -> datetime | None:
+        """Timestamp of the earliest RCPond note, or ``None`` if RCPond never posted."""
+        return next((e.datetime_stamp for e in self.get_combined_notes() if _is_rcpond_note(e)), None)
+
+    def first_manual_note_datetime(self) -> datetime | None:
+        """Timestamp of the earliest manual (human) note, or ``None`` if there is none."""
+        return next((e.datetime_stamp for e in self.get_combined_notes() if _is_manual_note(e)), None)
+
+    def is_closed(self) -> bool:
+        """Return ``True`` if the ticket is in a terminal state (Closed, Resolved, or Cancelled)."""
+        return self.state in _CLOSED_TICKET_STATES
+
+    def resolution_datetime(self) -> datetime | None:
+        """Best-effort time of final resolution.
+
+        For closed/resolved/cancelled tickets this is the timestamp of the final note
+        (work note or comment) as a proxy, falling back to ``opened_at`` when the ticket
+        has no notes. Returns ``None`` for tickets that are not in a terminal state, since
+        their resolution time cannot be determined from the ServiceNow API.
+
+        Returns
+        -------
+        datetime | None
+        """
+        if not self.is_closed():
+            return None
+        notes = self.get_combined_notes()
+        if notes:
+            return notes[-1].datetime_stamp
+        return self.opened_datetime()
+
     def refresh(self, service_now: ServiceNow) -> None:
         """Refresh mutable fields by re-querying the ServiceNow API.
 
@@ -279,6 +319,10 @@ def ticket_type_key(ticket: Ticket) -> str | None:
     )
 
 
+## Terminal ticket states. Such tickets are immutable and have a knowable resolution time.
+_CLOSED_TICKET_STATES = frozenset({"Closed", "Resolved", "Cancelled"})
+
+
 class TicketState(Enum):
     """Controls which tickets get_tickets() returns based on their state.
 
@@ -349,6 +393,9 @@ _RCPOND_TOOL_NAME_RE = re.compile(r"^\[code\]<b>RCPond v\S+ \[([^\]]+)\] generat
 ## not human/manual interaction.
 _SYSTEM_NOTE_AUTHOR = "System"
 
+## Timestamp format used by ServiceNow display values and the ``opened_at`` field.
+_TIMESTAMP_FORMAT = "%d/%m/%Y %H:%M:%S"
+
 
 def _is_rcpond_note(note: NoteEntry) -> bool:
     """Return ``True`` if ``note`` was posted by RCPond (any version), per its prefix."""
@@ -409,7 +456,7 @@ def _parse_comment_display_values(input: str) -> list[NoteEntry]:
         m = _HEADER.match(line)
         if m:
             _flush()
-            current_key = (datetime.strptime(m.group(1), "%d/%m/%Y %H:%M:%S"), m.group(2), m.group(3))
+            current_key = (datetime.strptime(m.group(1), _TIMESTAMP_FORMAT), m.group(2), m.group(3))
             content_lines = []
         elif current_key is not None:
             content_lines.append(line)
@@ -536,8 +583,6 @@ class ServiceNow:
         -------
         list[Ticket]
         """
-        _CLOSED_STATES = frozenset({"Closed", "Resolved", "Cancelled"})
-
         ticket_fields = {field.name for field in dataclasses.fields(Ticket)}
         resp = self.session.get(
             f"{self._base_api_url}/{self._TABLE}", params={"sysparm_query": self._query, "sysparm_display_value": "all"}
@@ -550,7 +595,7 @@ class ServiceNow:
             return tickets
 
         ## user_focus and all_open both exclude closed/resolved/cancelled
-        tickets = [t for t in tickets if t.state not in _CLOSED_STATES]
+        tickets = [t for t in tickets if t.state not in _CLOSED_TICKET_STATES]
 
         if state is TicketState.all_open:
             ## Bot: exclude tickets RCPond already handled; OAuth: everything non-closed
