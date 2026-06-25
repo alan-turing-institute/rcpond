@@ -472,53 +472,6 @@ def _setup_session(sn_instance, raw_tickets: list[dict]) -> None:
     sn_instance.session.get.return_value.raise_for_status = MagicMock()
 
 
-## Closed/resolved/cancelled tickets are always excluded, regardless of auth mode or long_list.
-
-
-# @pytest.mark.parametrize(("oauth", "long_list"), [(True, True), (True, False), (False, True), (False, False)])
-# def test_get_tickets_excludes_closed_states(sn_instance, oauth, long_list):
-#     """Should get the same result irrespective of the oauth and long_list settings"""
-#     _setup_session(
-#         sn_instance,
-#         [
-#             _raw_ticket(number="RES0000001", state="New"),
-#             _raw_ticket(number="RES0000002", state="Closed"),
-#             _raw_ticket(number="RES0000003", state="Resolved"),
-#             _raw_ticket(number="RES0000004", state="Cancelled"),
-#         ],
-#     )
-#     sn_instance._is_oauth = oauth
-#     tickets = sn_instance.get_tickets(long_list=long_list)
-#     assert [t.number for t in tickets] == ["RES0000001"]
-
-
-# ## OAuth shortlist — unassigned or assigned-to-me; everything else excluded.
-
-
-# def test_get_tickets_oauth_shortlist_includes_unassigned(sn_instance):
-#     _setup_session(sn_instance, [_raw_ticket(number="RES0000001", assigned_to="")])
-#     sn_instance._is_oauth = True
-#     with patch.object(sn_instance, "_current_user_display_name", return_value="Alice Smith"):
-#         tickets = sn_instance.get_tickets()
-#     assert len(tickets) == 1
-
-
-# def test_get_tickets_oauth_shortlist_includes_assigned_to_me(sn_instance):
-#     _setup_session(sn_instance, [_raw_ticket(number="RES0000001", assigned_to="Alice Smith")])
-#     sn_instance._is_oauth = True
-#     with patch.object(sn_instance, "_current_user_display_name", return_value="Alice Smith"):
-#         tickets = sn_instance.get_tickets()
-#     assert len(tickets) == 1
-
-
-# def test_get_tickets_oauth_shortlist_excludes_assigned_to_other(sn_instance):
-#     _setup_session(sn_instance, [_raw_ticket(number="RES0000001", assigned_to="Bob Jones")])
-#     sn_instance._is_oauth = True
-#     with patch.object(sn_instance, "_current_user_display_name", return_value="Alice Smith"):
-#         tickets = sn_instance.get_tickets()
-#     assert tickets == []
-
-
 ## OAuth/bot behaviour across TicketState values.
 
 _COMMON_RAW_TICKETS = [
