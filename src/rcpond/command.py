@@ -18,7 +18,7 @@ from pathlib import Path
 
 from rich import print
 
-from rcpond.analytics import compute_metrics, render_markdown
+from rcpond.analytics import Period, build_ticket_frame, render_markdown
 from rcpond.config import Config
 from rcpond.display import (
     display_full_ticket,
@@ -298,12 +298,12 @@ def find_related_tickets(ticket_number: str, config: Config | None = None) -> li
     return matches
 
 
-def analytics(config: Config | None = None, refresh: bool = False) -> str:
-    """Generate the RCPond analytics report (Stage 1) as markdown, print it, and return it.
+def analytics(config: Config | None = None, refresh: bool = False, period: Period = Period.quarter) -> str:
+    """Generate the RCPond analytics report as markdown, print it, and return it.
 
     Fetches all tickets in every state (including closed, resolved, and cancelled)
-    in a single bulk call, computes the Stage 1 metrics per ticket type, writes the
-    markdown report to stdout verbatim (so it can be redirected to a ``.md`` file),
+    in a single bulk call, builds a one-row-per-ticket DataFrame, renders the markdown
+    report, writes it to stdout verbatim (so it can be redirected to a ``.md`` file),
     and returns it.
 
     Parameters
@@ -314,6 +314,8 @@ def analytics(config: Config | None = None, refresh: bool = False) -> str:
         Reserved for the future ticket-history cache. The cache is not yet
         implemented — a single bulk fetch is currently optimal — so this flag has
         no effect today.
+    period : Period
+        Granularity for the over-time trends section (month, quarter, or year).
 
     Returns
     -------
@@ -326,7 +328,7 @@ def analytics(config: Config | None = None, refresh: bool = False) -> str:
     config = config or Config()
     service_now: ServiceNow = ServiceNow(config)
     tickets = service_now.get_tickets(state=TicketState.all_including_closed)
-    report = render_markdown(compute_metrics(tickets))
+    report = render_markdown(build_ticket_frame(tickets), period)
     ## Write verbatim (not via rich.print, which would wrap/format the markdown table).
     sys.stdout.write(report)
     return report

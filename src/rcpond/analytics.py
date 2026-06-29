@@ -3,148 +3,148 @@
 Computes performance metrics about RCPond directly from ServiceNow ticket history
 (there is no separate datastore). The public API is:
 
-- `DurationStats`: summary statistics for a set of time intervals.
-- `TicketTypeMetrics`: per-ticket-type metric counts and statistics.
-- `compute_metrics`: group tickets by type and compute the metrics.
-- `render_markdown`: render the metrics as a markdown report.
+- `Period`: granularity for the over-time trend tables.
+- `build_ticket_frame`: turn a list of tickets into a one-row-per-ticket DataFrame.
+- `render_markdown`: render the metrics from that DataFrame as a markdown report.
 
-Metrics are reported per ticket type (via `servicenow.ticket_type_key`). See
-planning/analytics.md for the staged metric roadmap. Implemented so far:
+This module is part of the optional ``html`` dependency group (it requires ``pandas``
+and ``tabulate``). All grouping/aggregation is delegated to pandas; the per-ticket
+feature extraction lives on ``Ticket`` (see ``servicenow.py``). See
+planning/analytics.md for the staged metric roadmap and design decisions.
 
-Stage 1 (counts):
+The report has four sections, each per ticket type:
 
-- total tickets
-- tickets processed by RCPond (>= 1 RCPond note)
-- tickets processed manually (>= 1 manual note and no RCPond note)
-- RCPond-processed tickets that also had a subsequent manual interaction
-
-Stage 2 (distributions and time intervals):
-
-- distribution of RCPond interactions per ticket
-- distribution of manual interactions per ticket
-- time from creation to first RCPond interaction
-- time from creation to first manual interaction
-- time from creation to final resolution (closed/resolved/cancelled only)
-- time from first RCPond interaction to final resolution
-
-Durations are summarised as ``DurationStats`` (in days). Tickets that do not
-qualify for a given interval (e.g. an open ticket has no resolution time) are
-simply excluded from that interval's statistics.
+- **Ticket processing** — counts: total, processed by RCPond, processed manually,
+  RCPond-processed with a subsequent manual interaction (plus a cross-type aggregate).
+- **Interaction distributions** — how many tickets had 0, 1, 2, ... RCPond / manual notes.
+- **Time intervals (days)** — n/median/mean/min/max for creation→first RCPond,
+  creation→first manual, creation→resolution, and first RCPond→resolution.
+- **Trends** — the processing counts plus median resolution time, bucketed by the
+  ticket's creation period (month/quarter/year).
 """
 
 from __future__ import annotations
 
-import statistics
-from collections import Counter
-from collections.abc import Callable, Iterable
-from dataclasses import dataclass
-from datetime import datetime
+from enum import Enum
+
+import pandas as pd
 
 from rcpond.servicenow import Ticket, ticket_type_key
 
-## --------------------------------------------------------------------------------
-## Metric data structures
 
+class Period(str, Enum):
+    """Granularity for the over-time trend tables.
 
-@dataclass(frozen=True)
-class DurationStats:
-    """Summary statistics for a set of time intervals, in days.
-
-    >>> stats.count, stats.median_days
+    >>> Period.quarter.value
+    'quarter'
     """
 
-    count: int
-    """Number of tickets that contributed to these statistics."""
-    median_days: float
-    """Median interval length in days."""
-    mean_days: float
-    """Mean interval length in days."""
-    min_days: float
-    """Shortest interval in days."""
-    max_days: float
-    """Longest interval in days."""
+    month = "month"
+    quarter = "quarter"
+    year = "year"
 
 
-@dataclass(frozen=True)
-class TicketTypeMetrics:
-    """Analytics metrics for a single ticket type.
+## Per-row columns produced directly from the Ticket helpers (before derived durations).
+_BASE_COLUMNS = [
+    "type_key",
+    "opened",
+    "rcpond_notes",
+    "manual_notes",
+    "processed_by_rcpond",
+    "processed_manually",
+    "subsequent_manual",
+    "first_rcpond",
+    "first_manual",
+    "resolution",
+]
 
-    >>> metrics.type_key, metrics.rcpond_processed
-    """
+## Datetime columns (parsed to datetime64 so pandas date arithmetic works).
+_DATETIME_COLUMNS = ["opened", "first_rcpond", "first_manual", "resolution"]
 
-    type_key: str
-    """The ``_TICKET_TYPES`` registry key these metrics describe."""
-    total_tickets: int
-    """Total tickets of this type included in the report."""
+## Derived duration columns, in days: (end - start). NaN when either endpoint is missing.
+_DURATION_COLUMNS = {
+    "days_to_first_rcpond": ("opened", "first_rcpond"),
+    "days_to_first_manual": ("opened", "first_manual"),
+    "days_to_resolution": ("opened", "resolution"),
+    "days_rcpond_to_resolution": ("first_rcpond", "resolution"),
+}
 
-    ## Stage 1: processing-mix counts
-    rcpond_processed: int
-    """Tickets with at least one RCPond note (any version)."""
-    manually_processed: int
-    """Tickets with at least one manual note and no RCPond note."""
-    rcpond_with_subsequent_manual: int
-    """RCPond-processed tickets that also had a manual note after RCPond's first note."""
+## Friendly labels for the time-interval table rows.
+_INTERVAL_LABELS = {
+    "days_to_first_rcpond": "Creation → first RCPond",
+    "days_to_first_manual": "Creation → first manual",
+    "days_to_resolution": "Creation → resolution",
+    "days_rcpond_to_resolution": "First RCPond → resolution",
+}
 
-    ## Stage 2: interaction distributions (interaction count -> number of tickets, sorted by count)
-    rcpond_interaction_distribution: dict[int, int]
-    """How many tickets had 0, 1, 2, ... RCPond notes."""
-    manual_interaction_distribution: dict[int, int]
-    """How many tickets had 0, 1, 2, ... manual notes."""
-
-    ## Stage 2: time intervals (None when no ticket qualifies)
-    time_to_first_rcpond: DurationStats | None
-    """Creation to first RCPond interaction."""
-    time_to_first_manual: DurationStats | None
-    """Creation to first manual interaction."""
-    time_to_resolution: DurationStats | None
-    """Creation to final resolution (closed/resolved/cancelled tickets only)."""
-    time_first_rcpond_to_resolution: DurationStats | None
-    """First RCPond interaction to final resolution."""
+## Period -> pandas ``to_period`` frequency code.
+_PERIOD_FREQ = {Period.month: "M", Period.quarter: "Q", Period.year: "Y"}
 
 
 ## --------------------------------------------------------------------------------
 ## Interface to this module
 
 
-def compute_metrics(tickets: list[Ticket]) -> list[TicketTypeMetrics]:
-    """Group ``tickets`` by ticket type and compute the metrics.
+def build_ticket_frame(tickets: list[Ticket]) -> pd.DataFrame:
+    """Build a one-row-per-ticket DataFrame from the per-ticket ``Ticket`` helpers.
 
-    Tickets whose type is not in the registry (``ticket_type_key`` returns
-    ``None``) are skipped, since per-type metrics are not meaningful for them.
-    Results are sorted by ``type_key`` for stable, reproducible output.
+    Tickets whose type is not in the registry (``ticket_type_key`` returns ``None``)
+    are excluded, since per-type metrics are not meaningful for them. The columns are
+    the de-facto analytics schema: ``type_key``; ``opened``/``first_rcpond``/
+    ``first_manual``/``resolution`` (datetime64, ``NaT`` when absent or, for resolution,
+    when the ticket is still open); ``rcpond_notes``/``manual_notes`` (int);
+    ``processed_by_rcpond``/``processed_manually``/``subsequent_manual`` (bool); and the
+    derived ``days_to_*`` duration columns (float days, ``NaN`` when an endpoint is missing).
 
     Parameters
     ----------
     tickets : list[Ticket]
-        Base tickets with ``work_notes``/``comments``/``state``/``opened_at``
-        populated, e.g. from ``ServiceNow.get_tickets(state=TicketState.all_including_closed)``.
+        Base tickets with ``work_notes``/``comments``/``state``/``opened_at`` populated,
+        e.g. from ``ServiceNow.get_tickets(state=TicketState.all_including_closed)``.
 
     Returns
     -------
-    list[TicketTypeMetrics]
-        One entry per ticket type present, sorted by ``type_key``.
+    pandas.DataFrame
     """
-    by_type: dict[str, list[Ticket]] = {}
+    rows = []
     for t in tickets:
         key = ticket_type_key(t)
         if key is None:
             continue
-        by_type.setdefault(key, []).append(t)
+        rcpond_notes = t.rcpond_note_count()
+        manual_notes = t.manual_note_count()
+        rows.append(
+            {
+                "type_key": key,
+                "opened": t.opened_datetime(),
+                "rcpond_notes": rcpond_notes,
+                "manual_notes": manual_notes,
+                "processed_by_rcpond": rcpond_notes > 0,
+                "processed_manually": rcpond_notes == 0 and manual_notes > 0,
+                "subsequent_manual": t.has_subsequent_manual_interaction(),
+                "first_rcpond": t.first_rcpond_note_datetime(),
+                "first_manual": t.first_manual_note_datetime(),
+                "resolution": t.resolution_datetime(),
+            }
+        )
 
-    return [_metrics_for_type(key, by_type[key]) for key in sorted(by_type)]
+    df = pd.DataFrame(rows, columns=_BASE_COLUMNS)
+    for col in _DATETIME_COLUMNS:
+        df[col] = pd.to_datetime(df[col])
+    for name, (start, end) in _DURATION_COLUMNS.items():
+        df[name] = (df[end] - df[start]).dt.total_seconds() / 86400.0
+    return df
 
 
-def render_markdown(metrics: list[TicketTypeMetrics]) -> str:
-    """Render metrics as a markdown report.
-
-    The report has a processing-mix summary table (one row per ticket type, with a
-    labelled cross-type aggregate row when more than one type is present), followed
-    by per-type interaction-distribution and time-interval sections.
+def render_markdown(df: pd.DataFrame, period: Period = Period.quarter) -> str:
+    """Render the analytics report as markdown from a ticket DataFrame.
 
     Parameters
     ----------
-    metrics : list[TicketTypeMetrics]
-        Per-type metrics as returned by ``compute_metrics``.
+    df : pandas.DataFrame
+        A frame from ``build_ticket_frame``.
+    period : Period
+        Granularity for the trends section.
 
     Returns
     -------
@@ -152,150 +152,114 @@ def render_markdown(metrics: list[TicketTypeMetrics]) -> str:
         A markdown document ending in a trailing newline.
     """
     lines = ["# RCPond analytics report", ""]
-
-    if not metrics:
+    if df.empty:
         lines += ["## Ticket processing", "", "_No tickets found._"]
         return "\n".join(lines) + "\n"
 
-    lines += _render_processing_table(metrics)
-    lines += _render_interaction_distributions(metrics)
-    lines += _render_time_intervals(metrics)
+    lines += _processing_section(df)
+    lines += _distribution_section(df)
+    lines += _intervals_section(df)
+    lines += _trends_section(df, period)
     return "\n".join(lines) + "\n"
-
-
-## --------------------------------------------------------------------------------
-## Internal helpers: metric computation
-
-
-def _metrics_for_type(type_key: str, group: list[Ticket]) -> TicketTypeMetrics:
-    """Compute all implemented metrics for a single ticket type's tickets."""
-    return TicketTypeMetrics(
-        type_key=type_key,
-        total_tickets=len(group),
-        rcpond_processed=sum(1 for t in group if t.rcpond_note_count() > 0),
-        manually_processed=sum(1 for t in group if t.rcpond_note_count() == 0 and t.manual_note_count() > 0),
-        rcpond_with_subsequent_manual=sum(1 for t in group if t.has_subsequent_manual_interaction()),
-        rcpond_interaction_distribution=_distribution(t.rcpond_note_count() for t in group),
-        manual_interaction_distribution=_distribution(t.manual_note_count() for t in group),
-        time_to_first_rcpond=_duration_stats(
-            _deltas_days(group, lambda t: t.opened_datetime(), lambda t: t.first_rcpond_note_datetime())
-        ),
-        time_to_first_manual=_duration_stats(
-            _deltas_days(group, lambda t: t.opened_datetime(), lambda t: t.first_manual_note_datetime())
-        ),
-        time_to_resolution=_duration_stats(
-            _deltas_days(group, lambda t: t.opened_datetime(), lambda t: t.resolution_datetime())
-        ),
-        time_first_rcpond_to_resolution=_duration_stats(
-            _deltas_days(group, lambda t: t.first_rcpond_note_datetime(), lambda t: t.resolution_datetime())
-        ),
-    )
-
-
-def _distribution(counts: Iterable[int]) -> dict[int, int]:
-    """Tally ``counts`` into a {value: occurrences} dict, sorted by value."""
-    return dict(sorted(Counter(counts).items()))
-
-
-def _deltas_days(
-    group: list[Ticket],
-    start: Callable[[Ticket], datetime | None],
-    end: Callable[[Ticket], datetime | None],
-) -> list[float]:
-    """Return the ``end - start`` interval, in days, for each ticket where both ends exist."""
-    deltas: list[float] = []
-    for t in group:
-        s, e = start(t), end(t)
-        if s is not None and e is not None:
-            deltas.append((e - s).total_seconds() / 86400.0)
-    return deltas
-
-
-def _duration_stats(deltas_days: list[float]) -> DurationStats | None:
-    """Summarise interval lengths, or ``None`` if no ticket qualified."""
-    if not deltas_days:
-        return None
-    return DurationStats(
-        count=len(deltas_days),
-        median_days=round(statistics.median(deltas_days), 2),
-        mean_days=round(statistics.mean(deltas_days), 2),
-        min_days=round(min(deltas_days), 2),
-        max_days=round(max(deltas_days), 2),
-    )
 
 
 ## --------------------------------------------------------------------------------
 ## Internal helpers: rendering
 
 
-def _render_processing_table(metrics: list[TicketTypeMetrics]) -> list[str]:
-    """Stage 1 processing-mix table, with a labelled aggregate row for multiple types."""
-    header = ["Ticket type", "Total tickets", "Processed by RCPond", "Processed manually", "RCPond + subsequent manual"]
-    lines = ["## Ticket processing", "", "| " + " | ".join(header) + " |", "| --- | ---: | ---: | ---: | ---: |"]
-    lines += [
-        _row(m.type_key, m.total_tickets, m.rcpond_processed, m.manually_processed, m.rcpond_with_subsequent_manual)
-        for m in metrics
-    ]
+def _md(frame: pd.DataFrame) -> str:
+    """Render a frame as a GitHub-flavoured markdown table.
+
+    Floats show 2 dp (right-aligned by tabulate); missing values render as ``nan``.
+    """
+    return frame.to_markdown(index=False, floatfmt=".2f")
+
+
+def _processing_section(df: pd.DataFrame) -> list[str]:
+    """Processing-mix counts per type, with a labelled cross-type aggregate for >1 type."""
+    agg = df.groupby("type_key").agg(
+        total=("type_key", "size"),
+        rcpond=("processed_by_rcpond", "sum"),
+        manual=("processed_manually", "sum"),
+        subsequent=("subsequent_manual", "sum"),
+    )
+    agg = agg.reset_index()
     ## A cross-type total is only meaningful (and non-redundant) with multiple types.
-    if len(metrics) > 1:
-        lines.append(
-            _row(
-                "**All types (aggregate)**",
-                sum(m.total_tickets for m in metrics),
-                sum(m.rcpond_processed for m in metrics),
-                sum(m.manually_processed for m in metrics),
-                sum(m.rcpond_with_subsequent_manual for m in metrics),
+    if len(agg) > 1:
+        totals = agg.drop(columns="type_key").sum()
+        totals["type_key"] = "**All types (aggregate)**"
+        agg = pd.concat([agg, totals.to_frame().T[agg.columns]], ignore_index=True)
+    agg = agg.rename(
+        columns={
+            "type_key": "Ticket type",
+            "total": "Total tickets",
+            "rcpond": "Processed by RCPond",
+            "manual": "Processed manually",
+            "subsequent": "RCPond + subsequent manual",
+        }
+    )
+    return ["## Ticket processing", "", _md(agg), ""]
+
+
+def _distribution_section(df: pd.DataFrame) -> list[str]:
+    """Per type: how many tickets had each interaction count (RCPond and manual side by side)."""
+    lines = ["## Interaction distributions", ""]
+    for type_key, sub in df.groupby("type_key"):
+        dist = pd.DataFrame(
+            {
+                "Tickets (RCPond)": sub["rcpond_notes"].value_counts(),
+                "Tickets (manual)": sub["manual_notes"].value_counts(),
+            }
+        )
+        dist = dist.fillna(0).astype(int).sort_index()
+        dist.index.name = "Interactions"
+        lines += [f"### {type_key}", "", _md(dist.reset_index()), ""]
+    return lines
+
+
+def _intervals_section(df: pd.DataFrame) -> list[str]:
+    """Per type: n/median/mean/min/max (days) for each time interval."""
+    lines = ["## Time intervals (days)", ""]
+    cols = list(_INTERVAL_LABELS)
+    for type_key, sub in df.groupby("type_key"):
+        stats = sub[cols].agg(["count", "median", "mean", "min", "max"]).T
+        stats["count"] = stats["count"].astype(int)
+        stats.index = pd.Index([_INTERVAL_LABELS[c] for c in stats.index], name="Interval")
+        stats = stats.reset_index().rename(
+            columns={"count": "n", "median": "Median", "mean": "Mean", "min": "Min", "max": "Max"}
+        )
+        lines += [f"### {type_key}", "", _md(stats), ""]
+    return lines
+
+
+def _trends_section(df: pd.DataFrame, period: Period) -> list[str]:
+    """Per type: processing counts plus median resolution, bucketed by creation period."""
+    lines = [f"## Trends by {period.value}", ""]
+    df = df.assign(period=df["opened"].dt.to_period(_PERIOD_FREQ[period]))
+    for type_key, sub in df.groupby("type_key"):
+        trend = (
+            sub.dropna(subset=["period"])
+            .groupby("period")
+            .agg(
+                total=("type_key", "size"),
+                rcpond=("processed_by_rcpond", "sum"),
+                manual=("processed_manually", "sum"),
+                subsequent=("subsequent_manual", "sum"),
+                median_resolution=("days_to_resolution", "median"),
             )
         )
+        trend = trend.reset_index()
+        ## PeriodIndex renders quarters as "2026Q1"; use the documented "2026-Q1" form.
+        trend["period"] = trend["period"].astype(str).str.replace("Q", "-Q")
+        trend = trend.rename(
+            columns={
+                "period": "Period",
+                "total": "Total",
+                "rcpond": "Processed by RCPond",
+                "manual": "Processed manually",
+                "subsequent": "RCPond + subsequent",
+                "median_resolution": "Median resolution (days)",
+            }
+        )
+        lines += [f"### {type_key}", "", _md(trend), ""]
     return lines
-
-
-def _render_interaction_distributions(metrics: list[TicketTypeMetrics]) -> list[str]:
-    """Per-type table of how many tickets had each interaction count."""
-    lines = ["", "## Interaction distributions"]
-    for m in metrics:
-        counts = sorted(set(m.rcpond_interaction_distribution) | set(m.manual_interaction_distribution))
-        lines += [
-            "",
-            f"### {m.type_key}",
-            "",
-            "| Interactions | Tickets (RCPond) | Tickets (manual) |",
-            "| ---: | ---: | ---: |",
-        ]
-        lines += [
-            f"| {n} | {m.rcpond_interaction_distribution.get(n, 0)} | {m.manual_interaction_distribution.get(n, 0)} |"
-            for n in counts
-        ]
-    return lines
-
-
-def _render_time_intervals(metrics: list[TicketTypeMetrics]) -> list[str]:
-    """Per-type table of time-interval statistics (in days)."""
-    lines = ["", "## Time intervals (days)"]
-    for m in metrics:
-        lines += [
-            "",
-            f"### {m.type_key}",
-            "",
-            "| Interval | n | Median | Mean | Min | Max |",
-            "| --- | ---: | ---: | ---: | ---: | ---: |",
-            _stats_row("Creation → first RCPond", m.time_to_first_rcpond),
-            _stats_row("Creation → first manual", m.time_to_first_manual),
-            _stats_row("Creation → resolution", m.time_to_resolution),
-            _stats_row("First RCPond → resolution", m.time_first_rcpond_to_resolution),
-        ]
-    return lines
-
-
-def _row(label: str, total: int, rcpond: int, manual: int, subsequent: int) -> str:
-    """Format a single processing-mix table row for a ticket type (or the aggregate)."""
-    return f"| {label} | {total} | {rcpond} | {manual} | {subsequent} |"
-
-
-def _stats_row(label: str, stats: DurationStats | None) -> str:
-    """Format a single time-interval row; an em dash marks intervals with no qualifying tickets."""
-    if stats is None:
-        return f"| {label} | 0 | — | — | — | — |"
-    return (
-        f"| {label} | {stats.count} | {stats.median_days} | {stats.mean_days} | {stats.min_days} | {stats.max_days} |"
-    )
