@@ -53,6 +53,7 @@ _BASE_COLUMNS = [
     "processed_by_rcpond",
     "processed_manually",
     "subsequent_manual",
+    "still_open",
     "first_rcpond",
     "first_manual",
     "resolution",
@@ -93,8 +94,9 @@ def build_ticket_frame(tickets: list[Ticket]) -> pd.DataFrame:
     the de-facto analytics schema: ``type_key``; ``opened``/``first_rcpond``/
     ``first_manual``/``resolution`` (datetime64, ``NaT`` when absent or, for resolution,
     when the ticket is still open); ``rcpond_notes``/``manual_notes`` (int);
-    ``processed_by_rcpond``/``processed_manually``/``subsequent_manual`` (bool); and the
-    derived ``days_to_*`` duration columns (float days, ``NaN`` when an endpoint is missing).
+    ``processed_by_rcpond``/``processed_manually``/``subsequent_manual``/``still_open``
+    (bool); and the derived ``days_to_*`` duration columns (float days, ``NaN`` when an
+    endpoint is missing).
 
     Parameters
     ----------
@@ -122,6 +124,7 @@ def build_ticket_frame(tickets: list[Ticket]) -> pd.DataFrame:
                 "processed_by_rcpond": rcpond_notes > 0,
                 "processed_manually": rcpond_notes == 0 and manual_notes > 0,
                 "subsequent_manual": t.has_subsequent_manual_interaction(),
+                "still_open": not t.is_closed(),
                 "first_rcpond": t.first_rcpond_note_datetime(),
                 "first_manual": t.first_manual_note_datetime(),
                 "resolution": t.resolution_datetime(),
@@ -179,6 +182,7 @@ def _processing_section(df: pd.DataFrame) -> list[str]:
     """Processing-mix counts per type, with a labelled cross-type aggregate for >1 type."""
     agg = df.groupby("type_key").agg(
         total=("type_key", "size"),
+        still_open=("still_open", "sum"),
         rcpond=("processed_by_rcpond", "sum"),
         manual=("processed_manually", "sum"),
         subsequent=("subsequent_manual", "sum"),
@@ -193,6 +197,7 @@ def _processing_section(df: pd.DataFrame) -> list[str]:
         columns={
             "type_key": "Ticket type",
             "total": "Total tickets",
+            "still_open": "Still open",
             "rcpond": "Processed by RCPond",
             "manual": "Processed manually",
             "subsequent": "RCPond + subsequent manual",
@@ -242,6 +247,7 @@ def _trends_section(df: pd.DataFrame, period: Period) -> list[str]:
             .groupby("period")
             .agg(
                 total=("type_key", "size"),
+                still_open=("still_open", "sum"),
                 rcpond=("processed_by_rcpond", "sum"),
                 manual=("processed_manually", "sum"),
                 subsequent=("subsequent_manual", "sum"),
@@ -255,6 +261,7 @@ def _trends_section(df: pd.DataFrame, period: Period) -> list[str]:
             columns={
                 "period": "Period",
                 "total": "Total",
+                "still_open": "Still open",
                 "rcpond": "Processed by RCPond",
                 "manual": "Processed manually",
                 "subsequent": "RCPond + subsequent",

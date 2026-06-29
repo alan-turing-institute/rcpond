@@ -61,6 +61,7 @@ def _frame(rows: list[dict]) -> pd.DataFrame:
         "processed_by_rcpond": False,
         "processed_manually": False,
         "subsequent_manual": False,
+        "still_open": True,
         "days_to_first_rcpond": float("nan"),
         "days_to_first_manual": float("nan"),
         "days_to_resolution": float("nan"),
@@ -91,12 +92,14 @@ def test_build_ticket_frame_excludes_unknown_type_and_derives_columns():
     ## Unknown-type ticket is excluded; order is preserved for the rest.
     assert list(df["type_key"]) == ["compute_allocation_request"] * 3
 
-    ## Closed ticket: RCPond-processed; resolution = final (System) note → 2 days after opening.
+    ## Closed ticket: RCPond-processed, not still open; resolution = final (System) note → 2 days after opening.
     assert bool(df.iloc[0]["processed_by_rcpond"]) is True
+    assert bool(df.iloc[0]["still_open"]) is False
     assert df.iloc[0]["days_to_resolution"] == 2.0
 
     ## Manual, still open: manually processed; no resolution → NaN duration.
     assert bool(df.iloc[1]["processed_manually"]) is True
+    assert bool(df.iloc[1]["still_open"]) is True
     assert pd.isna(df.iloc[1]["days_to_resolution"])
 
     ## No notes: neither RCPond nor manual.
@@ -128,10 +131,11 @@ def test_render_processing_with_cross_type_aggregate():
         ]
     )
     rows = _table_rows(render_markdown(df))
-    assert ["compute_allocation_request", "2", "1", "1", "0"] in rows
-    assert ["github_org_membership", "1", "1", "0", "1"] in rows
+    ## Ticket type | Total | Still open | Processed by RCPond | Processed manually | RCPond + subsequent
+    assert ["compute_allocation_request", "2", "2", "1", "1", "0"] in rows
+    assert ["github_org_membership", "1", "1", "1", "0", "1"] in rows
     ## Aggregate sums each column across types and is clearly labelled.
-    assert ["**All types (aggregate)**", "3", "2", "1", "1"] in rows
+    assert ["**All types (aggregate)**", "3", "3", "2", "1", "1"] in rows
 
 
 def test_render_processing_single_type_has_no_aggregate():
@@ -180,15 +184,15 @@ def test_render_time_intervals_with_dash_for_empty_interval():
 def test_render_trends_quarter_buckets_and_dash():
     df = _frame(
         [
-            {"opened": "2026-02-01", "processed_by_rcpond": True, "days_to_resolution": 2.0},
-            {"opened": "2026-05-01", "processed_manually": True},
+            {"opened": "2026-02-01", "processed_by_rcpond": True, "still_open": False, "days_to_resolution": 2.0},
+            {"opened": "2026-05-01", "processed_manually": True, "still_open": True},
         ]
     )
     rows = _table_rows(render_markdown(df, Period.quarter))
-    ## Period | Total | Processed by RCPond | Processed manually | RCPond + subsequent | Median resolution (days)
-    assert ["2026-Q1", "1", "1", "0", "0", "2.00"] in rows
-    ## Q2 has no closed tickets → no median resolution (default NaN rendering).
-    assert ["2026-Q2", "1", "0", "1", "0", "nan"] in rows
+    ## Period | Total | Still open | Processed by RCPond | Processed manually | RCPond + subsequent | Median resolution
+    assert ["2026-Q1", "1", "0", "1", "0", "0", "2.00"] in rows
+    ## Q2 has no closed tickets → still open, and no median resolution (default NaN rendering).
+    assert ["2026-Q2", "1", "1", "0", "1", "0", "nan"] in rows
 
 
 def test_render_trends_period_labels():
