@@ -345,6 +345,16 @@ def _extract_azure_ids(text: str) -> set[str]:
     return {m.lower() for m in _AZURE_UUID_RE.findall(text)}
 
 
+# Feature toggles for different match criteria
+MATCH_ON_FINANCE_CODE = True
+MATCH_ON_PI_EMAIL = True
+MATCH_ON_PMU_EMAIL = False
+MATCH_ON_ANY_SHARED_USERS = False
+MATCH_ON_ALL_SHARED_USERS = True
+MATCH_ON_SIMILAR_PROJECT_TITLE = True
+MATCH_ON_AZURE_SUBSCRIPTION_ID = True
+
+
 def _match_heuristics(source: Ticket, candidate: Ticket) -> list[str]:
     """Return a list of matched heuristic descriptions (non-empty means related).
 
@@ -364,42 +374,51 @@ def _match_heuristics(source: Ticket, candidate: Ticket) -> list[str]:
     matched: list[str] = []
 
     ## Finance code
-    src_fc = getattr(source, "which_finance_code", "").strip().upper()
-    cand_fc = getattr(candidate, "which_finance_code", "").strip().upper()
-    if src_fc and cand_fc and src_fc == cand_fc:
-        matched.append(f"finance_code:{src_fc}")
+    if MATCH_ON_FINANCE_CODE:
+        src_fc = getattr(source, "which_finance_code", "").strip().upper()
+        cand_fc = getattr(candidate, "which_finance_code", "").strip().upper()
+        if src_fc and cand_fc and src_fc == cand_fc:
+            matched.append(f"finance_code:{src_fc}")
 
     ## PI supervisor email
-    src_pi = getattr(source, "pi_supervisor_email", "").strip().lower()
-    cand_pi = getattr(candidate, "pi_supervisor_email", "").strip().lower()
-    if src_pi and cand_pi and src_pi == cand_pi:
-        matched.append(f"pi_email:{src_pi}")
+    if MATCH_ON_PI_EMAIL:
+        src_pi = getattr(source, "pi_supervisor_email", "").strip().lower()
+        cand_pi = getattr(candidate, "pi_supervisor_email", "").strip().lower()
+        if src_pi and cand_pi and src_pi == cand_pi:
+            matched.append(f"pi_email:{src_pi}")
 
     ## PMU contact email
-    src_pmu = getattr(source, "pmu_contact_email", "").strip().lower()
-    cand_pmu = getattr(candidate, "pmu_contact_email", "").strip().lower()
-    if src_pmu and cand_pmu and src_pmu == cand_pmu:
-        matched.append(f"pmu_email:{src_pmu}")
+    if MATCH_ON_PMU_EMAIL:
+        src_pmu = getattr(source, "pmu_contact_email", "").strip().lower()
+        cand_pmu = getattr(candidate, "pmu_contact_email", "").strip().lower()
+        if src_pmu and cand_pmu and src_pmu == cand_pmu:
+            matched.append(f"pmu_email:{src_pmu}")
 
     ## Shared user emails
     src_users = _extract_emails(getattr(source, "users_who_require_access_names_and_emails", ""))
     cand_users = _extract_emails(getattr(candidate, "users_who_require_access_names_and_emails", ""))
-    for email in sorted(src_users & cand_users):
-        matched.append(f"shared_user:{email}")
+    if MATCH_ON_ANY_SHARED_USERS:
+        for email in sorted(src_users & cand_users):
+            matched.append(f"shared_user:{email}")
+    if MATCH_ON_ALL_SHARED_USERS:  # noqa: SIM102: Keep feature-toggle and logic on separate lines
+        if src_users == cand_users:
+            matched.extend([f"shared_user:{email}" for email in src_users])
 
     ## Similar project title (fuzzy match)
-    src_title = getattr(source, "project_title", "").strip()
-    cand_title = getattr(candidate, "project_title", "").strip()
-    if src_title and cand_title:
-        ratio = difflib.SequenceMatcher(None, src_title.lower(), cand_title.lower()).ratio()
-        if ratio >= _PROJECT_TITLE_SIMILARITY_THRESHOLD:
-            matched.append(f"project_title_similarity:{ratio:.2f}")
+    if MATCH_ON_SIMILAR_PROJECT_TITLE:
+        src_title = getattr(source, "project_title", "").strip()
+        cand_title = getattr(candidate, "project_title", "").strip()
+        if src_title and cand_title:
+            ratio = difflib.SequenceMatcher(None, src_title.lower(), cand_title.lower()).ratio()
+            if ratio >= _PROJECT_TITLE_SIMILARITY_THRESHOLD:
+                matched.append(f"project_title_similarity:{ratio:.2f}")
 
     ## Azure subscription ID
-    src_azure = _extract_azure_ids(getattr(source, "azure_subscription_id_or_hpc_group_project_id", ""))
-    cand_azure = _extract_azure_ids(getattr(candidate, "azure_subscription_id_or_hpc_group_project_id", ""))
-    for azure_id in sorted(src_azure & cand_azure):
-        matched.append(f"azure_subscription_id:{azure_id}")
+    if MATCH_ON_AZURE_SUBSCRIPTION_ID:
+        src_azure = _extract_azure_ids(getattr(source, "azure_subscription_id_or_hpc_group_project_id", ""))
+        cand_azure = _extract_azure_ids(getattr(candidate, "azure_subscription_id_or_hpc_group_project_id", ""))
+        for azure_id in sorted(src_azure & cand_azure):
+            matched.append(f"azure_subscription_id:{azure_id}")
 
     return matched
 
