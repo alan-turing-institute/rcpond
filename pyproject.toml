@@ -146,6 +146,7 @@ dev = [
     "pre-commit",
     "pytest >=6",
     "pytest-cov >=3",
+    "tabulate>=0.9",
     "types-beautifulsoup4>=4.12",
     "types-requests>=2.32",
 ]
