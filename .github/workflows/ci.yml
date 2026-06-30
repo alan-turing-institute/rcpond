@@ -56,3 +56,27 @@ jobs:
 
       - name: Upload coverage report
         uses: codecov/codecov-action@v3.1.4
+
+  no-html-smoke:
+    name: CLI works without the optional 'html' extra
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.13"
+
+      # Install the core package only — no 'html' extra and no dev group, so
+      # pandas/tabulate are absent. This exercises the guarded, lazy import of
+      # rcpond.analytics and confirms the rest of the CLI works without 'html'.
+      - name: Install core package only
+        run: python -m pip install .
+
+      - name: Verify the CLI imports and runs without pandas/tabulate
+        run: |
+          python -c "import importlib.util as u; assert u.find_spec('pandas') is None, 'pandas must be absent for this check'"
+          python -c "import rcpond.cli, rcpond.command"
+          rcpond --help

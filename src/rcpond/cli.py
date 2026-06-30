@@ -234,6 +234,38 @@ def find_related(ctx: typer.Context, ticket_number: str):
     command.find_related_tickets(ticket_number=ticket_number, config=_config(ctx))
 
 
+try:
+    import pandas as pd  # noqa: F401
+
+    from rcpond.analytics import Period
+
+    @cli.command()
+    def analytics(
+        ctx: typer.Context,
+        period: Annotated[
+            Period,
+            typer.Option("--period", help="Granularity for the over-time trends section."),
+        ] = Period.quarter,
+        refresh: Annotated[
+            bool,
+            typer.Option(
+                "--refresh",
+                help="Force a full re-fetch, bypassing any cached ticket history (no effect yet; cache not implemented).",
+            ),
+        ] = False,
+    ):
+        """Generate a markdown analytics report on RCPond performance across all tickets.
+
+        Reports per ticket type: a processing-mix summary, interaction distributions,
+        time intervals (days), and over-time trends bucketed by --period. The markdown
+        is written to stdout; redirect it to a file to save it.
+        """
+        command.analytics(config=_config(ctx), refresh=refresh, period=period)
+
+except ImportError:
+    pass
+
+
 @cli.command()
 def check_templates(
     ctx: typer.Context,

@@ -397,6 +397,104 @@ def test_rcpond_most_recent_tool_name_combine_audit():
     assert _make_ticket(work_notes=combine_note).rcpond_most_recent_tool_name() == "combine_ticket_history"
 
 
+## ── note-classification counts (analytics) ──────────────────────────────────
+## A System-authored note (e.g. the auto-close comment) is automated, not manual.
+_SYSTEM_NOTE = _note(
+    "01/01/2026 12:00:00",
+    "System",
+    "This ticket was automatically closed by the system.",
+    note_type="Additional comments",
+)
+_EARLY_HUMAN = _note("01/01/2026 08:00:00", "Alice", "Initial human note")
+
+
+@pytest.mark.parametrize(
+    ("work_notes", "comments", "expected_rcpond", "expected_manual"),
+    [
+        ("", "", 0, 0),
+        ("\n".join([_RCPOND_OLD, _RCPOND_CURRENT]), "", 2, 0),
+        ("\n".join([_RCPOND_CURRENT, _HUMAN_NOTE]), "", 1, 1),
+        (_RCPOND_CURRENT, _SYSTEM_NOTE, 1, 0),
+    ],
+    ids=["empty", "two_rcpond_versions", "rcpond_and_human", "rcpond_and_system_comment"],
+)
+def test_note_counts(work_notes, comments, expected_rcpond, expected_manual):
+    ticket = _make_ticket(work_notes=work_notes, comments=comments)
+    assert ticket.rcpond_note_count() == expected_rcpond
+    assert ticket.manual_note_count() == expected_manual
+
+
+@pytest.mark.parametrize(
+    ("work_notes", "comments", "expected"),
+    [
+        (_HUMAN_NOTE, "", False),
+        (_RCPOND_CURRENT, "", False),
+        ("\n".join([_RCPOND_CURRENT, _HUMAN_NOTE]), "", True),
+        ("\n".join([_EARLY_HUMAN, _RCPOND_CURRENT]), "", False),
+        (_RCPOND_CURRENT, _SYSTEM_NOTE, False),
+    ],
+    ids=["no_rcpond", "rcpond_only", "human_after_rcpond", "human_before_rcpond", "system_after_rcpond"],
+)
+def test_has_subsequent_manual_interaction(work_notes, comments, expected):
+    ticket = _make_ticket(work_notes=work_notes, comments=comments)
+    assert ticket.has_subsequent_manual_interaction() is expected
+
+
+## ── note/resolution timestamps (analytics, Stage 2) ─────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("opened_at", "expected"),
+    [
+        ("01/01/2026 09:00:00", datetime(2026, 1, 1, 9, 0, 0)),
+        ("", None),
+        ("not a date", None),
+    ],
+    ids=["valid", "empty", "malformed"],
+)
+def test_opened_datetime(opened_at, expected):
+    ticket = dataclasses.replace(_make_ticket(), opened_at=opened_at)
+    assert ticket.opened_datetime() == expected
+
+
+def test_first_note_datetimes_pick_earliest_of_each_kind():
+    ticket = _make_ticket(work_notes="\n".join([_EARLY_HUMAN, _RCPOND_OLD, _RCPOND_CURRENT, _HUMAN_NOTE]))
+    ## earliest RCPond note is the old-version one at 09:00; earliest manual is 08:00
+    assert ticket.first_rcpond_note_datetime() == datetime(2026, 1, 1, 9, 0, 0)
+    assert ticket.first_manual_note_datetime() == datetime(2026, 1, 1, 8, 0, 0)
+
+
+def test_first_note_datetimes_none_when_absent():
+    assert _make_ticket(work_notes=_HUMAN_NOTE).first_rcpond_note_datetime() is None
+    assert _make_ticket(work_notes=_RCPOND_CURRENT).first_manual_note_datetime() is None
+
+
+@pytest.mark.parametrize("state", ["Closed", "Resolved", "Cancelled"])
+def test_is_closed_true_for_terminal_states(state):
+    assert dataclasses.replace(_make_ticket(), state=state).is_closed() is True
+
+
+@pytest.mark.parametrize("state", ["New", "In Progress", "On Hold"])
+def test_is_closed_false_for_active_states(state):
+    assert dataclasses.replace(_make_ticket(), state=state).is_closed() is False
+
+
+def test_resolution_datetime_none_when_open():
+    ticket = dataclasses.replace(_make_ticket(work_notes=_RCPOND_CURRENT), state="New")
+    assert ticket.resolution_datetime() is None
+
+
+def test_resolution_datetime_uses_final_note_for_closed():
+    ## Final note is the System auto-close comment at 12:00.
+    ticket = dataclasses.replace(_make_ticket(work_notes=_RCPOND_CURRENT, comments=_SYSTEM_NOTE), state="Closed")
+    assert ticket.resolution_datetime() == datetime(2026, 1, 1, 12, 0, 0)
+
+
+def test_resolution_datetime_falls_back_to_opened_at_when_no_notes():
+    ticket = dataclasses.replace(_make_ticket(), state="Cancelled", opened_at="01/01/2026 09:00:00")
+    assert ticket.resolution_datetime() == datetime(2026, 1, 1, 9, 0, 0)
+
+
 ## ── get_tickets filtering ───────────────────────────────────────────────────
 
 
@@ -427,53 +525,6 @@ def _raw_ticket(
 def _setup_session(sn_instance, raw_tickets: list[dict]) -> None:
     sn_instance.session.get.return_value.json.return_value = {"result": raw_tickets}
     sn_instance.session.get.return_value.raise_for_status = MagicMock()
-
-
-## Closed/resolved/cancelled tickets are always excluded, regardless of auth mode or long_list.
-
-
-# @pytest.mark.parametrize(("oauth", "long_list"), [(True, True), (True, False), (False, True), (False, False)])
-# def test_get_tickets_excludes_closed_states(sn_instance, oauth, long_list):
-#     """Should get the same result irrespective of the oauth and long_list settings"""
-#     _setup_session(
-#         sn_instance,
-#         [
-#             _raw_ticket(number="RES0000001", state="New"),
-#             _raw_ticket(number="RES0000002", state="Closed"),
-#             _raw_ticket(number="RES0000003", state="Resolved"),
-#             _raw_ticket(number="RES0000004", state="Cancelled"),
-#         ],
-#     )
-#     sn_instance._is_oauth = oauth
-#     tickets = sn_instance.get_tickets(long_list=long_list)
-#     assert [t.number for t in tickets] == ["RES0000001"]
-
-
-# ## OAuth shortlist — unassigned or assigned-to-me; everything else excluded.
-
-
-# def test_get_tickets_oauth_shortlist_includes_unassigned(sn_instance):
-#     _setup_session(sn_instance, [_raw_ticket(number="RES0000001", assigned_to="")])
-#     sn_instance._is_oauth = True
-#     with patch.object(sn_instance, "_current_user_display_name", return_value="Alice Smith"):
-#         tickets = sn_instance.get_tickets()
-#     assert len(tickets) == 1
-
-
-# def test_get_tickets_oauth_shortlist_includes_assigned_to_me(sn_instance):
-#     _setup_session(sn_instance, [_raw_ticket(number="RES0000001", assigned_to="Alice Smith")])
-#     sn_instance._is_oauth = True
-#     with patch.object(sn_instance, "_current_user_display_name", return_value="Alice Smith"):
-#         tickets = sn_instance.get_tickets()
-#     assert len(tickets) == 1
-
-
-# def test_get_tickets_oauth_shortlist_excludes_assigned_to_other(sn_instance):
-#     _setup_session(sn_instance, [_raw_ticket(number="RES0000001", assigned_to="Bob Jones")])
-#     sn_instance._is_oauth = True
-#     with patch.object(sn_instance, "_current_user_display_name", return_value="Alice Smith"):
-#         tickets = sn_instance.get_tickets()
-#     assert tickets == []
 
 
 ## OAuth/bot behaviour across TicketState values.
@@ -641,7 +692,21 @@ def test_get_full_ticket_raises_for_unknown_type(sn_instance, ticket):
         sn_instance.get_full_ticket(unknown)
 
     assert "Unknown ticket type" in str(excinfo.value)  # Value is from the 'short_description' in the ticket
-    assert "compute_allocation_request" in str(excinfo.value)  # Value is from the key in _TICKET_TYPES
+    assert "compute_allocation_request" in str(excinfo.value)  # Known type keys are listed in the message
+
+
+## ── ticket_type_key resolver ─────────────────────────────────────────────────
+
+
+def test_ticket_type_key_matches_registered_type(ticket):
+    """A base ticket matching ComputeAllocationRequestTicket.MATCH_CRITERIA resolves to its registry key."""
+    assert servicenow.ticket_type_key(ticket) == "compute_allocation_request"
+
+
+def test_ticket_type_key_returns_none_for_unknown_type(ticket):
+    """A ticket matching no registered MATCH_CRITERIA resolves to None (no exception, no message)."""
+    unknown = dataclasses.replace(ticket, short_description="Unknown ticket type")
+    assert servicenow.ticket_type_key(unknown) is None
 
 
 ## ── _current_user_sys_id / _current_user_display_name ──────────────────────

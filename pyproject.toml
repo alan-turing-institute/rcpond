@@ -41,6 +41,7 @@ dependencies = [
 html = [
     "beautifulsoup4>=4.12",
     "pandas>=2.0",
+    "tabulate>=0.9",
 ]
 docs = [
     "mkdocs>=1.6.1",
@@ -145,6 +146,7 @@ dev = [
     "pre-commit",
     "pytest >=6",
     "pytest-cov >=3",
+    "tabulate>=0.9",
     "types-beautifulsoup4>=4.12",
     "types-requests>=2.32",
 ]

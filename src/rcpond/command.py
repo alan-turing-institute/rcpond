@@ -7,13 +7,15 @@ The four main entry points are:
 - `process_specific_ticket`: Review a given ticket via the LLM.
 - `batch_process_tickets`: Review all unassigned tickets via the LLM.
 - `batch_evaluate_tickets`: Evaluate LLM performance against pre-downloaded HTML tickets.
-  Requires the ``html`` optional dependency group (``pip install rcpond[html]``).
+  Requires the ``html`` optional dependency group (``uv sync --extra html``).
 - `check_templates`: Render all Jinja2 templates in a directory with dummy variable values (for CI).
 """
 
 import json
+import sys
 from enum import Enum
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from rich import print
 
@@ -29,6 +31,11 @@ from rcpond.llm import LLM, LLMResponse
 from rcpond.prompt import construct_prompt
 from rcpond.servicenow import ComputeAllocationRequestTicket, RelatedTicketMatch, ServiceNow, Ticket, TicketState
 from rcpond.tools import CombineTicketHistoryTool, get_available_tools, verify_render_all_templates
+
+if TYPE_CHECKING:
+    ## Imported lazily inside analytics(): analytics.py requires the optional ``html``
+    ## dependency group (pandas + tabulate), which the rest of the package does not need.
+    from rcpond.analytics import Period
 
 
 class ReplyMode(str, Enum):
@@ -294,6 +301,49 @@ def find_related_tickets(ticket_number: str, config: Config | None = None) -> li
     matches = service_now.find_related_tickets(full_ticket)
     display_related_tickets(full_ticket, matches)
     return matches
+
+
+def analytics(config: Config | None = None, refresh: bool = False, period: "Period | None" = None) -> str:
+    """Generate the RCPond analytics report as markdown, print it, and return it.
+
+    Fetches all tickets in every state (including closed, resolved, and cancelled)
+    in a single bulk call, builds a one-row-per-ticket DataFrame, renders the markdown
+    report, writes it to stdout verbatim (so it can be redirected to a ``.md`` file),
+    and returns it.
+
+    Requires the optional ``html`` dependency group (``uv sync --extra html``);
+    ``rcpond.analytics`` is imported lazily so the rest of the package works without it.
+
+    Parameters
+    ----------
+    config : Config | None
+        Configuration to use. If None, Config() is constructed from the environment.
+    refresh : bool
+        Reserved for the future ticket-history cache. The cache is not yet
+        implemented — a single bulk fetch is currently optimal — so this flag has
+        no effect today.
+    period : Period | None
+        Granularity for the over-time trends section (month, quarter, or year).
+        Defaults to ``Period.quarter`` when not given.
+
+    Returns
+    -------
+    str
+        The markdown report.
+    """
+    from rcpond.analytics import Period, build_ticket_frame, render_markdown
+
+    ## TODO: --refresh becomes meaningful once a stage needs per-ticket full fetches
+    ## and the ticket-history cache (see planning/analytics.md) is implemented.
+    _ = refresh
+    period = period or Period.quarter
+    config = config or Config()
+    service_now: ServiceNow = ServiceNow(config)
+    tickets = service_now.get_tickets(state=TicketState.all_including_closed)
+    report = render_markdown(build_ticket_frame(tickets), period)
+    ## Write verbatim (not via rich.print, which would wrap/format the markdown table).
+    sys.stdout.write(report)
+    return report
 
 
 def process_next_ticket(dry_run: bool, reply_mode: ReplyMode, config: Config | None = None):

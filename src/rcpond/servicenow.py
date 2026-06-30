@@ -107,7 +107,7 @@ class Ticket:
 
     def is_rcpond_processed(self) -> bool:
         """Returns `True` if RCPond (any version) has ever posted a Comment or Work Note on this ticket. `False` otherwise."""
-        return any(_RCPOND_NOTE_RE.match(e.content) for e in self.get_combined_notes())
+        return any(_is_rcpond_note(e) for e in self.get_combined_notes())
 
     def is_rcpond_most_recent_process(self) -> bool:
         """Returns `True` if the current version of RCPond posted the most recent Comment or Work Note on this ticket. `False` otherwise."""
@@ -121,6 +121,87 @@ class Ticket:
             return None
         m = _RCPOND_TOOL_NAME_RE.match(notes[-1].content)
         return m.group(1) if m else None
+
+    def rcpond_note_count(self) -> int:
+        """Number of notes (work notes or comments) posted by RCPond, any version.
+
+        Returns
+        -------
+        int
+            Count of RCPond-authored notes across work notes and comments.
+        """
+        return sum(1 for e in self.get_combined_notes() if _is_rcpond_note(e))
+
+    def manual_note_count(self) -> int:
+        """Number of human (manual) notes on this ticket.
+
+        Excludes RCPond-authored notes and automated notes from the ServiceNow
+        ``System`` user (e.g. auto-close comments).
+
+        Returns
+        -------
+        int
+            Count of manual, human-authored notes.
+        """
+        return sum(1 for e in self.get_combined_notes() if _is_manual_note(e))
+
+    def has_subsequent_manual_interaction(self) -> bool:
+        """Return ``True`` if a human note follows RCPond's first note on this ticket.
+
+        Detects tickets where a person interacted after RCPond first became
+        involved. Automated ``System`` notes (e.g. auto-close comments) are not
+        counted. Returns ``False`` when RCPond never posted, or when no manual note
+        appears after its first note.
+
+        Returns
+        -------
+        bool
+        """
+        notes = self.get_combined_notes()
+        first_rcpond = next((i for i, e in enumerate(notes) if _is_rcpond_note(e)), None)
+        if first_rcpond is None:
+            return False
+        return any(_is_manual_note(e) for e in notes[first_rcpond + 1 :])
+
+    def opened_datetime(self) -> datetime | None:
+        """Parse ``opened_at`` into a datetime, or ``None`` if it is blank or unparseable."""
+        if not self.opened_at:
+            return None
+        try:
+            return datetime.strptime(self.opened_at, _TIMESTAMP_FORMAT)
+        except ValueError:
+            return None
+
+    def first_rcpond_note_datetime(self) -> datetime | None:
+        """Timestamp of the earliest RCPond note, or ``None`` if RCPond never posted."""
+        return next((e.datetime_stamp for e in self.get_combined_notes() if _is_rcpond_note(e)), None)
+
+    def first_manual_note_datetime(self) -> datetime | None:
+        """Timestamp of the earliest manual (human) note, or ``None`` if there is none."""
+        return next((e.datetime_stamp for e in self.get_combined_notes() if _is_manual_note(e)), None)
+
+    def is_closed(self) -> bool:
+        """Return ``True`` if the ticket is in a terminal state (Closed, Resolved, or Cancelled)."""
+        return self.state in _CLOSED_TICKET_STATES
+
+    def resolution_datetime(self) -> datetime | None:
+        """Best-effort time of final resolution.
+
+        For closed/resolved/cancelled tickets this is the timestamp of the final note
+        (work note or comment) as a proxy, falling back to ``opened_at`` when the ticket
+        has no notes. Returns ``None`` for tickets that are not in a terminal state, since
+        their resolution time cannot be determined from the ServiceNow API.
+
+        Returns
+        -------
+        datetime | None
+        """
+        if not self.is_closed():
+            return None
+        notes = self.get_combined_notes()
+        if notes:
+            return notes[-1].datetime_stamp
+        return self.opened_datetime()
 
     def refresh(self, service_now: ServiceNow) -> None:
         """Refresh mutable fields by re-querying the ServiceNow API.
@@ -208,6 +289,40 @@ _TICKET_TYPES: dict[str, type[Ticket]] = {
 }
 
 
+def ticket_type_key(ticket: Ticket) -> str | None:
+    """Return the ``_TICKET_TYPES`` registry key whose ``MATCH_CRITERIA`` all match ``ticket``.
+
+    Dispatch is by each registered class's ``MATCH_CRITERIA`` (evaluated against the
+    base ``Ticket`` fields), not by the key — see planning/multiple-ticket-types.md.
+    The returned key is used for per-type analytics grouping and for tagging cached
+    tickets so they can be deserialised to the correct dataclass.
+
+    Parameters
+    ----------
+    ticket : Ticket
+        Any ticket (base or subclass) carrying the fields named in ``MATCH_CRITERIA``.
+
+    Returns
+    -------
+    str | None
+        The matching registry key, or ``None`` if no registered type matches.
+    """
+    return next(
+        (
+            key
+            for key, cls in _TICKET_TYPES.items()
+            ## Skip classes with empty criteria: an empty mapping would match everything.
+            if cls.MATCH_CRITERIA
+            and all(getattr(ticket, field, None) == value for field, value in cls.MATCH_CRITERIA.items())
+        ),
+        None,
+    )
+
+
+## Terminal ticket states. Such tickets are immutable and have a knowable resolution time.
+_CLOSED_TICKET_STATES = frozenset({"Closed", "Resolved", "Cancelled"})
+
+
 class TicketState(Enum):
     """Controls which tickets get_tickets() returns based on their state.
 
@@ -273,6 +388,27 @@ _RCPOND_CURRENT_VERSION_RE = re.compile(
 ## Extracts the tool name from any new-format RCPond note prefix.
 _RCPOND_TOOL_NAME_RE = re.compile(r"^\[code\]<b>RCPond v\S+ \[([^\]]+)\] generated response:</b>\[/code\]")
 
+## Display name of the automated ServiceNow account. Its notes (e.g. the comment
+## posted when a ticket is automatically closed) are treated as automated activity,
+## not human/manual interaction.
+_SYSTEM_NOTE_AUTHOR = "System"
+
+## Timestamp format used by ServiceNow display values and the ``opened_at`` field.
+_TIMESTAMP_FORMAT = "%d/%m/%Y %H:%M:%S"
+
+
+def _is_rcpond_note(note: NoteEntry) -> bool:
+    """Return ``True`` if ``note`` was posted by RCPond (any version), per its prefix."""
+    return bool(_RCPOND_NOTE_RE.match(note.content))
+
+
+def _is_manual_note(note: NoteEntry) -> bool:
+    """Return ``True`` if ``note`` represents a human (manual) interaction.
+
+    Excludes RCPond-authored notes and automated notes from the ``System`` user.
+    """
+    return not _is_rcpond_note(note) and note.user != _SYSTEM_NOTE_AUTHOR
+
 
 ## Extract, from the record returned from ServiceNow, the fields
 ## defined in Ticket. A value in the record is either a string,
@@ -320,7 +456,7 @@ def _parse_comment_display_values(input: str) -> list[NoteEntry]:
         m = _HEADER.match(line)
         if m:
             _flush()
-            current_key = (datetime.strptime(m.group(1), "%d/%m/%Y %H:%M:%S"), m.group(2), m.group(3))
+            current_key = (datetime.strptime(m.group(1), _TIMESTAMP_FORMAT), m.group(2), m.group(3))
             content_lines = []
         elif current_key is not None:
             content_lines.append(line)
@@ -466,8 +602,6 @@ class ServiceNow:
         -------
         list[Ticket]
         """
-        _CLOSED_STATES = frozenset({"Closed", "Resolved", "Cancelled"})
-
         ticket_fields = {field.name for field in dataclasses.fields(Ticket)}
         resp = self.session.get(
             f"{self._base_api_url}/{self._TABLE}", params={"sysparm_query": self._query, "sysparm_display_value": "all"}
@@ -480,7 +614,7 @@ class ServiceNow:
             return tickets
 
         ## user_focus and all_open both exclude closed/resolved/cancelled
-        tickets = [t for t in tickets if t.state not in _CLOSED_STATES]
+        tickets = [t for t in tickets if t.state not in _CLOSED_TICKET_STATES]
 
         if state is TicketState.all_open:
             ## Bot: exclude tickets RCPond already handled; OAuth: everything non-closed
@@ -552,20 +686,14 @@ class ServiceNow:
         ValueError
             If no entry in ``_TICKET_TYPES`` has ``MATCH_CRITERIA`` that match ``tkt``.
         """
-        ticket_class = next(
-            (
-                cls
-                for cls in _TICKET_TYPES.values()
-                if all(getattr(tkt, field, None) == value for field, value in cls.MATCH_CRITERIA.items())
-            ),
-            None,
-        )
-        if ticket_class is None:
+        type_key = ticket_type_key(tkt)
+        if type_key is None:
             all_criteria_fields = {f for cls in _TICKET_TYPES.values() for f in cls.MATCH_CRITERIA}
             ticket_values = {f: getattr(tkt, f, "<missing>") for f in sorted(all_criteria_fields)}
             known = ", ".join(f"{k!r}" for k in _TICKET_TYPES)
             msg = f"No registered ticket type matches this ticket {ticket_values}. Known types: {known}"
             raise ValueError(msg)
+        ticket_class = _TICKET_TYPES[type_key]
 
         base_fields = {field.name for field in dataclasses.fields(Ticket)}
         extra_fields = {field.name for field in dataclasses.fields(ticket_class)} - base_fields
