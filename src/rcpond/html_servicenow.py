@@ -26,7 +26,7 @@ from datetime import datetime
 from pathlib import Path
 
 from rcpond.parse_html import extract_key_facts, parse_ticket_html
-from rcpond.servicenow import ComputeAllocationRequestTicket, NoteEntry, ServiceNow, Ticket
+from rcpond.servicenow import ComputeAllocationRequestTicket, NoteEntry, ServiceNow, Ticket, TicketState
 
 ## ---- Interface to this module ----
 
@@ -86,14 +86,14 @@ class HtmlServiceNow(ServiceNow):
 
     ## ---- Read methods ----
 
-    def get_tickets(self, long_list: bool = False) -> list[Ticket]:
+    def get_tickets(self, state: TicketState = TicketState.user_focus) -> list[Ticket]:
         """Return a ``ComputeAllocationRequestTicket`` for each HTML file in ``html_dir``.
 
         Parameters
         ----------
-        long_list : bool
-            If ``False`` (default), only unassigned tickets are returned.
-            If ``True``, all tickets are returned regardless of assignment state.
+        state : TicketState
+            ``user_focus``: only unassigned tickets are returned.
+            ``all_open`` or ``all_including_closed``: all tickets regardless of assignment.
 
         Returns
         -------
@@ -104,7 +104,7 @@ class HtmlServiceNow(ServiceNow):
         for f in sorted(self._html_dir.glob("*.html")):
             facts = extract_key_facts(f)
             is_assigned = bool(facts["assigned_to"]["display_value"])
-            if is_assigned and not long_list:
+            if is_assigned and state is TicketState.user_focus:
                 continue
             tickets.append(parse_ticket_html(f))
         return tickets
@@ -177,7 +177,7 @@ class HtmlServiceNow(ServiceNow):
 
     ## ---- Write no-ops ----
 
-    def post_note(self, _tkt: Ticket, _note: str) -> None:
+    def post_note(self, _tkt: Ticket, note: str = "", tool_name: str = "") -> None:
         """No-op — HTML source is read-only."""
 
     def _attempt_assign_to(self, _ticket: Ticket, _assignee: str) -> None:

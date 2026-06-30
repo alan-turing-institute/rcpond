@@ -225,6 +225,41 @@ class TestGenerateEndToEnd:
         assert messages[1] == {"role": "user", "content": "Say hello in one sentence."}
 
     @patch("rcpond.llm.requests.post")
+    def test_generate_with_extra_messages_appends_them(self, mock_post, llm):
+        mock_response = MagicMock()
+        mock_response.json.return_value = CHAT_RESPONSE
+        mock_post.return_value = mock_response
+
+        extra = [
+            {"role": "assistant", "content": "I'll look that up.", "tool_calls": []},
+            {"role": "tool", "content": "Result here", "tool_call_id": "call_123"},
+        ]
+        llm.generate(
+            system_prompt="You are helpful.",
+            user_prompt="Check ticket.",
+            model="gpt-oss-120b",
+            extra_messages=extra,
+        )
+
+        messages = mock_post.call_args.kwargs["json"]["messages"]
+        assert len(messages) == 4
+        assert messages[0] == {"role": "system", "content": "You are helpful."}
+        assert messages[1] == {"role": "user", "content": "Check ticket."}
+        assert messages[2] == extra[0]
+        assert messages[3] == extra[1]
+
+    @patch("rcpond.llm.requests.post")
+    def test_generate_without_extra_messages_sends_two_messages(self, mock_post, llm):
+        mock_response = MagicMock()
+        mock_response.json.return_value = CHAT_RESPONSE
+        mock_post.return_value = mock_response
+
+        llm.generate(system_prompt="You are helpful.", user_prompt="Hi.", model="gpt-oss-120b")
+
+        messages = mock_post.call_args.kwargs["json"]["messages"]
+        assert len(messages) == 2
+
+    @patch("rcpond.llm.requests.post")
     def test_generate_end_to_end_tool_call(self, mock_post, llm):
         mock_response = MagicMock()
         mock_response.json.return_value = TOOL_CALL_RESPONSE

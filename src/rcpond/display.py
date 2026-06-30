@@ -14,7 +14,7 @@ from rich.table import Table
 from rich.text import Text
 
 from rcpond.llm import LLMResponse
-from rcpond.servicenow import ComputeAllocationRequestTicket, NoteEntry, Ticket
+from rcpond.servicenow import ComputeAllocationRequestTicket, NoteEntry, RelatedTicketMatch, Ticket
 
 _console = Console()
 
@@ -223,6 +223,57 @@ def display_multi_tickets(tickets: list[Ticket], *, console: Console | None = No
 
         title = f"[bold]{description} / {category}[/bold]"
         con.print(Panel(table, title=title, title_align="left", border_style="bright_blue"))
+
+
+def display_related_tickets(
+    source: Ticket,
+    matches: list[RelatedTicketMatch],
+    *,
+    console: Console | None = None,
+) -> None:
+    """Display related ticket matches for a source ticket.
+
+    Parameters
+    ----------
+    source : Ticket
+        The ticket that was searched from.
+    matches : list[RelatedTicketMatch]
+        Matches returned by ``ServiceNow.find_related_tickets()``.
+    console : Console | None
+        Rich Console to write to. Defaults to the module-level console (stdout).
+    """
+    con = console or _console
+
+    if not matches:
+        con.print(
+            Panel(
+                "[dim]No related tickets found.[/dim]",
+                title=f"[bold]Related tickets for {source.number}[/bold]",
+                title_align="left",
+                border_style="dim",
+            )
+        )
+        return
+
+    table = Table(show_header=True, header_style="bold cyan", box=None, padding=(0, 2))
+    table.add_column("Number", no_wrap=True)
+    table.add_column("State", no_wrap=True)
+    table.add_column("Opened", no_wrap=True)
+    table.add_column("Matched on")
+
+    for match in matches:
+        t = match.ticket
+        heuristics = ", ".join(match.matched_heuristics)
+        table.add_row(t.number, t.state, t.opened_at, heuristics)
+
+    con.print(
+        Panel(
+            table,
+            title=f"[bold]Related tickets for {source.number}[/bold]  [dim]{len(matches)} found[/dim]",
+            title_align="left",
+            border_style="bright_blue",
+        )
+    )
 
 
 def display_response(response: LLMResponse, *, console: Console | None = None) -> None:

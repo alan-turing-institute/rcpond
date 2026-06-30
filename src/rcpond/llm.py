@@ -137,10 +137,14 @@ class LLM:
         model: str,
         tools: list[Tool] | None = None,
         ticket_number: str | None = None,
+        extra_messages: list[dict] | None = None,
     ) -> LLMResponse:
         """Generate an LLM response given a system prompt and a user prompt.
-        Formats the system and user prompt into a single prompt and calls the `_generate` method to get the response from the LLM.
-        LLM response is parsed into `LLMResponse` dataclass.
+
+        Formats the system and user prompts as the opening two messages, then
+        optionally appends ``extra_messages`` for multi-turn conversations (e.g.
+        an ``assistant`` turn containing a prior tool call followed by a ``tool``
+        turn containing the result).
 
         Parameters
         ----------
@@ -154,16 +158,22 @@ class LLM:
             Optional list of tools to make available to the model.
         ticket_number : str | None
             The ticket number being processed, stored on the response for traceability.
+        extra_messages : list[dict] | None
+            Optional additional messages in OpenAI format appended after the
+            system and user messages. Used to inject prior tool results into a
+            multi-turn conversation.
 
         Returns
         -------
         LLMResponse
             The generated response from the LLM.
         """
-        messages = [
+        messages: list[dict] = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
+        if extra_messages:
+            messages.extend(extra_messages)
         tool_dicts = [t.to_openai_dict() for t in tools] if tools else None
         response = self._generate(messages, model=model, tools=tool_dicts)
         llm_response = self._parse_response(response)

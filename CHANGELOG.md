@@ -7,14 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-24
+
+### Summary of changes
+
+This release enables RCPond to consider a project's full history when reviewing a ticket, and gives reviewers more control over when it acts:
+
+- **Related ticket history.** When a ticket looks like part of a longer-running project, RCPond now finds the related tickets — matching on finance code, project title, the people involved, or Azure subscription — and takes their full history into account (including closed and resolved tickets) before drafting a response.
+- **New `find-related` command.** Lists the tickets RCPond considers related to a given ticket and shows why each one matched, so the matching can be checked and tuned.
+- **Control over re-commenting.** A new `--reply-mode` option (`cautious`, `default`, `always`) controls when RCPond skips a ticket it has already handled, so it doesn't repeat itself or talk over a colleague.
+
 ### Added
 
 - `--reply-mode {cautious|default|always}` option for the `process-next`, `process-ticket`, and `process-all` subcommands, controlling when rcpond skips a ticket based on prior activity.
 - Backward compatibility alias `rcpond.servicenow.FullTicket` for the renamed `ComputeAllocationRequestTicket` class.
+- Per-ticket-type configuration: create `$XDG_CONFIG_HOME/rcpond/ticket_types/{key}.config` with `RCPOND_RULES_PATH`, `RCPOND_EMAIL_TEMPLATES_DIR`, and `RCPOND_SERVICENOW_QUERY` to configure a ticket type. The key must match an entry in the `_TICKET_TYPES` registry.
+- `--ticket-type <key>` mandatory flag on `process-next` and `process-all` to specify which ticket type to process in batch commands.
+- `RCPOND_SERVICENOW_QUERY` config value replaces the previously hardcoded ServiceNow query filter; falls back to the built-in default when not set.
+- `find-related` subcommand: given a ticket number, lists all related tickets and which heuristic matched (finance code, PI email, PMU email, shared user email, similar project title, Azure subscription ID). Searches across all ticket states including closed and resolved.
+- `TicketState` enum (`user_focus` / `all_open` / `all_including_closed`) replaces the `long_list: bool` parameter on `ServiceNow.get_tickets()`.
+- `get_ticket()` now searches across all ticket states (including closed/resolved/cancelled), so that ticket numbers extracted from text fields are always resolvable.
+- `combine_ticket_history` tool: a non-terminal tool the LLM can call to find related historical tickets, combine their key fields and full note history into a deterministic, audit-ready block, post it to the current ticket as an audit work note, and feed it back as context for the LLM's next turn.
 
 ### Changed
 
 - Renamed ticket dataclass `FullTicket` to `ComputeAllocationRequestTicket` across code and docs.
+- `--dry-run` now drives the full agentic loop: non-terminal tools (e.g. `combine_ticket_history`) execute read-only and feed their result back to the LLM, instead of the loop stopping at the first tool call. Each tool's `execute()` takes a `dry_run` flag and suppresses its own ServiceNow writes, so `_process_ticket` no longer special-cases dry runs.
 
 ### Deprecated
 
@@ -82,7 +100,8 @@ No functional changes — version bump only.
 - Read the Docs documentation site with MkDocs, including a configuration guide, API reference,
   and quick-start.
 
-[Unreleased]: https://github.com/alan-turing-institute/rcpond/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/alan-turing-institute/rcpond/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/alan-turing-institute/rcpond/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/alan-turing-institute/rcpond/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/alan-turing-institute/rcpond/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/alan-turing-institute/rcpond/compare/v0.1.1...v0.1.2

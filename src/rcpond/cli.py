@@ -39,6 +39,7 @@ from rich import print
 from rcpond import command
 from rcpond.command import ReplyMode
 from rcpond.config import Config
+from rcpond.servicenow import TicketState
 
 cli = typer.Typer(name="rcpond", no_args_is_help=True)
 
@@ -134,9 +135,9 @@ def whoami(ctx: typer.Context) -> None:
 
 
 @cli.command()
-def display_all(ctx: typer.Context, long_list: bool = False):
-    """Display all unassigned tickets from ServiceNow."""
-    command.display_all_tickets(long_list=long_list, config=_config(ctx))
+def display_all(ctx: typer.Context, ticket_state: TicketState = TicketState.user_focus):
+    """Display tickets from ServiceNow filtered by --ticket-state."""
+    command.display_all_tickets(state=ticket_state, config=_config(ctx))
 
 
 @cli.command()
@@ -161,14 +162,19 @@ _REPLY_MODE_HELP = (
 )
 
 
+_TICKET_TYPE_HELP = "Ticket type key to process (e.g. 'compute_allocation_request'). Must match a key in the ticket type registry and have a corresponding config file."
+
+
 @cli.command()
 def process_next(
     ctx: typer.Context,
+    ticket_type: Annotated[str, typer.Option("--ticket-type", help=_TICKET_TYPE_HELP)],
     dry_run: bool = False,
     reply_mode: Annotated[ReplyMode, typer.Option(help=_REPLY_MODE_HELP)] = ReplyMode.default,
 ):
     """Review an arbitrarily selected unassigned ticket via the LLM."""
-    command.process_next_ticket(dry_run=dry_run, reply_mode=reply_mode, config=_config(ctx))
+    cfg = Config(env_path=ctx.obj["env_path"], cli_args={**ctx.obj["cli_args"], "ticket_type": ticket_type})
+    command.process_next_ticket(dry_run=dry_run, reply_mode=reply_mode, config=cfg)
 
 
 @cli.command()
@@ -219,8 +225,34 @@ except ImportError:
 
 
 @cli.command()
+def find_related(ctx: typer.Context, ticket_number: str):
+    """List tickets related to the given ticket number.
+
+    Searches all ticket states (including closed and resolved) and reports which
+    heuristic matched each related ticket (finance code, PI email, project title, etc.).
+    """
+    command.find_related_tickets(ticket_number=ticket_number, config=_config(ctx))
+
+
+@cli.command()
+def check_templates(
+    ctx: typer.Context,
+) -> None:
+    """Render all Jinja2 templates in a directory with dummy values (for CI).
+
+    This subcommand is to help those editing templates. It is not expected that most users will need to use this directly.
+
+    Exits with code 1 if any template fails to render. No ServiceNow or LLM
+    configuration is required.
+    """
+    if not command.check_templates(_config(ctx)):
+        raise typer.Exit(1)
+
+
+@cli.command()
 def process_all(
     ctx: typer.Context,
+    ticket_type: Annotated[str, typer.Option("--ticket-type", help=_TICKET_TYPE_HELP)],
     dry_run: bool = False,
     reply_mode: ReplyMode = ReplyMode.default,
     ## Single flag name (no "--flag/--no-flag" form) suppresses Typer's auto-generated
@@ -230,8 +262,9 @@ def process_all(
     ] = False,
 ):
     """Review all unassigned tickets via the LLM."""
+    cfg = Config(env_path=ctx.obj["env_path"], cli_args={**ctx.obj["cli_args"], "ticket_type": ticket_type})
     if yes_i_am_sure:
-        command.batch_process_tickets(dry_run=dry_run, reply_mode=reply_mode, config=_config(ctx))
+        command.batch_process_tickets(dry_run=dry_run, reply_mode=reply_mode, config=cfg)
     else:
         msg = "The [bold cyan]--yes-i-am-sure[/bold cyan] option MUST be specified when using the [bold]process-all[/bold] subcommand."
         print(msg)

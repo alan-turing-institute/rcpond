@@ -8,7 +8,14 @@ import pytest
 import requests as _requests  ## used by test_token_introspection
 
 from rcpond import config, servicenow
-from rcpond.servicenow import ComputeAllocationRequestTicket, NoteEntry, ServiceNow, Ticket
+from rcpond.servicenow import (
+    ComputeAllocationRequestTicket,
+    NoteEntry,
+    RelatedTicketMatch,
+    ServiceNow,
+    Ticket,
+    TicketState,
+)
 
 
 def test_fullticket_alias_warns_and_resolves_to_new_class():
@@ -63,6 +70,7 @@ def sn_instance():
     sn._base_api_url = "https://example.com/api/now/table"
     sn._web_base_url = "https://example.com"
     sn._id_token = None
+    sn._query = "short_description=Request access to HPC and cloud computing facilities"
     sn.session = MagicMock()
     return sn
 
@@ -281,8 +289,11 @@ def _note(ts: str, user: str, content: str, note_type: str = "Work notes") -> st
     return f"{ts} - {user} ({note_type})\n{content}"
 
 
-_RCPOND_OLD = _note("01/01/2026 09:00:00", "RCPond", servicenow._note_prefix("0.0.0") + "Old response")
-_RCPOND_CURRENT = _note("01/01/2026 10:00:00", "RCPond", servicenow._note_prefix() + "Response")
+## Simulate a note posted by an old version (pre-tool-name format, old version string).
+_RCPOND_OLD = _note(
+    "01/01/2026 09:00:00", "RCPond", "[code]<b>RCPond v0.0.0 generated response:</b>[/code]\n----\nOld response"
+)
+_RCPOND_CURRENT = _note("01/01/2026 10:00:00", "RCPond", servicenow._note_prefix("post_freeform_note") + "Response")
 _HUMAN_NOTE = _note("01/01/2026 11:00:00", "Alice", "A human work note")
 
 
@@ -332,6 +343,58 @@ def test_rcpond_note_detection_current_version_after_old():
     ticket = _make_ticket(work_notes=notes)
     assert ticket.is_rcpond_processed() is True
     assert ticket.is_rcpond_most_recent_process() is True
+
+
+## ── _note_prefix / _RCPOND_NOTE_RE ──────────────────────────────────────────
+
+
+def test_note_prefix_includes_tool_name():
+    prefix = servicenow._note_prefix("post_freeform_note")
+    assert "[post_freeform_note]" in prefix
+    assert prefix.startswith("[code]<b>RCPond v")
+
+
+def test_note_prefix_version_override():
+    prefix = servicenow._note_prefix("post_freeform_note", version="1.2.3")
+    assert "v1.2.3" in prefix
+    assert "[post_freeform_note]" in prefix
+
+
+def test_rcpond_note_re_matches_old_format_without_tool_name():
+    """Legacy notes without [tool_name] still match _RCPOND_NOTE_RE."""
+    old_prefix = "[code]<b>RCPond v0.0.0 generated response:</b>[/code]\n----\n"
+    assert servicenow._RCPOND_NOTE_RE.match(old_prefix)
+
+
+def test_rcpond_note_re_matches_new_format_with_tool_name():
+    new_prefix = servicenow._note_prefix("post_freeform_note", version="0.0.0")
+    assert servicenow._RCPOND_NOTE_RE.match(new_prefix)
+
+
+## ── rcpond_most_recent_tool_name ─────────────────────────────────────────────
+
+
+def test_rcpond_most_recent_tool_name_returns_none_for_no_notes():
+    assert _make_ticket().rcpond_most_recent_tool_name() is None
+
+
+def test_rcpond_most_recent_tool_name_returns_none_for_human_note():
+    assert _make_ticket(work_notes=_HUMAN_NOTE).rcpond_most_recent_tool_name() is None
+
+
+def test_rcpond_most_recent_tool_name_returns_none_for_legacy_format():
+    """Old-format notes (no [tool_name]) return None."""
+    assert _make_ticket(work_notes=_RCPOND_OLD).rcpond_most_recent_tool_name() is None
+
+
+def test_rcpond_most_recent_tool_name_returns_tool_name():
+    ## _RCPOND_CURRENT uses _note_prefix("post_freeform_note")
+    assert _make_ticket(work_notes=_RCPOND_CURRENT).rcpond_most_recent_tool_name() == "post_freeform_note"
+
+
+def test_rcpond_most_recent_tool_name_combine_audit():
+    combine_note = _note("01/01/2026 10:00:00", "RCPond", servicenow._note_prefix("combine_ticket_history") + "Audit")
+    assert _make_ticket(work_notes=combine_note).rcpond_most_recent_tool_name() == "combine_ticket_history"
 
 
 ## ── get_tickets filtering ───────────────────────────────────────────────────
@@ -413,15 +476,28 @@ def _setup_session(sn_instance, raw_tickets: list[dict]) -> None:
 #     assert tickets == []
 
 
-## OAuth longlist — all non-closed tickets regardless of assignment or rcpond status.
+## OAuth/bot behaviour across TicketState values.
+
+_COMMON_RAW_TICKETS = [
+    _raw_ticket(number="unassigned_new", state="New", assigned_to=""),
+    _raw_ticket(number="current_user", assigned_to="Current OAuth User"),
+    _raw_ticket(number="other_user", assigned_to="A.N.Other User"),
+    _raw_ticket(number="rcpond_latest_comment", work_notes=_RCPOND_CURRENT),
+    _raw_ticket(number="rcpond_early_comment", work_notes=_RCPOND_OLD),
+    _raw_ticket(number="human_note", work_notes=_HUMAN_NOTE),
+    _raw_ticket(number="unassigned_in_progress", state="In Progress", assigned_to=""),
+    _raw_ticket(number="closed", state="Closed"),
+    _raw_ticket(number="resolved", state="Resolved"),
+    _raw_ticket(number="cancelled", state="Cancelled"),
+]
 
 
 @pytest.mark.parametrize(
-    ("oauth", "long_list", "expected"),
+    ("oauth", "state", "expected"),
     [
         (
             True,
-            True,
+            TicketState.all_open,
             {
                 "unassigned_new",
                 "current_user",
@@ -434,7 +510,7 @@ def _setup_session(sn_instance, raw_tickets: list[dict]) -> None:
         ),
         (
             True,
-            False,
+            TicketState.user_focus,
             {
                 "unassigned_new",
                 "current_user",
@@ -444,35 +520,46 @@ def _setup_session(sn_instance, raw_tickets: list[dict]) -> None:
                 "unassigned_in_progress",
             },
         ),
-        (False, True, {"unassigned_new", "current_user", "other_user", "human_note", "unassigned_in_progress"}),
-        (False, False, {"unassigned_new", "human_note", "unassigned_in_progress"}),
+        (
+            False,
+            TicketState.all_open,
+            {"unassigned_new", "current_user", "other_user", "human_note", "unassigned_in_progress"},
+        ),
+        (False, TicketState.user_focus, {"unassigned_new", "human_note", "unassigned_in_progress"}),
     ],
 )
-def test_get_tickets_oauth_longlist_combinations(sn_instance, oauth, long_list, expected):
-    _setup_session(
-        sn_instance,
-        [
-            _raw_ticket(number="unassigned_new", state="New", assigned_to=""),
-            _raw_ticket(number="current_user", assigned_to="Current OAuth User"),
-            _raw_ticket(number="other_user", assigned_to="A.N.Other User"),
-            _raw_ticket(number="rcpond_latest_comment", work_notes=_RCPOND_CURRENT),
-            _raw_ticket(number="rcpond_early_comment", work_notes=_RCPOND_OLD),
-            _raw_ticket(number="human_note", work_notes=_HUMAN_NOTE),
-            _raw_ticket(number="unassigned_in_progress", state="In Progress", assigned_to=""),
-            _raw_ticket(number="closed", state="Closed"),
-            _raw_ticket(number="resolved", state="Resolved"),
-            _raw_ticket(number="cancelled", state="Cancelled"),
-        ],
-    )
+def test_get_tickets_state_combinations(sn_instance, oauth, state, expected):
+    _setup_session(sn_instance, _COMMON_RAW_TICKETS)
     sn_instance._is_oauth = oauth
 
     if oauth:
         with patch.object(sn_instance, "_current_user_display_name", return_value="Current OAuth User"):
-            tickets = sn_instance.get_tickets(long_list=long_list)
+            tickets = sn_instance.get_tickets(state=state)
     else:
-        tickets = sn_instance.get_tickets(long_list=long_list)
+        tickets = sn_instance.get_tickets(state=state)
 
     assert {t.number for t in tickets} == expected
+
+
+def test_get_tickets_all_including_closed_returns_everything(sn_instance):
+    """TicketState.all_including_closed bypasses all filters: returns every ticket regardless of state or assignment."""
+    _setup_session(sn_instance, _COMMON_RAW_TICKETS)
+    sn_instance._is_oauth = False
+
+    tickets = sn_instance.get_tickets(state=TicketState.all_including_closed)
+
+    assert {t.number for t in tickets} == {
+        "unassigned_new",
+        "current_user",
+        "other_user",
+        "rcpond_latest_comment",
+        "rcpond_early_comment",
+        "human_note",
+        "unassigned_in_progress",
+        "closed",
+        "resolved",
+        "cancelled",
+    }
 
 
 ## Bot (static-token) shortlist — unassigned AND not rcpond_processed.
@@ -708,8 +795,8 @@ def test_post_note(dev_instance_sn):
 
     before_work_note_count = len(dev_instance_sn.get_work_notes(my_tkt))
 
-    dev_instance_sn.post_note(my_tkt, "Test Work note A")
-    dev_instance_sn.post_note(my_tkt, "Test Work note B")
+    dev_instance_sn.post_note(my_tkt, "Test Work note A", tool_name="post_freeform_note")
+    dev_instance_sn.post_note(my_tkt, "Test Work note B", tool_name="post_freeform_note")
 
     after_work_note_count = len(dev_instance_sn.get_work_notes(my_tkt))
 
@@ -755,3 +842,178 @@ def test_change_assignee(dev_instance_sn):
     ## Check that the number of assigned and unassigned tickets has reverted as expected
     after_reset = dev_instance_sn.get_tickets()
     assert len(after_reset) == len(unassigned_tickets)
+
+
+## ── find_related_tickets ─────────────────────────────────────────────────────
+
+_EXTRA_FIELD_DEFAULTS = {f: "" for f in _CART_EXTRA_FIELDS}
+
+
+def _make_full_ticket(**overrides) -> ComputeAllocationRequestTicket:
+    """Build a ComputeAllocationRequestTicket with all fields defaulting to empty string."""
+    defaults: dict = {
+        "sys_id": "sys_default",
+        "number": "RES9990000",
+        "opened_at": "01/01/2026 09:00:00",
+        "requested_for": "Test User",
+        "u_category": "HPC",
+        "u_sub_category": "New",
+        "short_description": "Request access to HPC and cloud computing facilities",
+        "state": "New",
+        "assigned_to": "",
+        "work_notes": "",
+        "comments": "",
+        **_EXTRA_FIELD_DEFAULTS,
+    }
+    defaults.update(overrides)
+    return ComputeAllocationRequestTicket(**defaults)
+
+
+def _base_ticket_for(full: ComputeAllocationRequestTicket) -> Ticket:
+    """Strip a full ticket down to the base Ticket fields."""
+    base_fields = {f.name for f in dataclasses.fields(Ticket)}
+    return Ticket(**{f: getattr(full, f) for f in base_fields})
+
+
+def _setup_find_related(sn_instance, candidates: list[ComputeAllocationRequestTicket]) -> None:
+    """Mock get_tickets and get_full_ticket so find_related_tickets iterates over candidates."""
+    sn_instance.get_tickets = MagicMock(return_value=[_base_ticket_for(c) for c in candidates])
+    sn_instance.get_full_ticket = MagicMock(side_effect=candidates)
+
+
+@pytest.mark.parametrize(
+    ("field", "source_value", "match_value", "no_match_value", "heuristic_substr"),
+    [
+        ("which_finance_code", "TUR-2023-001", "TUR-2023-001", "TUR-9999-000", "finance_code:TUR-2023-001"),
+        ("pi_supervisor_email", "pi@example.com", "pi@example.com", "other@example.com", "pi_email:pi@example.com"),
+        (
+            "project_title",
+            "Deep Learning for Climate Modelling",
+            "Deep Learning for Climate Modeling",
+            "Completely Different Research",
+            "project_title_similarity",
+        ),
+        (
+            "azure_subscription_id_or_hpc_group_project_id",
+            "12345678-1234-1234-1234-123456789abc",
+            "12345678-1234-1234-1234-123456789abc",
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            "12345678-1234-1234-1234-123456789abc",
+        ),
+    ],
+    ids=["finance_code", "pi_email", "project_title", "azure_subscription_id"],
+)
+def test_find_related_by_heuristic(sn_instance, field, source_value, match_value, no_match_value, heuristic_substr):
+    source = _make_full_ticket(number="RES0001000", **{field: source_value})
+    match = _make_full_ticket(number="RES0002000", **{field: match_value})
+    no_match = _make_full_ticket(number="RES0003000", **{field: no_match_value})
+    _setup_find_related(sn_instance, [match, no_match])
+
+    results = sn_instance.find_related_tickets(source)
+
+    assert len(results) == 1
+    assert results[0].ticket.number == "RES0002000"
+    assert any(heuristic_substr in h for h in results[0].matched_heuristics)
+
+
+def test_find_related_shared_users_reports_all_source_users(sn_instance):
+    """With the default 'all shared users' heuristic, any user overlap reports every source user.
+
+    The source lists Alice and Bob; the candidate shares only Alice. The match is still
+    related, and the reported heuristics include *both* source users (not just the overlap).
+    A candidate with no shared users is not related.
+    """
+    source = _make_full_ticket(
+        number="RES0001000",
+        users_who_require_access_names_and_emails="Alice Smith alice@example.com, Bob Jones bob@example.com",
+    )
+    match = _make_full_ticket(
+        number="RES0002000",
+        users_who_require_access_names_and_emails="Alice Smith alice@example.com, Bob Jones bob@example.com",
+    )
+    no_match = _make_full_ticket(
+        number="RES0003000",
+        users_who_require_access_names_and_emails="Alice Smith alice@example.com, Carol carol@example.com",
+    )
+    _setup_find_related(sn_instance, [match, no_match])
+
+    results = sn_instance.find_related_tickets(source)
+
+    assert [r.ticket.number for r in results] == ["RES0002000"]
+    assert set(results[0].matched_heuristics) == {
+        "shared_user:alice@example.com",
+        "shared_user:bob@example.com",
+    }
+
+
+def test_find_related_empty_fields_do_not_match(sn_instance):
+    """Empty finance code, PI email, etc. must not be treated as a match."""
+    source = _make_full_ticket(
+        number="RES0001000",
+        which_finance_code="",
+        pi_supervisor_email="",
+        pmu_contact_email="",
+        project_title="",
+        azure_subscription_id_or_hpc_group_project_id="",
+    )
+    candidate = _make_full_ticket(
+        number="RES0002000",
+        which_finance_code="",
+        pi_supervisor_email="",
+        pmu_contact_email="",
+        project_title="",
+        azure_subscription_id_or_hpc_group_project_id="",
+    )
+    _setup_find_related(sn_instance, [candidate])
+
+    results = sn_instance.find_related_tickets(source)
+
+    assert results == []
+
+
+def test_find_related_excludes_source_ticket(sn_instance):
+    """The source ticket itself must never appear in the related ticket results."""
+    source = _make_full_ticket(number="RES0001000", which_finance_code="TUR-2023-001")
+    source_base = _base_ticket_for(source)
+    sn_instance.get_tickets = MagicMock(return_value=[source_base])
+    sn_instance.get_full_ticket = MagicMock()
+
+    results = sn_instance.find_related_tickets(source)
+
+    assert results == []
+    sn_instance.get_full_ticket.assert_not_called()
+
+
+def test_find_related_multiple_heuristics_in_one_match(sn_instance):
+    """A ticket matching via several heuristics lists each one."""
+    source = _make_full_ticket(
+        number="RES0001000",
+        which_finance_code="TUR-2023-001",
+        pi_supervisor_email="pi@example.com",
+    )
+    match = _make_full_ticket(
+        number="RES0002000",
+        which_finance_code="TUR-2023-001",
+        pi_supervisor_email="pi@example.com",
+    )
+    _setup_find_related(sn_instance, [match])
+
+    results = sn_instance.find_related_tickets(source)
+
+    assert len(results) == 1
+    heuristics = results[0].matched_heuristics
+    assert any("finance_code" in h for h in heuristics)
+    assert any("pi_email" in h for h in heuristics)
+
+
+def test_find_related_returns_relatedticketmatch_instances(sn_instance):
+    source = _make_full_ticket(number="RES0001000", which_finance_code="TUR-2023-001")
+    match = _make_full_ticket(number="RES0002000", which_finance_code="TUR-2023-001")
+    _setup_find_related(sn_instance, [match])
+
+    results = sn_instance.find_related_tickets(source)
+
+    assert len(results) == 1
+    assert isinstance(results[0], RelatedTicketMatch)
+    assert isinstance(results[0].ticket, ComputeAllocationRequestTicket)
+    assert isinstance(results[0].matched_heuristics, tuple)

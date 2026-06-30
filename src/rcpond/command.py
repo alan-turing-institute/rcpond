@@ -8,18 +8,27 @@ The four main entry points are:
 - `batch_process_tickets`: Review all unassigned tickets via the LLM.
 - `batch_evaluate_tickets`: Evaluate LLM performance against pre-downloaded HTML tickets.
   Requires the ``html`` optional dependency group (``pip install rcpond[html]``).
+- `check_templates`: Render all Jinja2 templates in a directory with dummy variable values (for CI).
 """
 
 import json
 from enum import Enum
 from pathlib import Path
 
+from rich import print
+
 from rcpond.config import Config
-from rcpond.display import display_full_ticket, display_multi_tickets, display_response, display_short_ticket
+from rcpond.display import (
+    display_full_ticket,
+    display_multi_tickets,
+    display_related_tickets,
+    display_response,
+    display_short_ticket,
+)
 from rcpond.llm import LLM, LLMResponse
 from rcpond.prompt import construct_prompt
-from rcpond.servicenow import ComputeAllocationRequestTicket, ServiceNow, Ticket
-from rcpond.tools import get_available_tools
+from rcpond.servicenow import ComputeAllocationRequestTicket, RelatedTicketMatch, ServiceNow, Ticket, TicketState
+from rcpond.tools import CombineTicketHistoryTool, get_available_tools, verify_render_all_templates
 
 
 class ReplyMode(str, Enum):
@@ -35,13 +44,67 @@ class ReplyMode(str, Enum):
     always = "always"
 
 
+## Maximum number of LLM turns before the loop is forcibly exited.
+_MAX_ITERATIONS = 3
+
+## Derived from the tool itself so the two cannot drift apart.
+_COMBINE_TICKET_HISTORY = CombineTicketHistoryTool().name
+
+
 def _should_skip(full_ticket: Ticket, reply_mode: ReplyMode) -> bool:
     """Return True if the ticket should be skipped given the reply mode."""
+    ## Never skip if the most recent RCPond note is a CombineTicketHistory audit —
+    ## the expected follow-up response has not yet been posted.
+    if full_ticket.rcpond_most_recent_tool_name() == _COMBINE_TICKET_HISTORY:
+        return False
     if reply_mode == ReplyMode.cautious:
         return full_ticket.is_rcpond_processed()
     if reply_mode == ReplyMode.default:
         return full_ticket.is_rcpond_most_recent_process()
     return False  ## always
+
+
+def _concurrent_skip_response(
+    full_ticket: Ticket, service_now: ServiceNow, reply_mode: ReplyMode, dry_run: bool
+) -> LLMResponse | None:
+    """Re-check for concurrent activity before committing a write.
+
+    Refreshes the ticket and, if another party has posted since processing began,
+    returns a deterministic skip ``LLMResponse``; otherwise returns ``None``. In a
+    dry run nothing is written, so there is no race to guard against and ``None`` is
+    returned without a refresh. Keeping the dry-run guard here means ``_process_ticket``
+    needs no ``dry_run`` branching of its own.
+
+    Parameters
+    ----------
+    full_ticket : Ticket
+        The ticket being processed; refreshed in place when not a dry run.
+    service_now : ServiceNow
+        The ServiceNow client used to refresh the ticket.
+    reply_mode : ReplyMode
+        Controls when concurrent activity counts as a reason to skip.
+    dry_run : bool
+        When True, no write will occur, so the check is skipped.
+
+    Returns
+    -------
+    LLMResponse | None
+        A skip response if processing should be abandoned, else ``None``.
+    """
+    if dry_run:
+        return None
+    full_ticket.refresh(service_now)
+    if not _should_skip(full_ticket, reply_mode):
+        return None
+    prev_msg = full_ticket.get_combined_notes()[-1]
+    msg = f"Skipping: Another user has commented on ticket '{full_ticket.number}' whilst RCPond was working. Their message is\n'{prev_msg}'"
+    return LLMResponse(
+        response_text="",
+        reasoning=msg,
+        planned_tool_call=None,
+        ticket_number=full_ticket.number,
+        llm_model=None,
+    )
 
 
 def _process_ticket(
@@ -84,28 +147,62 @@ def _process_ticket(
 
     tools = get_available_tools(config)
     system_prompt, user_prompt = construct_prompt(full_ticket, config)
-    llm_response: LLMResponse = llm.generate(
-        system_prompt, user_prompt, config.llm_model, tools=tools, ticket_number=ticket.number
-    )
+    extra_messages: list[dict] = []
 
-    ## Check that no-one else has replied whilst the LLM was working
-    full_ticket.refresh(service_now)
-    if _should_skip(full_ticket, reply_mode):
-        prev_msg = full_ticket.get_combined_notes()[-1]
-        msg = f"Skipping: Another user has comments on ticket '{full_ticket.number}' whilst RCPond was working. Their message is\n'{prev_msg}'"
-        ## llm_model=None signals a deterministic (non-LLM) response
-        return LLMResponse(
-            response_text="", reasoning=msg, planned_tool_call=None, ticket_number=full_ticket.number, llm_model=None
+    for _ in range(_MAX_ITERATIONS):
+        llm_response = llm.generate(
+            system_prompt,
+            user_prompt,
+            config.llm_model,
+            tools=tools,
+            ticket_number=ticket.number,
+            extra_messages=extra_messages or None,
         )
 
-    if not dry_run and llm_response.planned_tool_call is not None:
+        if llm_response.planned_tool_call is None:
+            ## Text response — abandon if another party posted while we were working.
+            if (skip := _concurrent_skip_response(full_ticket, service_now, reply_mode, dry_run)) is not None:
+                return skip
+            break
+
         name = llm_response.planned_tool_call["function"]["name"]
         args = llm_response.planned_tool_call["function"]["arguments"]
         matched = [t for t in tools if t.name == name]
         if not matched:
             msg = f"Unknown tool: {name!r}"
             raise ValueError(msg)
-        matched[0].execute(service_now, full_ticket, **args)
+        tool = matched[0]
+
+        ## Each tool honours dry_run internally (suppressing any ServiceNow writes),
+        ## so the loop itself never branches on dry_run.
+        if tool.is_terminal:
+            ## Terminal tools commit a final note; abandon first if another party posted.
+            if (skip := _concurrent_skip_response(full_ticket, service_now, reply_mode, dry_run)) is not None:
+                return skip
+            tool.execute(service_now, full_ticket, dry_run=dry_run, **args)
+            break
+
+        ## Non-terminal: execute, inject the result into the next LLM turn, and continue.
+        result = tool.execute(service_now, full_ticket, dry_run=dry_run, **args)
+        tool_call = llm_response.planned_tool_call
+        extra_messages += [
+            {
+                "role": "assistant",
+                "content": llm_response.response_text or "",
+                "tool_calls": [
+                    {
+                        "id": tool_call["id"],
+                        "type": "function",
+                        "function": {"name": name, "arguments": json.dumps(args)},
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": tool_call["id"],
+                "content": result or "",
+            },
+        ]
 
     return llm_response
 
@@ -114,11 +211,39 @@ def _process_ticket(
 ## Interface to this module
 
 
-def display_all_tickets(long_list: bool, config: Config | None = None):
-    """Display the list of unassigned tickets from ServiceNow to the user."""
+def check_templates(config: Config) -> bool:
+    """Render all non-partial Jinja2 templates in a directory with dummy variable values.
+
+    Delegates to ``PostTemplatedNoteTool.render_all`` so the same rendering code
+    path used in production is exercised. Intended for use as a CI check in the
+    templates repository.
+
+    Parameters
+    ----------
+    templates_dir : Path
+        Directory containing ``*.j2`` template files. Files whose names start
+        with ``_`` are treated as partials and not rendered directly.
+
+    Returns
+    -------
+    bool
+        True if every top-level template renders without error; False otherwise.
+        A pass/fail line is printed for each template.
+    """
+    results = verify_render_all_templates(config)
+    for name, passed, error in results:
+        if passed:
+            print(f"  [green]PASS[/green]  {name}")
+        else:
+            print(f"  [red]FAIL[/red]  {name}: {error}")
+    return all(passed for _, passed, _ in results)
+
+
+def display_all_tickets(state: TicketState = TicketState.user_focus, config: Config | None = None):
+    """Display tickets from ServiceNow filtered by state."""
     config = config or Config()
     service_now: ServiceNow = ServiceNow(config)
-    display_multi_tickets(service_now.get_tickets(long_list=long_list))
+    display_multi_tickets(service_now.get_tickets(state=state))
 
 
 def display_single_ticket(ticket_number: str, config: Config | None = None):
@@ -145,6 +270,30 @@ def get_ticket_url(ticket_number: str, config: Config | None = None) -> str:
     service_now: ServiceNow = ServiceNow(config)
     ticket = service_now.get_ticket(ticket_number)
     return service_now.web_url(ticket)
+
+
+def find_related_tickets(ticket_number: str, config: Config | None = None) -> list[RelatedTicketMatch]:
+    """Find tickets related to the given ticket number using field-matching heuristics.
+
+    Parameters
+    ----------
+    ticket_number : str
+        The ticket to search from (e.g. ``"RES0001234"``).
+    config : Config | None
+        Configuration to use. If None, Config() is constructed from the environment.
+
+    Returns
+    -------
+    list[RelatedTicketMatch]
+        Related tickets and the heuristics that matched.
+    """
+    config = config or Config()
+    service_now: ServiceNow = ServiceNow(config)
+    ticket = service_now.get_ticket(ticket_number)
+    full_ticket = service_now.get_full_ticket(ticket)
+    matches = service_now.find_related_tickets(full_ticket)
+    display_related_tickets(full_ticket, matches)
+    return matches
 
 
 def process_next_ticket(dry_run: bool, reply_mode: ReplyMode, config: Config | None = None):
@@ -259,7 +408,7 @@ def batch_evaluate_tickets(in_dir: Path, out_file: Path, num_runs: int = 1, conf
     llm: LLM = LLM(config)
 
     ## Pre-filter to Azure tickets only
-    all_tickets = service_now.get_tickets(long_list=True)
+    all_tickets = service_now.get_tickets(state=TicketState.all_open)
     azure_tickets = []
     for ticket in all_tickets:
         # TODO: Temporary, an messy way to limit tickets to only those related to Azure

@@ -3,12 +3,13 @@
 Provides a class, `ServiceNow`, which wraps the ServiceNow
 API. The only methods are:
 
-- `ServiceNow.get_tickets()`: Get a list of tickets. By default only unassigned tickets are returned, but all tickets can be selected;
-- `ServiceNow.get_ticket()`: Get a single ticket by its ticket number (e.g. ``"RES0001234"``);
+- `ServiceNow.get_tickets()`: Get a list of tickets filtered by ``TicketState``;
+- `ServiceNow.get_ticket()`: Get a single ticket by its ticket number (e.g. ``”RES0001234”``);
 - `ServiceNow.get_full_ticket()`: Get full details of a ticket;
+- `ServiceNow.find_related_tickets()`: Find tickets related to a given ticket via field-matching heuristics;
 - `assign_to()` Assigns a ticket to the named user;
 - `get_work_notes()` List the work notes for a specific ticket; and
-- `post_note()` (Not implemented) Post a “work note” to a ticket.
+- `post_note()` Post a “work note” to a ticket.
 
 Tickets are returned as instances of a `Ticket` dataclass which
 contains a few, high-level details. The subclass `ComputeAllocationRequestTicket` contains
@@ -32,11 +33,13 @@ from __future__ import annotations
 
 import base64
 import dataclasses
+import difflib
 import json
 import re
 import warnings
 from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
 from types import MappingProxyType
 from typing import ClassVar, Self
 
@@ -109,7 +112,15 @@ class Ticket:
     def is_rcpond_most_recent_process(self) -> bool:
         """Returns `True` if the current version of RCPond posted the most recent Comment or Work Note on this ticket. `False` otherwise."""
         notes = self.get_combined_notes()
-        return bool(notes) and notes[-1].content.startswith(_note_prefix())
+        return bool(notes) and bool(_RCPOND_CURRENT_VERSION_RE.match(notes[-1].content))
+
+    def rcpond_most_recent_tool_name(self) -> str | None:
+        """Return the tool name from the most recent RCPond note prefix, or ``None`` if the last note is not from RCPond or uses the legacy format."""
+        notes = self.get_combined_notes()
+        if not notes:
+            return None
+        m = _RCPOND_TOOL_NAME_RE.match(notes[-1].content)
+        return m.group(1) if m else None
 
     def refresh(self, service_now: ServiceNow) -> None:
         """Refresh mutable fields by re-querying the ServiceNow API.
@@ -197,6 +208,33 @@ _TICKET_TYPES: dict[str, type[Ticket]] = {
 }
 
 
+class TicketState(Enum):
+    """Controls which tickets get_tickets() returns based on their state.
+
+    >>> sn.get_tickets(state=TicketState.user_focus)
+    """
+
+    user_focus = "user_focus"
+    """Curated shortlist: unassigned (or assigned to current OAuth user) and not already rcpond-last."""
+    all_open = "all_open"
+    """All non-closed/resolved/cancelled tickets."""
+    all_including_closed = "all_including_closed"
+    """Every ticket in the query result, including closed, resolved, and cancelled — no filters applied."""
+
+
+@dataclass(frozen=True)
+class RelatedTicketMatch:
+    """A related ticket identified by find_related_tickets().
+
+    >>> match.ticket.number, match.matched_heuristics
+    """
+
+    ticket: Ticket
+    """The related ticket (as a full subclass instance)."""
+    matched_heuristics: tuple[str, ...]
+    """Human-readable descriptions of each matching heuristic, e.g. ``('finance_code:TUR-2023-001',)``."""
+
+
 ## Backward compatibility alias for pre-rename imports.
 def __getattr__(name: str):
     if name == "FullTicket":
@@ -219,12 +257,21 @@ def __dir__() -> list[str]:
 ## Utilities
 
 
-def _note_prefix(version: str = rcpond_version) -> str:
-    return f"[code]<b>RCPond v{version} generated response:</b>[/code]\n----\n"
+def _note_prefix(tool_name: str, version: str = rcpond_version) -> str:
+    return f"[code]<b>RCPond v{version} [{tool_name}] generated response:</b>[/code]\n----\n"
 
 
-## Matches the RCPond prefix for any version.
-_RCPOND_NOTE_RE = re.compile(r"^\[code\]<b>RCPond v\S+ generated response:</b>\[/code\]")
+## Matches the RCPond prefix for any version and any tool name.
+## Also matches the legacy format (without [tool_name]) for backwards compatibility.
+_RCPOND_NOTE_RE = re.compile(r"^\[code\]<b>RCPond v\S+ (\[[^\]]+\] )?generated response:</b>\[/code\]")
+
+## Matches the RCPond prefix for the current version only (any tool name).
+_RCPOND_CURRENT_VERSION_RE = re.compile(
+    r"^\[code\]<b>RCPond v" + re.escape(rcpond_version) + r" \[[^\]]+\] generated response:</b>\[/code\]"
+)
+
+## Extracts the tool name from any new-format RCPond note prefix.
+_RCPOND_TOOL_NAME_RE = re.compile(r"^\[code\]<b>RCPond v\S+ \[([^\]]+)\] generated response:</b>\[/code\]")
 
 
 ## Extract, from the record returned from ServiceNow, the fields
@@ -282,6 +329,100 @@ def _parse_comment_display_values(input: str) -> list[NoteEntry]:
     return result
 
 
+## Default ServiceNow query used when no per-type config overrides it.
+_DEFAULT_SERVICENOW_QUERY = "short_description=Request access to HPC and cloud computing facilities"
+
+_EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
+_AZURE_UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE)
+_PROJECT_TITLE_SIMILARITY_THRESHOLD = 0.8
+
+
+def _extract_emails(text: str) -> set[str]:
+    return {m.lower() for m in _EMAIL_RE.findall(text)}
+
+
+def _extract_azure_ids(text: str) -> set[str]:
+    return {m.lower() for m in _AZURE_UUID_RE.findall(text)}
+
+
+# Feature toggles for different match criteria
+MATCH_ON_FINANCE_CODE = True
+MATCH_ON_PI_EMAIL = True
+MATCH_ON_PMU_EMAIL = False
+MATCH_ON_ANY_SHARED_USERS = False
+MATCH_ON_ALL_SHARED_USERS = True
+MATCH_ON_SIMILAR_PROJECT_TITLE = True
+MATCH_ON_AZURE_SUBSCRIPTION_ID = True
+
+
+def _match_heuristics(source: Ticket, candidate: Ticket) -> list[str]:
+    """Return a list of matched heuristic descriptions (non-empty means related).
+
+    Parameters
+    ----------
+    source : Ticket
+        The ticket being reviewed (must be a full subclass instance).
+    candidate : Ticket
+        A candidate ticket to compare against.
+
+    Returns
+    -------
+    list[str]
+        One entry per matched heuristic, e.g. ``['finance_code:TUR-2023-001', 'pi_email:j@example.com']``.
+        Empty list means no match.
+    """
+    matched: list[str] = []
+
+    ## Finance code
+    if MATCH_ON_FINANCE_CODE:
+        src_fc = getattr(source, "which_finance_code", "").strip().upper()
+        cand_fc = getattr(candidate, "which_finance_code", "").strip().upper()
+        if src_fc and cand_fc and src_fc == cand_fc:
+            matched.append(f"finance_code:{src_fc}")
+
+    ## PI supervisor email
+    if MATCH_ON_PI_EMAIL:
+        src_pi = getattr(source, "pi_supervisor_email", "").strip().lower()
+        cand_pi = getattr(candidate, "pi_supervisor_email", "").strip().lower()
+        if src_pi and cand_pi and src_pi == cand_pi:
+            matched.append(f"pi_email:{src_pi}")
+
+    ## PMU contact email
+    if MATCH_ON_PMU_EMAIL:
+        src_pmu = getattr(source, "pmu_contact_email", "").strip().lower()
+        cand_pmu = getattr(candidate, "pmu_contact_email", "").strip().lower()
+        if src_pmu and cand_pmu and src_pmu == cand_pmu:
+            matched.append(f"pmu_email:{src_pmu}")
+
+    ## Shared user emails
+    src_users = _extract_emails(getattr(source, "users_who_require_access_names_and_emails", ""))
+    cand_users = _extract_emails(getattr(candidate, "users_who_require_access_names_and_emails", ""))
+    if MATCH_ON_ANY_SHARED_USERS:
+        for email in sorted(src_users & cand_users):
+            matched.append(f"shared_user:{email}")
+    if MATCH_ON_ALL_SHARED_USERS:  # noqa: SIM102: Keep feature-toggle and logic on separate lines
+        if src_users == cand_users:
+            matched.extend([f"shared_user:{email}" for email in src_users])
+
+    ## Similar project title (fuzzy match)
+    if MATCH_ON_SIMILAR_PROJECT_TITLE:
+        src_title = getattr(source, "project_title", "").strip()
+        cand_title = getattr(candidate, "project_title", "").strip()
+        if src_title and cand_title:
+            ratio = difflib.SequenceMatcher(None, src_title.lower(), cand_title.lower()).ratio()
+            if ratio >= _PROJECT_TITLE_SIMILARITY_THRESHOLD:
+                matched.append(f"project_title_similarity:{ratio:.2f}")
+
+    ## Azure subscription ID
+    if MATCH_ON_AZURE_SUBSCRIPTION_ID:
+        src_azure = _extract_azure_ids(getattr(source, "azure_subscription_id_or_hpc_group_project_id", ""))
+        cand_azure = _extract_azure_ids(getattr(candidate, "azure_subscription_id_or_hpc_group_project_id", ""))
+        for azure_id in sorted(src_azure & cand_azure):
+            matched.append(f"azure_subscription_id:{azure_id}")
+
+    return matched
+
+
 ## --------------------------------------------------------------------------------
 ## Interface to this module
 
@@ -296,6 +437,7 @@ class ServiceNow:
     def __init__(self, config: Config):
         self._base_api_url = config.servicenow_url
         self._web_base_url: str = config.servicenow_web_url
+        self._query: str = config.servicenow_query or _DEFAULT_SERVICENOW_QUERY
         self._id_token: str | None = None
         self._is_oauth = False
         self.session = requests.Session()
@@ -309,48 +451,47 @@ class ServiceNow:
         else:
             self.session.headers["Ocp-Apim-Subscription-Key"] = config.servicenow_token or ""
 
-    def get_tickets(self, long_list: bool = False) -> list[Ticket]:
+    def get_tickets(self, state: TicketState = TicketState.user_focus) -> list[Ticket]:
         """Get tickets that are applications for HPC/Azure credits.
 
         Parameters
         ----------
-        long_list : bool
-            If ``False`` (default), return a curated shortlist relevant to the
-            current user or bot. If ``True``, return all non-closed/resolved tickets.
+        state : TicketState
+            Controls which tickets are returned:
+            - ``user_focus`` (default): curated shortlist relevant to the current user or bot.
+            - ``all_open``: all non-closed/resolved/cancelled tickets.
+            - ``all_including_closed``: every ticket in the query result; no filters applied.
 
         Returns
         -------
         list[Ticket]
-            For interactive (OAuth) users — shortlist: unassigned or assigned to the
-            current user; longlist: all non-closed/resolved tickets.
-            For bot (token) users — shortlist: unassigned tickets where RCPond has not
-            posted the most recent note; longlist: all non-closed/resolved tickets where
-            RCPond has not posted the most recent note.
         """
-        _BASE_QUERY = "short_description=Request access to HPC and cloud computing facilities"
         _CLOSED_STATES = frozenset({"Closed", "Resolved", "Cancelled"})
 
         ticket_fields = {field.name for field in dataclasses.fields(Ticket)}
         resp = self.session.get(
-            f"{self._base_api_url}/{self._TABLE}", params={"sysparm_query": _BASE_QUERY, "sysparm_display_value": "all"}
+            f"{self._base_api_url}/{self._TABLE}", params={"sysparm_query": self._query, "sysparm_display_value": "all"}
         )
         resp.raise_for_status()
 
         tickets = [Ticket(**_extract_ticket_fields(tkt, ticket_fields)) for tkt in resp.json()["result"]]
-        ## Always exclude closed/resolved tickets; remaining filters depend on auth mode and long_list
+
+        if state is TicketState.all_including_closed:
+            return tickets
+
+        ## user_focus and all_open both exclude closed/resolved/cancelled
         tickets = [t for t in tickets if t.state not in _CLOSED_STATES]
 
-        if long_list:
-            ## Bot longlist: exclude tickets RCPond already handled (OAuth sees everything)
+        if state is TicketState.all_open:
+            ## Bot: exclude tickets RCPond already handled; OAuth: everything non-closed
             if not self._is_oauth:
                 tickets = [t for t in tickets if not t.is_rcpond_processed()]
         else:
+            ## user_focus
             if self._is_oauth:
                 my_name = self._current_user_display_name()
-                ## Interactive shortlist: only tickets assigned to me or unassigned
                 tickets = [t for t in tickets if t.assigned_to in ("", my_name)]
             else:
-                ## Bot shortlist: unassigned tickets RCPond has not already handled
                 tickets = [t for t in tickets if t.assigned_to == "" and not t.is_rcpond_processed()]
 
         return tickets
@@ -372,7 +513,7 @@ class ServiceNow:
             If no ticket matches, or if more than one matches (should not happen
             in practice — ServiceNow enforces uniqueness, but guarded defensively).
         """
-        matched = [t for t in self.get_tickets(long_list=True) if t.number == ticket_number]
+        matched = [t for t in self.get_tickets(state=TicketState.all_including_closed) if t.number == ticket_number]
         if len(matched) == 0:
             err_msg = f"Ticket '{ticket_number}' not found."
             raise ValueError(err_msg)
@@ -446,6 +587,42 @@ class ServiceNow:
 
         return ticket_class.from_Ticket(tkt, **_extract_ticket_fields(result, extra_fields))
 
+    def find_related_tickets(self, ticket: Ticket) -> list[RelatedTicketMatch]:
+        """Find tickets related to ``ticket`` using field-matching heuristics.
+
+        Fetches all tickets (including closed) and calls ``get_full_ticket()`` on each candidate
+        to obtain the extra fields required for matching. This can be slow for large ticket volumes.
+
+        Parameters
+        ----------
+        ticket : Ticket
+            The source ticket (must be a full subclass instance, e.g. ``ComputeAllocationRequestTicket``).
+
+        Returns
+        -------
+        list[RelatedTicketMatch]
+            One entry per related ticket, each with the matched heuristic descriptions.
+            The source ticket itself is never included.
+        """
+        all_tickets = self.get_tickets(state=TicketState.all_including_closed)
+        candidates = [t for t in all_tickets if t.number != ticket.number]
+
+        if len(candidates) > 50:
+            import sys
+
+            print(
+                f"[rcpond] Fetching full details for {len(candidates)} tickets — this may take a while.",
+                file=sys.stderr,
+            )
+
+        results: list[RelatedTicketMatch] = []
+        for t in candidates:
+            full = self.get_full_ticket(t)
+            matched = _match_heuristics(ticket, full)
+            if matched:
+                results.append(RelatedTicketMatch(ticket=full, matched_heuristics=tuple(matched)))
+        return results
+
     def _fetch_fields(self, sys_id: str, fields: set[str]) -> dict[str, str]:
         """Fetch display values for the specified fields from a single record.
 
@@ -491,14 +668,15 @@ class ServiceNow:
         resp.raise_for_status()
         return resp.json()["result"]["assigned_to"]
 
-    def post_note(self, tkt: Ticket, note: str) -> None:
+    def post_note(self, tkt: Ticket, note: str, tool_name: str) -> None:
         """Post a work note to a ticket.
 
         Params:
             tkt: The ticket
             note: The note to post
+            tool_name: Identifies the tool that posted this note, included in the prefix.
         """
-        prefix = _note_prefix()
+        prefix = _note_prefix(tool_name)
 
         ## This will append the `note` param to `work_notes` field
         resp = self.session.patch(
