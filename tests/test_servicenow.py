@@ -951,14 +951,6 @@ def _setup_find_related(sn_instance, candidates: list[ComputeAllocationRequestTi
     [
         ("which_finance_code", "TUR-2023-001", "TUR-2023-001", "TUR-9999-000", "finance_code:TUR-2023-001"),
         ("pi_supervisor_email", "pi@example.com", "pi@example.com", "other@example.com", "pi_email:pi@example.com"),
-        ("pmu_contact_email", "pmu@example.com", "pmu@example.com", "other@example.com", "pmu_email:pmu@example.com"),
-        (
-            "users_who_require_access_names_and_emails",
-            "Alice Smith alice@example.com, Bob Jones bob@example.com",
-            "Alice Smith alice@example.com, Carol carol@example.com",
-            "Dave dave@other.com",
-            "shared_user:alice@example.com",
-        ),
         (
             "project_title",
             "Deep Learning for Climate Modelling",
@@ -974,7 +966,7 @@ def _setup_find_related(sn_instance, candidates: list[ComputeAllocationRequestTi
             "12345678-1234-1234-1234-123456789abc",
         ),
     ],
-    ids=["finance_code", "pi_email", "pmu_email", "shared_user_email", "project_title", "azure_subscription_id"],
+    ids=["finance_code", "pi_email", "project_title", "azure_subscription_id"],
 )
 def test_find_related_by_heuristic(sn_instance, field, source_value, match_value, no_match_value, heuristic_substr):
     source = _make_full_ticket(number="RES0001000", **{field: source_value})
@@ -987,6 +979,36 @@ def test_find_related_by_heuristic(sn_instance, field, source_value, match_value
     assert len(results) == 1
     assert results[0].ticket.number == "RES0002000"
     assert any(heuristic_substr in h for h in results[0].matched_heuristics)
+
+
+def test_find_related_shared_users_reports_all_source_users(sn_instance):
+    """With the default 'all shared users' heuristic, any user overlap reports every source user.
+
+    The source lists Alice and Bob; the candidate shares only Alice. The match is still
+    related, and the reported heuristics include *both* source users (not just the overlap).
+    A candidate with no shared users is not related.
+    """
+    source = _make_full_ticket(
+        number="RES0001000",
+        users_who_require_access_names_and_emails="Alice Smith alice@example.com, Bob Jones bob@example.com",
+    )
+    match = _make_full_ticket(
+        number="RES0002000",
+        users_who_require_access_names_and_emails="Alice Smith alice@example.com, Bob Jones bob@example.com",
+    )
+    no_match = _make_full_ticket(
+        number="RES0003000",
+        users_who_require_access_names_and_emails="Alice Smith alice@example.com, Carol carol@example.com",
+    )
+    _setup_find_related(sn_instance, [match, no_match])
+
+    results = sn_instance.find_related_tickets(source)
+
+    assert [r.ticket.number for r in results] == ["RES0002000"]
+    assert set(results[0].matched_heuristics) == {
+        "shared_user:alice@example.com",
+        "shared_user:bob@example.com",
+    }
 
 
 def test_find_related_empty_fields_do_not_match(sn_instance):
