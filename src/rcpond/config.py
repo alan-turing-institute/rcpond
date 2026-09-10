@@ -109,7 +109,7 @@ class Config:
         Path to the RULES.md file used to construct the system prompt.
     system_prompt_template_path : Path
         Path to the Jinja2 template used to render the system prompt.
-    email_templates_path : Path
+    email_templates_dir : Path
         Path of the directory of Jinja2 templates used to render messages to end users
     """
 
@@ -202,11 +202,17 @@ class Config:
                     if env_key in _per_type_vars:
                         values[f.name] = _per_type_vars[env_key]
 
-        # 3. Override with actual environment variables
+        # 3. Override with actual environment variables. Treat blank values as
+        # unset so required options are reported as missing instead of failing
+        # later with an empty string.
         for f in fields(self):
             env_key = _env_var_name(f.name)
             if env_key in os.environ:
-                values[f.name] = os.environ[env_key]
+                env_value = os.environ[env_key]
+                if env_value.strip():
+                    values[f.name] = env_value
+                else:
+                    values.pop(f.name, None)
 
         # 4. Override with CLI args (highest precedence)
         if cli_args:
