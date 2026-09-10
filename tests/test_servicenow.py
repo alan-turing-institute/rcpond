@@ -613,55 +613,6 @@ def test_get_tickets_all_including_closed_returns_everything(sn_instance):
     }
 
 
-## Bot (static-token) shortlist — unassigned AND not rcpond_processed.
-
-
-# def test_get_tickets_bot_shortlist_includes_unassigned_unprocessed(sn_instance):
-#     _setup_session(sn_instance, [_raw_ticket(number="RES0000001", assigned_to="", work_notes=_HUMAN_NOTE)])
-#     sn_instance._is_oauth = False
-#     tickets = sn_instance.get_tickets()
-#     assert len(tickets) == 1
-
-
-# def test_get_tickets_bot_shortlist_excludes_rcpond_processed(sn_instance):
-#     _setup_session(sn_instance, [_raw_ticket(number="RES0000001", assigned_to="", work_notes=_RCPOND_CURRENT)])
-#     sn_instance._is_oauth = False
-#     tickets = sn_instance.get_tickets()
-#     assert tickets == []
-
-
-# def test_get_tickets_bot_shortlist_excludes_assigned(sn_instance):
-#     """Assigned tickets are excluded from the bot shortlist even if unprocessed."""
-#     _setup_session(sn_instance, [_raw_ticket(number="RES0000001", assigned_to="Bob Jones")])
-#     sn_instance._is_oauth = False
-#     tickets = sn_instance.get_tickets()
-#     assert tickets == []
-
-
-## Bot (static-token) longlist — all non-closed tickets, minus rcpond_processed.
-
-
-# def test_get_tickets_bot_longlist_excludes_rcpond_processed(sn_instance):
-#     _setup_session(
-#         sn_instance,
-#         [
-#             _raw_ticket(number="RES0000001", work_notes=_RCPOND_CURRENT),
-#             _raw_ticket(number="RES0000002", assigned_to="Bob Jones", work_notes=_RCPOND_CURRENT),
-#         ],
-#     )
-#     sn_instance._is_oauth = False
-#     tickets = sn_instance.get_tickets(long_list=True)
-#     assert tickets == []
-
-
-# def test_get_tickets_bot_longlist_includes_assigned_unprocessed(sn_instance):
-#     """Bot longlist includes assigned tickets as long as RCPond has not processed them."""
-#     _setup_session(sn_instance, [_raw_ticket(number="RES0000001", assigned_to="Bob Jones")])
-#     sn_instance._is_oauth = False
-#     tickets = sn_instance.get_tickets(long_list=True)
-#     assert len(tickets) == 1
-
-
 ## ── get_full_ticket dispatch ────────────────────────────────────────────────
 
 _BASE_FIELD_NAMES = {f.name for f in dataclasses.fields(Ticket)}
@@ -759,7 +710,7 @@ def test_sys_user_lookup_via_apim(dev_instance_sn):
         pytest.skip("Requires OAuth authentication")
 
     ## Get a known sys_id from an assigned ticket's assignee field
-    all_tickets = dev_instance_sn.get_tickets(long_list=True)
+    all_tickets = dev_instance_sn.get_tickets(TicketState.all_open)
     assigned = [t for t in all_tickets if t.assigned_to]
     if not assigned:
         pytest.skip("No assigned tickets available to extract a sys_id from")
@@ -871,7 +822,7 @@ def test_post_note(dev_instance_sn):
 @pytest.mark.integration()
 def test_get_tickets(dev_instance_sn):
     unassigned_tickets = dev_instance_sn.get_tickets()
-    all_tickets = dev_instance_sn.get_tickets(long_list=True)
+    all_tickets = dev_instance_sn.get_tickets(TicketState.all_open)
 
     assert len(all_tickets) >= len(unassigned_tickets)
 
@@ -880,7 +831,7 @@ def test_get_tickets(dev_instance_sn):
 def test_change_assignee(dev_instance_sn):
     # Attempt to select one assigned and on unassigned ticket
     unassigned_tickets = dev_instance_sn.get_tickets()
-    all_tickets = dev_instance_sn.get_tickets(long_list=True)
+    all_tickets = dev_instance_sn.get_tickets(TicketState.all_open)
 
     unassigned_sys_ids = {t.sys_id for t in unassigned_tickets}
     assigned_tickets = [t for t in all_tickets if t.sys_id not in unassigned_sys_ids]
