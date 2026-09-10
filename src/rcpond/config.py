@@ -202,11 +202,17 @@ class Config:
                     if env_key in _per_type_vars:
                         values[f.name] = _per_type_vars[env_key]
 
-        # 3. Override with actual environment variables
+        # 3. Override with actual environment variables. Treat blank values as
+        # unset so required options are reported as missing instead of failing
+        # later with an empty string.
         for f in fields(self):
             env_key = _env_var_name(f.name)
             if env_key in os.environ:
-                values[f.name] = os.environ[env_key]
+                env_value = os.environ[env_key]
+                if env_value.strip():
+                    values[f.name] = env_value
+                else:
+                    values.pop(f.name, None)
 
         # 4. Override with CLI args (highest precedence)
         if cli_args:

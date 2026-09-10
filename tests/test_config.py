@@ -118,6 +118,25 @@ def test_load_from_env_vars_only(monkeypatch, common_config_values):
     assert config.llm_model == "gpt-4"
 
 
+def test_blank_required_env_var_is_treated_as_missing(monkeypatch, common_config_values):
+    for key, value in common_config_values.items():
+        monkeypatch.setenv(f"RCPOND_{key.upper()}", value)
+    monkeypatch.setenv("RCPOND_LLM_MODEL", "   ")
+
+    with pytest.raises(ValueError, match="Missing required configuration: llm_model"):
+        Config()
+
+
+def test_blank_optional_env_var_is_treated_as_unset(monkeypatch, common_config_values):
+    for key, value in common_config_values.items():
+        monkeypatch.setenv(f"RCPOND_{key.upper()}", value)
+    monkeypatch.setenv("RCPOND_TICKET_TYPE", "")
+
+    config = Config()
+
+    assert config.ticket_type is None
+
+
 def test_load_from_cli_args_only(common_config_values):
     config = Config(cli_args=common_config_values)
 
