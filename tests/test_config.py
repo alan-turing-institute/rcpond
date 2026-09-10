@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from rcpond.config import Config
+from rcpond.config import AuthMode, Config
 
 _WORKING_TEMPLATES_DIR = Path("tests/fixtures/working_templates")
 _FAILING_TEMPLATES_DIR = Path("tests/fixtures/failing_templates")
@@ -545,17 +545,8 @@ def test_oauth_redirect_port_required_when_oauth_credentials_present(common_conf
         Config(cli_args=oauth_values)
 
 
-def test_oauth_scope_requires_openid(common_config_values):
-    """OAuth credentials with a scope that omits 'openid' must raise ValueError."""
-    with pytest.raises(ValueError, match="openid"):
-        Config(
-            cli_args={
-                **common_config_values,
-                "servicenow_client_id": "cid",
-                "servicenow_client_secret": "csec",
-                "servicenow_oauth_scope": "workspace",
-            }
-        )
+## The 'openid' scope requirement is covered by test_openid_scope_required_only_in_oauth_user_mode,
+## which asserts it for the implicit 'auto' route as well as both explicit OAuth modes.
 
 
 def test_oauth_scope_and_port_configurable(common_config_values):
@@ -583,6 +574,171 @@ def test_oauth_wins_when_both_configured(common_config_values):
     assert config.servicenow_token is not None
     assert config.servicenow_client_id == "cid"
     assert config.servicenow_client_secret == "csecret"
+
+
+# --- ServiceNow auth mode selection ---
+
+
+@pytest.fixture()
+def cc_config_values(common_config_values):
+    """Config values for a Client Credentials (M2M) setup.
+
+    Omits every field the browser flow needs — gateway token, scope, redirect port
+    and authorisation URL — keeping only the token endpoint and the client credentials.
+    """
+    _browser_flow_only = {
+        "servicenow_token",
+        "servicenow_oauth_scope",
+        "servicenow_oauth_redirect_port",
+        "servicenow_oauth_auth_url",
+    }
+    values = {k: v for k, v in common_config_values.items() if k not in _browser_flow_only}
+    values["servicenow_auth_mode"] = "oauth_client_credentials"
+    values["servicenow_client_id"] = "cid"
+    values["servicenow_client_secret"] = "csec"
+    return values
+
+
+_OAUTH_CREDS = {
+    "servicenow_client_id": "cid",
+    "servicenow_client_secret": "csec",
+    "servicenow_oauth_scope": "workspace openid",
+}
+
+
+@pytest.mark.parametrize(
+    ("extra_values", "expected_mode"),
+    [
+        ({}, AuthMode.token),
+        ({"servicenow_auth_mode": "auto"}, AuthMode.token),
+        (_OAUTH_CREDS, AuthMode.oauth_user),
+        ({**_OAUTH_CREDS, "servicenow_auth_mode": "auto"}, AuthMode.oauth_user),
+        ({**_OAUTH_CREDS, "servicenow_auth_mode": "token"}, AuthMode.token),
+        ({**_OAUTH_CREDS, "servicenow_auth_mode": "oauth_client_credentials"}, AuthMode.oauth_client_credentials),
+    ],
+    ids=[
+        "no_credentials_defaults_to_token",
+        "no_credentials_explicit_auto_is_token",
+        "credentials_default_to_browser_flow",
+        "credentials_explicit_auto_is_browser_flow",
+        "explicit_token_overrides_credentials",
+        "client_credentials_only_when_explicit",
+    ],
+)
+def test_auth_mode_resolution(common_config_values, extra_values, expected_mode):
+    """The full mode-resolution table.
+
+    ``oauth_client_credentials`` appears only on the row that names it explicitly —
+    it is never inferred from the shape of the config.
+    """
+    config = Config(cli_args={**common_config_values, **extra_values})
+    assert config.servicenow_auth_mode == expected_mode
+
+
+def test_auth_mode_read_from_env_var(monkeypatch, cc_config_values):
+    for key, value in cc_config_values.items():
+        monkeypatch.setenv(f"RCPOND_{key.upper()}", str(value))
+    monkeypatch.setenv("RCPOND_SERVICENOW_AUTH_MODE", "oauth_client_credentials")
+    config = Config()
+    assert config.servicenow_auth_mode == AuthMode.oauth_client_credentials
+
+
+def test_unknown_auth_mode_raises_listing_known_modes(common_config_values):
+    with pytest.raises(ValueError, match="oauth_client_credentials"):
+        Config(cli_args={**common_config_values, "servicenow_auth_mode": "magic"})
+
+
+# --- Client Credentials mode requirements ---
+
+
+def test_client_credentials_mode_validates_without_browser_flow_fields(cc_config_values):
+    """Scope, redirect port and auth URL are not used by the Client Credentials grant."""
+    config = Config(cli_args=cc_config_values)
+    assert config.servicenow_auth_mode == AuthMode.oauth_client_credentials
+    assert config.servicenow_oauth_scope is None
+    assert config.servicenow_oauth_redirect_port is None
+    assert config.servicenow_oauth_auth_url is None
+    assert config.servicenow_token is None
+
+
+# --- The openid scope rule ---
+
+
+@pytest.mark.parametrize(
+    ("auth_mode", "expected_error"),
+    [
+        ## A None mode is dropped by Config (documented cli_args behaviour), so this row
+        ## exercises the implicit 'auto' route the CLI takes when the flag is not passed.
+        (None, "openid"),
+        (AuthMode.oauth_user, "openid"),
+        (AuthMode.oauth_client_credentials, None),
+    ],
+    ids=["implicit_auto_requires_openid", "explicit_browser_flow_requires_openid", "client_credentials_does_not"],
+)
+def test_openid_scope_required_only_in_oauth_user_mode(common_config_values, auth_mode, expected_error):
+    """One rule, every side: identical config, differing only in mode, with opposite outcomes.
+
+    The browser flow needs 'openid' to obtain an id_token identifying the end user,
+    whether it was selected explicitly or resolved from 'auto'. The Client Credentials
+    grant has no end user, so requiring it there would reject a valid M2M setup.
+    """
+    values = {
+        **common_config_values,
+        **_OAUTH_CREDS,
+        "servicenow_auth_mode": auth_mode,
+        "servicenow_oauth_scope": "useraccount",  ## note: no 'openid'
+    }
+
+    if expected_error:
+        with pytest.raises(ValueError, match=expected_error):
+            Config(cli_args=values)
+    else:
+        ## Asserting the resolved mode confirms the config landed in the mode whose
+        ## rules we are claiming were applied — not merely that nothing raised.
+        ## Safe to compare against auth_mode: every non-error row names its mode explicitly.
+        assert Config(cli_args=values).servicenow_auth_mode == auth_mode
+
+
+@pytest.mark.parametrize(
+    "missing_field",
+    [
+        "servicenow_oauth_token_url",
+        "servicenow_client_id",
+        "servicenow_client_secret",
+    ],
+)
+def test_client_credentials_mode_requires_field(cc_config_values, missing_field):
+    """Each of the three fields the Client Credentials grant cannot work without."""
+    del cc_config_values[missing_field]
+    with pytest.raises(ValueError, match=missing_field):
+        Config(cli_args=cc_config_values)
+
+
+def test_client_credentials_mode_allows_gateway_token_alongside(cc_config_values):
+    """The APIM subscription key and the OAuth bearer are independent (see plan §4)."""
+    config = Config(cli_args={**cc_config_values, "servicenow_token": "gateway-key"})
+    assert config.servicenow_token == "gateway-key"
+    assert config.servicenow_auth_mode == AuthMode.oauth_client_credentials
+
+
+# --- Explicit mode overrides ---
+
+
+def test_explicit_token_mode_still_requires_servicenow_token(common_config_values):
+    values = {
+        **common_config_values,
+        "servicenow_auth_mode": "token",
+        "servicenow_client_id": "cid",
+        "servicenow_client_secret": "csec",
+    }
+    del values["servicenow_token"]
+    with pytest.raises(ValueError, match="servicenow_token"):
+        Config(cli_args=values)
+
+
+def test_explicit_oauth_user_mode_requires_client_credentials(common_config_values):
+    with pytest.raises(ValueError, match="servicenow_client_id"):
+        Config(cli_args={**common_config_values, "servicenow_auth_mode": "oauth_user"})
 
 
 # --- Per-type config loading ---
