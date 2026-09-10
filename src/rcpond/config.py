@@ -109,7 +109,7 @@ class Config:
         Path to the RULES.md file used to construct the system prompt.
     system_prompt_template_path : Path
         Path to the Jinja2 template used to render the system prompt.
-    email_templates_path : Path
+    email_templates_dir : Path
         Path of the directory of Jinja2 templates used to render messages to end users
     """
 
