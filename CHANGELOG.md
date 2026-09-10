@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `servicenow.ticket_type_key()`: resolves a ticket to its `_TICKET_TYPES` registry key via `MATCH_CRITERIA` (now also used by `get_full_ticket`'s dispatch).
 - Note-classification and timing helpers on `Ticket`: `rcpond_note_count()`, `manual_note_count()`, `has_subsequent_manual_interaction()`, `first_rcpond_note_datetime()`, `first_manual_note_datetime()`, `is_closed()`, `resolution_datetime()`, and `opened_datetime()`.
 
+### Fixed
+
+- Blank `RCPOND_*` environment variables are treated as unset, so required values produce a clear missing-configuration error instead of propagating empty strings.
+
 ### Notes
 
 - The `analytics --refresh` flag is accepted but currently has no effect: a single bulk fetch is sufficient for the implemented metrics, so the ticket-history cache described in the design is deferred until a later stage needs per-ticket fetches.
