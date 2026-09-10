@@ -17,6 +17,54 @@ This document plans a third mode: **OAuth 2.0 Client Credentials**, so a bot can
 authenticate as a ServiceNow service account with a real OAuth token rather than a
 static gateway key.
 
+## Motivation
+
+Why do this at all, given that static token auth already works for bots? The case
+is mostly an IT security and compliance one.
+
+| | Static token (`Ocp-Apim-Subscription-Key`) | Client Credentials |
+|---|---|---|
+| **Attribution** | Authenticates the caller to the APIM gateway, not a principal to ServiceNow. Actions are recorded against whatever integration user the route is wired to, shared with anything else holding the key. | Token is bound to a specific service account, so `sys_audit` and the ticket activity log answer "which principal changed this record". |
+| **Secret on the wire** | The secret you store *is* the secret you transmit, on every request, through every hop — gateway logs, proxy logs, crash dumps, shell history. | The client secret goes to one endpoint, once per token lifetime. Everything else on the wire is a short-lived derived token. |
+| **Blast radius if captured** | Valid until someone notices and manually revokes — for a key with no expiry, potentially years. | Access token dies in ~30 minutes. An open-ended incident becomes a bounded one. |
+| **Revocation / rotation** | Requires finding every deployment holding the key and swapping simultaneously, so in practice it never gets rotated. | Client can be disabled centrally at the registry, tokens revoked, secret rotated with an overlap window. |
+| **Authorization** | Binary — hold the key, get whatever the gateway route permits. Perimeter enforcement only. | Service account carries roles and ACLs enforced by ServiceNow itself, so least-privilege is expressible. Defence in depth. |
+| **Inventory / monitoring** | Keys sprawl with no owner or register. Usage is indistinguishable from legitimate traffic. | Clients live in an enumerable registry with an owner. Token issuance is a discrete, alertable event. |
+
+Periodic credential rotation and enumerable access for review are explicit
+requirements in ISO 27001:2022 A.5.17 and the SOC 2 logical-access common
+criteria; audit-trail accountability is tested directly by most frameworks.
+
+### Why attribution matters most for RCPond
+
+The first row is the strongest argument for *this* codebase, and it is already
+visible in the code: `assign_to_me()` raises `NotImplementedError` under static
+token auth (`servicenow.py:931`) precisely because there is no identity to assign
+to. Every ticket mutation the bot makes today is unattributable beyond "something
+holding the gateway key". That is the compliance gap this work closes — and it is
+why §3.1 (whether a service-account identity actually resolves under a Client
+Credentials token) is the most important of the open questions in §7.
+
+### Honest limits of the argument
+
+- **This does not eliminate static secrets.** The client secret is itself a
+  long-lived shared secret; it has been relocated to one place with better hygiene
+  around it, not removed. If it lands in the same CI variable or `.env` file the
+  gateway key was in, the theft risk of the *durable* credential is roughly
+  unchanged. The gains are in attribution, blast radius, revocation and inventory —
+  not in "no more static secrets". The genuine step change would be
+  `private_key_jwt` client assertion, mTLS, or workload identity federation, where
+  no shared secret exists at all. Client Credentials with a secret is the pragmatic
+  intermediate step, and worth naming as such if this needs sign-off against a
+  strict secrets-management policy.
+- **The gateway key may not go away.** If APIM still requires its subscription key
+  alongside the bearer (§7, §4), this adds a bearer on top of the static token
+  rather than replacing it. Still net positive on attribution and defence in depth,
+  but do not promise otherwise until that is confirmed.
+- **It is not free.** The token endpoint becomes an availability dependency, and
+  token caching/expiry introduces a new class of failure. That is why §2 and §5
+  bother with expiry handling rather than fetching once at startup.
+
 ## Summary of what changes
 
 Changes **are** required — this is not a drop-in. The five substantive ones:
