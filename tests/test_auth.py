@@ -195,16 +195,20 @@ def test_browser_flow_not_triggered_when_no_refresh_token_but_access_valid(mock_
 _CC_TOKEN_URL = "https://example.service-now.com/oauth_token.do"
 
 
-@pytest.fixture()
-def cc_config():
-    """A machine-to-machine config: client credentials, no browser-flow fields."""
+def _make_cc_config(client_id: str = "cc-client-id", client_secret: str = "cc-client-secret") -> MagicMock:
+    """Build a machine-to-machine config: client credentials, no browser-flow fields."""
     config = MagicMock()
     config.servicenow_auth_mode = AuthMode.oauth_client_credentials
-    config.servicenow_client_id = "cc-client-id"
-    config.servicenow_client_secret = "cc-client-secret"
+    config.servicenow_client_id = client_id
+    config.servicenow_client_secret = client_secret
     config.servicenow_oauth_scope = None
     config.servicenow_oauth_token_url = _CC_TOKEN_URL
     return config
+
+
+@pytest.fixture()
+def cc_config():
+    return _make_cc_config()
 
 
 def _cc_token(access_token: str = "cc-token", lifetime: int = 3600) -> dict:
@@ -275,6 +279,24 @@ def test_client_credentials_token_reused_within_its_lifetime(cc_config):
 
     assert first == second == "cc-token"
     mock_flow.assert_called_once()
+
+
+def test_client_credentials_cache_is_keyed_by_client_id(cc_config):
+    """Two clients in one process must not share a token.
+
+    Without the client ID key, the second client would be handed the first client's
+    token and would silently authenticate as the wrong service account.
+    """
+    _prime_cc_cache(cc_config, _cc_token("first-client-token"))
+    other_client = _make_cc_config(client_id="other-client-id")
+
+    with patch("rcpond.auth._run_client_credentials_flow", return_value=_cc_token("second-client-token")) as mock_flow:
+        result = get_bearer_token(other_client)
+
+    assert result == "second-client-token"
+    mock_flow.assert_called_once()
+    ## The first client's cached token must survive the second client's fetch
+    assert get_bearer_token(cc_config) == "first-client-token"
 
 
 def test_client_credentials_token_refetched_when_expired(cc_config):
