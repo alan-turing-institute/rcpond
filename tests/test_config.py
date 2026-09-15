@@ -464,6 +464,7 @@ def test_fields_are_config_values_only():
         "llm_chat_completions_url",
         "llm_api_key",
         "llm_model",
+        "servicenow_auth_mode",
         "servicenow_token",
         "servicenow_url",
         "servicenow_web_url",

@@ -55,11 +55,31 @@ import dataclasses
 import os
 import typing
 from dataclasses import InitVar, dataclass, field, fields
+from enum import StrEnum
 from pathlib import Path
 
 import jinja2
 import jinja2.nodes
 from xdg_base_dirs import xdg_config_home
+
+
+class AuthMode(StrEnum):
+    """How requests to the ServiceNow API are authenticated.
+
+    >>> config.servicenow_auth_mode is AuthMode.oauth_user
+    """
+
+    token = "token"
+    """Static subscription key sent as ``Ocp-Apim-Subscription-Key``. Carries no user identity."""
+    oauth_user = "oauth_user"
+    """OAuth Authorization Code + PKCE. Interactive: opens a browser and acts as the human user."""
+    oauth_client_credentials = "oauth_client_credentials"
+    """OAuth Client Credentials. Non-interactive machine-to-machine; acts as a service account."""
+
+
+AUTH_MODE_AUTO = "auto"
+"""Accepted input value for ``servicenow_auth_mode`` meaning "infer from the credentials
+supplied".  Resolved during construction, so ``Config.servicenow_auth_mode`` never holds it."""
 
 
 @dataclass
@@ -84,27 +104,38 @@ class Config:
         API key for authenticating with the LLM provider.
     llm_model : str
         Model identifier to use for LLM requests.
+    servicenow_auth_mode : AuthMode
+        How ServiceNow requests are authenticated. Accepts ``'auto'`` (the default),
+        ``'token'``, ``'oauth_user'`` or ``'oauth_client_credentials'``. ``'auto'`` resolves
+        to ``oauth_user`` when client credentials are supplied and ``token`` otherwise, so
+        this attribute always holds a concrete mode. ``oauth_client_credentials`` is never
+        inferred — it must be requested explicitly, as it shares its fields with the
+        browser flow.
     servicenow_token : str | None
-        Static subscription key for the ServiceNow API. Required unless OAuth
-        credentials are provided (``servicenow_client_id`` + ``servicenow_client_secret``).
+        Static subscription key for the ServiceNow API. Required in ``token`` mode;
+        optional in either OAuth mode, where it may still be supplied if the API
+        gateway requires a subscription key alongside the bearer token.
     servicenow_url : str
         Base URL of the ServiceNow REST API endpoint.
     servicenow_web_url : str
         Base URL of the ServiceNow Web UI (e.g. ``https://alanturingdev.service-now.com``).
         Used to generate direct links to tickets.
     servicenow_client_id : str | None
-        OAuth client ID. When set alongside ``servicenow_client_secret``, OAuth is
-        used in preference to ``servicenow_token``.
+        OAuth client ID. Required in both OAuth modes; ignored in ``token`` mode.
     servicenow_client_secret : str | None
-        OAuth client secret.
+        OAuth client secret. Required in both OAuth modes; ignored in ``token`` mode.
     servicenow_oauth_scope : str | None
-        OAuth scope requested from ServiceNow. Required when using OAuth; ignored otherwise.
+        OAuth scope requested from ServiceNow. Required in ``oauth_user`` mode, where it
+        must include ``openid``; optional in ``oauth_client_credentials`` mode, which has
+        no end user to identify. Ignored in ``token`` mode.
     servicenow_oauth_redirect_port : int | None
-        Port for the local OAuth redirect listener. Required when using OAuth; ignored otherwise.
+        Port for the local OAuth redirect listener. Required in ``oauth_user`` mode only —
+        the Client Credentials grant involves no redirect.
     servicenow_oauth_auth_url : str | None
-        ServiceNow OAuth authorisation endpoint URL. Required when using OAuth; ignored otherwise.
+        ServiceNow OAuth authorisation endpoint URL. Required in ``oauth_user`` mode only —
+        the Client Credentials grant never visits the authorisation endpoint.
     servicenow_oauth_token_url : str | None
-        ServiceNow OAuth token endpoint URL. Required when using OAuth; ignored otherwise.
+        ServiceNow OAuth token endpoint URL. Required in both OAuth modes.
     rules_path : Path
         Path to the RULES.md file used to construct the system prompt.
     system_prompt_template_path : Path
@@ -119,6 +150,7 @@ class Config:
     llm_chat_completions_url: str = field(init=False)
     llm_api_key: str = field(init=False)
     llm_model: str = field(init=False)
+    servicenow_auth_mode: AuthMode = field(init=False)
     servicenow_token: str | None = field(init=False)
     servicenow_url: str = field(init=False)
     servicenow_web_url: str = field(init=False)
@@ -220,34 +252,44 @@ class Config:
                 if f.name in cli_args and cli_args[f.name] is not None:
                     values[f.name] = cli_args[f.name]
 
-        ## Fields that are always optional (may be absent or None)
-        _ALWAYS_OPTIONAL = {"servicenow_client_id", "servicenow_client_secret", "ticket_type", "servicenow_query"}
+        ## Resolve the auth mode before validating: it determines which fields are required.
+        auth_mode = _resolve_auth_mode(values.get("servicenow_auth_mode"), values)
+        values["servicenow_auth_mode"] = auth_mode
 
-        _OAUTH_ONLY = {
+        ## Fields that are optional whatever the auth mode
+        _ALWAYS_OPTIONAL = {"servicenow_auth_mode", "ticket_type", "servicenow_query"}
+
+        _OAUTH_CREDENTIALS = {"servicenow_client_id", "servicenow_client_secret"}
+
+        ## Fields only the browser-based Authorization Code flow uses
+        _BROWSER_FLOW_ONLY = {
             "servicenow_oauth_scope",
             "servicenow_oauth_redirect_port",
             "servicenow_oauth_auth_url",
-            "servicenow_oauth_token_url",
         }
 
-        ## servicenow_token is required unless both OAuth credentials are present;
-        ## OAuth-only fields are required only when OAuth credentials are present.
-        oauth_present = bool(values.get("servicenow_client_id") and values.get("servicenow_client_secret"))
-        conditionally_optional = {"servicenow_token"} if oauth_present else _OAUTH_ONLY
+        ## Per-mode optional fields; every other field is required.
+        if auth_mode is AuthMode.token:
+            optional = _ALWAYS_OPTIONAL | _OAUTH_CREDENTIALS | _BROWSER_FLOW_ONLY | {"servicenow_oauth_token_url"}
+        elif auth_mode is AuthMode.oauth_user:
+            ## The gateway subscription key is not needed when a bearer token is used
+            optional = _ALWAYS_OPTIONAL | {"servicenow_token"}
+        else:
+            ## Client Credentials: no browser, so no redirect port, authorisation URL or scope
+            optional = _ALWAYS_OPTIONAL | _BROWSER_FLOW_ONLY | {"servicenow_token"}
 
-        missing = [
-            f.name
-            for f in fields(self)
-            if f.name not in values and f.name not in _ALWAYS_OPTIONAL and f.name not in conditionally_optional
-        ]
+        missing = [f.name for f in fields(self) if f.name not in values and f.name not in optional]
         if missing:
             msg = f"Missing required configuration: {', '.join(missing)}"
             raise ValueError(msg)
 
-        if oauth_present and "openid" not in values.get("servicenow_oauth_scope", "").split():
+        ## The 'openid' scope yields the id_token identifying the end user, so it is only
+        ## meaningful for the browser flow. Requiring it under Client Credentials would
+        ## reject a valid M2M setup — there is no end user to identify.
+        if auth_mode is AuthMode.oauth_user and "openid" not in values.get("servicenow_oauth_scope", "").split():
             scope = values.get("servicenow_oauth_scope", "(not set)")
             msg = (
-                f"RCPOND_SERVICENOW_OAUTH_SCOPE must include 'openid' when OAuth credentials are set "
+                f"RCPOND_SERVICENOW_OAUTH_SCOPE must include 'openid' when using '{AuthMode.oauth_user}' auth "
                 f"(current value: {scope!r}). Add 'openid' to the scope and re-authenticate with 'rcpond login'."
             )
             raise ValueError(msg)
@@ -283,6 +325,42 @@ class Config:
 
 def _env_var_name(field_name: str) -> str:
     return f"RCPOND_{field_name.upper()}"
+
+
+def _resolve_auth_mode(raw: str | None, values: dict) -> AuthMode:
+    """Return the concrete ``AuthMode`` for ``raw``, inferring it when unset or ``'auto'``.
+
+    Parameters
+    ----------
+    raw : str | None
+        The configured ``servicenow_auth_mode``. ``None`` (not supplied) and ``'auto'``
+        are both treated as "infer from the credentials present".
+    values : dict
+        The merged config values, inspected only when inferring.
+
+    Returns
+    -------
+    AuthMode
+        Never ``'auto'`` — always one of the three concrete modes.
+
+    Raises
+    ------
+    ValueError
+        If ``raw`` is neither ``'auto'`` nor a known mode.
+    """
+    if raw is None or raw == AUTH_MODE_AUTO:
+        ## oauth_client_credentials is deliberately never inferred: it shares client_id
+        ## and client_secret with the browser flow, so the config shape cannot distinguish
+        ## the two. Picking the wrong grant fails opaquely at the ServiceNow end.
+        has_credentials = bool(values.get("servicenow_client_id") and values.get("servicenow_client_secret"))
+        return AuthMode.oauth_user if has_credentials else AuthMode.token
+
+    try:
+        return AuthMode(raw)
+    except ValueError:
+        known = ", ".join(f"'{mode}'" for mode in (AUTH_MODE_AUTO, *AuthMode))
+        msg = f"Unknown servicenow_auth_mode '{raw}'. Known modes: {known}."
+        raise ValueError(msg) from None
 
 
 def _parse_dotenv(env_path: Path) -> dict[str, str]:
