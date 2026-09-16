@@ -580,11 +580,15 @@ class ServiceNow:
         self.session.headers.update({"Content-Type": "application/json", "Accept": "application/json"})
 
         if self._is_oauth:
+            ## Imported here, not at module level: this pulls authlib and cryptography,
+            ## ~400ms that static-token runs would otherwise pay on every invocation.
             from rcpond.auth import get_bearer_token, get_id_token
 
             self.session.headers["Authorization"] = f"Bearer {get_bearer_token(config)}"
-            ## Only the interactive flow issues an id_token. Reading the cache in any other
-            ## mode would adopt the identity of whichever user last logged in on this host.
+            ## Only the interactive flow issues an id_token, and only it writes the token
+            ## cache. Reading that cache in any other mode would adopt the identity of
+            ## whoever last completed a browser login on this host — who need not be the
+            ## person or process running now.
             if self._acts_as_user:
                 self._id_token = get_id_token()
 

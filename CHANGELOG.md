@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Blank `RCPOND_*` environment variables are treated as unset, so required values produce a clear missing-configuration error instead of propagating empty strings.
-- A Client Credentials session no longer reads the interactive user's cached `id_token`. The on-disk cache belongs to whoever last ran `rcpond login` on that host, so a bot sharing the host could have adopted that person's identity.
+- A Client Credentials session no longer reads the interactive user's cached `id_token`. Only the browser-based flow ever writes the on-disk cache, so it holds the tokens of whoever last completed a browser login on that host — not necessarily the person or process running the current command. A bot sharing the host could therefore have adopted that person's identity.
 - `docs/configuration.md` gave `RCPOND_SERVICENOW_OAUTH_SCOPE=workspace` in its examples, which fails validation: the interactive flow requires `openid` in the scope to obtain an `id_token`.
 
 ### Notes

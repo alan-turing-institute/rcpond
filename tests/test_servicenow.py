@@ -163,9 +163,11 @@ def test_auth_header_composition(auth_mode, servicenow_token, expect_bearer, exp
 def test_client_credentials_does_not_adopt_a_cached_user_id_token():
     """A machine session must not inherit a human's identity from the on-disk cache.
 
-    get_id_token() reads $XDG_CACHE_HOME/rcpond/tokens.json, which belongs to whichever
-    interactive user last logged in on this host. Reading it in Client Credentials mode
-    would make the bot act as that person.
+    get_id_token() reads $XDG_CACHE_HOME/rcpond/tokens.json, which only the browser-based
+    flow ever writes — a Client Credentials `rcpond login` leaves it untouched. It
+    therefore holds the tokens of whoever last completed a browser login on this host,
+    who need not be the person or process running now. Reading it in Client Credentials
+    mode would make the bot act as that person.
     """
     cfg = _sn_config(AuthMode.oauth_client_credentials)
 
