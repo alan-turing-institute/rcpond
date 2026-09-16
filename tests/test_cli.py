@@ -141,31 +141,44 @@ def test_whoami_static_token_reports_no_identity(mock_config):
 
 
 @pytest.mark.parametrize(
-    ("auth_mode", "expected_label"),
+    ("auth_mode", "claims", "is_service_account"),
     [
-        (AuthMode.oauth_user, "oauth_user"),
-        (AuthMode.oauth_client_credentials, "oauth_client_credentials"),
+        (
+            AuthMode.oauth_user,
+            {"name": "Ada Example", "user_name": "ada.example", "sub": "fake-user-sys-id"},
+            False,
+        ),
+        (
+            ## The name deliberately avoids the words asserted on below, so the warning
+            ## check cannot be satisfied by the claims themselves.
+            AuthMode.oauth_client_credentials,
+            {"name": "Example Bot", "user_name": "example.bot", "sub": "fake-service-sys-id"},
+            True,
+        ),
     ],
     ids=["interactive", "client_credentials"],
 )
-def test_whoami_reports_identity_and_mode(mock_config, auth_mode, expected_label):
+def test_whoami_reports_identity_and_mode(mock_config, auth_mode, claims, is_service_account):
     """Both OAuth modes have an identity worth printing, and the mode must be stated.
 
-    Under Client Credentials the identity is a service account, not the person at the
-    keyboard — so a bare name would be actively misleading.
+    The rows carry deliberately different fake identities: under Client Credentials the
+    identity is a service account rather than the person at the keyboard, so reporting a
+    bare name without saying which mode produced it would be actively misleading.
     """
     mock_config.servicenow_auth_mode = auth_mode
-    claims = {"name": "Research API User", "user_name": "research_cmd_user", "sub": "b04b7606"}
     sn = _patched_servicenow(auth_mode, claims)
 
     with patch("rcpond.servicenow.ServiceNow", return_value=sn):
         result = _invoke(["whoami"], mock_config)
 
     assert result.exit_code == 0, result.output
-    assert "Research API User" in result.output
-    assert "research_cmd_user" in result.output
-    assert "b04b7606" in result.output
-    assert expected_label in result.output
+    for claim_value in claims.values():
+        assert claim_value in result.output
+    assert auth_mode in result.output
+    ## "not your own user" is the distinctive half of the warning — matching on
+    ## "service account" alone would be satisfied by an identity that happens to be named
+    ## one, which is exactly how an earlier version of this assertion failed to bite.
+    assert ("not your own user" in result.output.lower()) is is_service_account
 
 
 def test_whoami_exits_nonzero_when_identity_is_unavailable(mock_config):
