@@ -106,10 +106,11 @@ RCPOND_LLM_CHAT_COMPLETIONS_URL=https://...
 RCPOND_LLM_API_KEY=your-api-key-here
 RCPOND_LLM_MODEL=gpt-4o
 RCPOND_SERVICENOW_URL=https://turing-api.azure-api.net/dev-research/api/now/table
+# RCPOND_SERVICENOW_AUTH_MODE=auto  # auto | token | oauth_user | oauth_client_credentials
 # RCPOND_SERVICENOW_TOKEN=your-servicenow-token  # required if not using OAuth
 RCPOND_SERVICENOW_CLIENT_ID=your-client-id
 RCPOND_SERVICENOW_CLIENT_SECRET=your-client-secret
-RCPOND_SERVICENOW_OAUTH_SCOPE=workspace
+RCPOND_SERVICENOW_OAUTH_SCOPE=workspace openid
 RCPOND_SERVICENOW_OAUTH_REDIRECT_PORT=8765
 RCPOND_SERVICENOW_OAUTH_AUTH_URL=https://...service-now.com/oauth_auth.do
 RCPOND_SERVICENOW_OAUTH_TOKEN_URL=https://...service-now.com/oauth_token.do
@@ -149,7 +150,17 @@ The reply mode is used in two places; Prior to calling the LLM, to check for pre
 
 ## ServiceNow authentication
 
-RCPond supports two ways to authenticate with the ServiceNow API. If both are configured, OAuth takes precedence.
+RCPond supports three ways to authenticate with the ServiceNow API:
+
+| Mode | For | Acts as |
+|---|---|---|
+| `oauth_user` | People, at a terminal | The individual who logged in |
+| `oauth_client_credentials` | Bots, scripts, CI | A ServiceNow service account |
+| `token` | Simple setups, legacy | A generic integration user |
+
+The mode is chosen by `RCPOND_SERVICENOW_AUTH_MODE`. Its default, `auto`, selects `oauth_user` when client credentials are configured and `token` otherwise — which is the historical behaviour, so existing configurations are unaffected.
+
+`oauth_client_credentials` is **never** selected automatically. It uses the same `CLIENT_ID`/`CLIENT_SECRET` fields as the interactive flow, so the configuration alone cannot distinguish the two; you must ask for it explicitly.
 
 ### Option 1: OAuth 2.0 (Recommended)
 
@@ -162,11 +173,13 @@ To enable OAuth, add your client credentials to the configuration:
 ```
 RCPOND_SERVICENOW_CLIENT_ID=your-client-id
 RCPOND_SERVICENOW_CLIENT_SECRET=your-client-secret
-RCPOND_SERVICENOW_OAUTH_SCOPE=workspace
+RCPOND_SERVICENOW_OAUTH_SCOPE=workspace openid
 RCPOND_SERVICENOW_OAUTH_REDIRECT_PORT=8765
 RCPOND_SERVICENOW_OAUTH_AUTH_URL=https://...service-now.com/oauth_auth.do
 RCPOND_SERVICENOW_OAUTH_TOKEN_URL=https://...service-now.com/oauth_token.do
 ```
+
+The scope must include `openid`: that is what makes ServiceNow issue the `id_token` RCPond uses to identify you.
 
 Example / default values for the OAuth fields can be found in the default configuration file in the [rcpond-rules repo](https://github.com/alan-turing-institute/rcpond-rules).
 
@@ -188,7 +201,47 @@ After successful login, the obtained tokens will be cached locally for future us
 Tokens are stored at `$XDG_CACHE_HOME/rcpond/tokens.json` (default: `~/.cache/rcpond/tokens.json`) with permissions `0600`.
 
 
-### Option 2: Static API token
+### Option 2: OAuth 2.0 Client Credentials (bots and CI)
+
+For non-interactive use — a scheduled bot, a script, a CI job — where no human is present to complete a browser login. RCPond authenticates as a ServiceNow service account using the OAuth Client Credentials grant.
+
+Compared with a static token, this gives the bot a real identity in ServiceNow (so its actions are attributed to a named service account rather than a shared key), short-lived access tokens instead of an indefinitely valid secret, and central revocation.
+
+```
+RCPOND_SERVICENOW_AUTH_MODE=oauth_client_credentials
+RCPOND_SERVICENOW_CLIENT_ID=your-client-id
+RCPOND_SERVICENOW_CLIENT_SECRET=your-client-secret
+RCPOND_SERVICENOW_OAUTH_TOKEN_URL=https://...service-now.com/oauth_token.do
+```
+
+Only the token endpoint is needed. `RCPOND_SERVICENOW_OAUTH_AUTH_URL` and `RCPOND_SERVICENOW_OAUTH_REDIRECT_PORT` are for the browser flow and are ignored here, and `RCPOND_SERVICENOW_OAUTH_SCOPE` is optional — in particular it need not contain `openid`, since there is no end user to identify.
+
+If your API gateway requires a subscription key alongside the bearer token, set `RCPOND_SERVICENOW_TOKEN` as well; the two are independent and both headers will be sent.
+
+**Supply the secret through the environment**, not on the command line — a secret passed as `--servicenow-client-secret` is visible to anyone who can list processes.
+
+#### Prerequisites in ServiceNow
+
+An instance administrator must create (or extend) an OAuth application registry entry with the **Client Credentials** grant type enabled, associated with a service account holding the roles needed to read and update the request table.
+
+#### There is no login step
+
+Client Credentials tokens are fetched on demand and held **in memory for the life of the process**, never written to disk. This is deliberate: the on-disk token cache has no notion of which principal it belongs to, so a bot and an interactive user sharing a host would otherwise overwrite and then read each other's tokens.
+
+`rcpond login` is therefore not required. Running it simply checks that the credentials are accepted:
+
+```bash
+$ rcpond login
+Credentials verified. Client Credentials mode needs no interactive login.
+```
+
+Use `rcpond whoami` to confirm which service account you are acting as — it reports the auth mode alongside the identity, and warns when that identity is not your own user.
+
+#### Assigning tickets
+
+`assign_to_me()` is not available in this mode. The service account identity does resolve correctly, so this is a deliberate product decision rather than a technical limit: assigning tickets to the bot is not believed to be a useful ServiceNow workflow. This is under review.
+
+### Option 3: Static API token
 
 A static subscription key issued by the ServiceNow administrator. This is the simpler option and is supported by the default configuration file. However, actions taken by RCPond will be attributed to a generic integration user rather than an individual, and the token must be manually rotated when it expires.
 

@@ -31,16 +31,25 @@ RCPOND_SERVICENOW_WEB_URL=https://alanturingdev.service-now.com
 RCPOND_RULES_PATH=/path/to/rule/file
 RCPOND_SYSTEM_PROMPT_TEMPLATE_PATH=/path/to/prompt/file
 
-# Static token auth (required unless OAuth credentials are set):
+# Auth mode: auto (default) | token | oauth_user | oauth_client_credentials.
+# 'auto' selects oauth_user when client credentials are set, otherwise token;
+# oauth_client_credentials is never selected automatically.
+# RCPOND_SERVICENOW_AUTH_MODE=auto
+
+# Static token auth (required in 'token' mode; optional elsewhere, for an API
+# gateway that wants a subscription key alongside the OAuth bearer):
 RCPOND_SERVICENOW_TOKEN=your-servicenow-token  # pragma: allowlist secret
 
-# OAuth auth (takes precedence over the static token when both are set):
+# Interactive OAuth (browser login). Scope must include 'openid'.
 # RCPOND_SERVICENOW_CLIENT_ID=your-client-id
 # RCPOND_SERVICENOW_CLIENT_SECRET=your-client-secret
-# RCPOND_SERVICENOW_OAUTH_SCOPE=useraccount
+# RCPOND_SERVICENOW_OAUTH_SCOPE=useraccount openid
 # RCPOND_SERVICENOW_OAUTH_REDIRECT_PORT=8765
 # RCPOND_SERVICENOW_OAUTH_AUTH_URL=https://alanturingdev.service-now.com/oauth_auth.do
 # RCPOND_SERVICENOW_OAUTH_TOKEN_URL=https://alanturingdev.service-now.com/oauth_token.do
+
+# Machine-to-machine OAuth (bots, CI): client credentials plus the token URL only.
+# RCPOND_SERVICENOW_AUTH_MODE=oauth_client_credentials
 ```
 
 Example use
