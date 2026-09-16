@@ -70,6 +70,10 @@ markers = [
 xfail_strict = true
 filterwarnings = [
   "error",
+  # typer's test helpers call click.utils.get_binary_stream / get_text_stream, both
+  # deprecated in Click 9. Raised inside typer, not by rcpond; only reachable from the
+  # CLI tests. Drop this once typer stops using them.
+  "ignore:'click.utils.get_\\w+_stream' is deprecated:DeprecationWarning",
 ]
 log_cli_level = "INFO"
 testpaths = [
