@@ -207,10 +207,10 @@ def test_web_url_strips_trailing_slash(sn_instance, ticket):
 def test_assign_to_me_raises_without_an_interactive_user(ticket, auth_mode):
     """Only the interactive flow may claim a ticket.
 
-    Static token auth carries no identity at all. Client Credentials is bound to a
-    service account, but how this instance resolves that identity is unverified —
-    see test_client_credentials_identity_resolution and open question §7 of
-    planning/oauth-client-credentials.md. Blocked until that is answered.
+    Static token auth carries no identity at all. Client Credentials resolves to a
+    service account and *could* technically assign — see the recorded result in
+    test_client_credentials_identity_resolution — but assigning tickets to the bot is
+    not believed to be a useful ServiceNow workflow, so it is blocked by choice.
     """
     sn = _make_sn(auth_mode)
     with pytest.raises(NotImplementedError, match="OAuth"):
@@ -801,17 +801,28 @@ def test_ticket_type_key_returns_none_for_unknown_type(ticket):
 def test_client_credentials_identity_resolution(dev_instance_sn):
     """Diagnostic: what identity does a Client Credentials token resolve to on our instance?
 
-    Answers open question §7 of planning/oauth-client-credentials.md. ServiceNow is
-    documented to bind a client-credentials token to the user associated with the OAuth
-    entity profile, so ``gs.getUserID()`` should return that service account — but that
-    is unverified here, and ``assign_to_me()`` stays blocked for this mode until it is.
+    Answers open question §7 of planning/oauth-client-credentials.md.
 
-    Run with a Client Credentials config against the dev instance::
+    Result (dev instance, 2026-09-16)::
+
+        Client Credentials identity claims: {
+            'sub': 'b04b7606fbbd3e100b8cf46daeefdccb',
+            'name': 'Research API User',
+            'user_name': 'research_cmd_user',
+        }
+
+    So ``gs.getUserID()`` does resolve to the service account, as ServiceNow documents —
+    and it is the same 'Research API User' that already authors RCPond's work notes.
+
+    Identity resolution is therefore **not** the reason ``assign_to_me()`` is blocked for
+    this mode. It is blocked because assigning tickets to the bot is not believed to be a
+    useful ServiceNow workflow, a decision pending review with users. Do not unblock on
+    the strength of this result alone.
+
+    Re-run with a Client Credentials config against the dev instance::
 
         RCPOND_SERVICENOW_AUTH_MODE=oauth_client_credentials uv run pytest -m integration \\
             tests/test_servicenow.py::test_client_credentials_identity_resolution -s
-
-    Record the outcome in this docstring, then decide whether to unblock assign_to_me().
     """
     if dev_instance_sn._auth_mode is not AuthMode.oauth_client_credentials:
         pytest.skip("Requires RCPOND_SERVICENOW_AUTH_MODE=oauth_client_credentials")
@@ -825,8 +836,7 @@ def test_client_credentials_identity_resolution(dev_instance_sn):
         pytest.fail(f"Client Credentials token did not resolve to any ServiceNow user: {exc}")
 
     print(f"\nClient Credentials identity claims: {claims}")
-    print("  → If 'name'/'user_name' is the service account, assign_to_me() can be unblocked.")
-    print("  → If it is 'guest' or a human user, it must stay blocked.")
+    print("  → Expected the service account ('Research API User'); see this test's docstring.")
 
     assert claims.get("sub"), "gs.getUserID() resolved no sys_id for this token"
 

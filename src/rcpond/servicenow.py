@@ -46,7 +46,7 @@ from typing import ClassVar, Self
 import requests
 
 from rcpond import __version__ as rcpond_version
-from rcpond.config import Config
+from rcpond.config import AuthMode, Config
 
 
 @dataclass
@@ -575,17 +575,37 @@ class ServiceNow:
         self._web_base_url: str = config.servicenow_web_url
         self._query: str = config.servicenow_query or _DEFAULT_SERVICENOW_QUERY
         self._id_token: str | None = None
-        self._is_oauth = False
+        self._auth_mode: AuthMode = config.servicenow_auth_mode
         self.session = requests.Session()
         self.session.headers.update({"Content-Type": "application/json", "Accept": "application/json"})
-        if config.servicenow_client_id and config.servicenow_client_secret:
+
+        if self._is_oauth:
             from rcpond.auth import get_bearer_token, get_id_token
 
             self.session.headers["Authorization"] = f"Bearer {get_bearer_token(config)}"
-            self._id_token = get_id_token()
-            self._is_oauth = True
-        else:
-            self.session.headers["Ocp-Apim-Subscription-Key"] = config.servicenow_token or ""
+            ## Only the interactive flow issues an id_token. Reading the cache in any other
+            ## mode would adopt the identity of whichever user last logged in on this host.
+            if self._acts_as_user:
+                self._id_token = get_id_token()
+
+        ## Independent of the bearer: the subscription key authenticates the caller to the
+        ## API gateway, not the principal to ServiceNow, so both may be needed at once.
+        if config.servicenow_token:
+            self.session.headers["Ocp-Apim-Subscription-Key"] = config.servicenow_token
+
+    @property
+    def _acts_as_user(self) -> bool:
+        """True when the session carries a human user's identity.
+
+        Distinct from ``_is_oauth``: a Client Credentials session is OAuth-authenticated
+        but acts as a service account, so it takes the bot code paths throughout.
+        """
+        return self._auth_mode is AuthMode.oauth_user
+
+    @property
+    def _is_oauth(self) -> bool:
+        """True when requests carry an OAuth bearer token rather than only a gateway key."""
+        return self._auth_mode is not AuthMode.token
 
     def get_tickets(self, state: TicketState = TicketState.user_focus) -> list[Ticket]:
         """Get tickets that are applications for HPC/Azure credits.
@@ -616,13 +636,16 @@ class ServiceNow:
         ## user_focus and all_open both exclude closed/resolved/cancelled
         tickets = [t for t in tickets if t.state not in _CLOSED_TICKET_STATES]
 
+        ## Filtering keys on whether a human is behind the session, not on whether OAuth is
+        ## in use: a Client Credentials session is OAuth-authenticated but is a bot, and
+        ## must see exactly what static token auth sees.
         if state is TicketState.all_open:
-            ## Bot: exclude tickets RCPond already handled; OAuth: everything non-closed
-            if not self._is_oauth:
+            ## Bot: exclude tickets RCPond already handled; interactive: everything non-closed
+            if not self._acts_as_user:
                 tickets = [t for t in tickets if not t.is_rcpond_processed()]
         else:
             ## user_focus
-            if self._is_oauth:
+            if self._acts_as_user:
                 my_name = self._current_user_display_name()
                 tickets = [t for t in tickets if t.assigned_to in ("", my_name)]
             else:
@@ -924,15 +947,20 @@ class ServiceNow:
         Raises
         ------
         NotImplementedError
-            If the client is using static token authentication, which does not
-            carry a per-user identity. OAuth credentials (``servicenow_client_id``
-            + ``servicenow_client_secret``) are required to use this feature.
+            Unless the interactive OAuth flow is in use. Static token auth carries no
+            per-user identity at all. Client Credentials *does* resolve to a service
+            account on our instance (verified — see the integration test
+            ``test_client_credentials_identity_resolution``), so blocking it is a
+            deliberate product decision rather than a technical limitation: assigning
+            tickets to the bot is not believed to be a useful ServiceNow workflow.
+            Pending review with users; do not unblock merely because identity resolves.
         """
-        if not self._is_oauth:
+        if not self._acts_as_user:
             msg = (
-                "assign_to_me() requires OAuth authentication.\n"
-                "Static token auth does not carry a per-user identity.\n"
-                "Set servicenow_client_id and servicenow_client_secret in your config to enable this feature."
+                "assign_to_me() requires interactive OAuth authentication.\n"
+                f"The current auth mode is '{self._auth_mode}', which has no human user to assign to.\n"
+                "Static token auth carries no per-user identity. Client Credentials is bound to a\n"
+                "service account, but assigning tickets to the bot is deliberately not supported."
             )
             raise NotImplementedError(msg)
         return self.assign_to(ticket, self._current_user_sys_id())

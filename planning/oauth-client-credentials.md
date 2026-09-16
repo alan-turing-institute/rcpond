@@ -251,32 +251,39 @@ Then:
 - Keep `_is_oauth` as a property aliasing `self._auth_mode != "token"` if anything
   outside these call sites depends on it; grep shows only `cli.py:125` does.
 
-### 3.1 Identity under Client Credentials — a decision to make
+### 3.1 Identity under Client Credentials — RESOLVED
 
 `_fetch_current_user_claims()` (`servicenow.py:816`) tries the cached `id_token`
 first, then falls back to querying `sys_user` with
 `sys_id=javascript:gs.getUserID()`. That fallback is evaluated server-side and
 returns whichever user the session is bound to.
 
-ServiceNow's Client Credentials grant binds the token to a user associated with
-the OAuth entity profile, so **the fallback path should return the service
-account's record** — meaning `whoami` and `assign_to_me` could work under M2M
-without further code. This needs verifying against the actual instance before we
-rely on it; if `gs.getUserID()` resolves to `guest` or errors, identity is simply
-unavailable in this mode.
+**Verified against the dev instance on 2026-09-16** (see the integration test
+`test_client_credentials_identity_resolution`): the fallback returns the service
+account, as ServiceNow documents.
 
-Two options, pending that check:
+```
+{'sub': 'b04b7606fbbd3e100b8cf46daeefdccb',
+ 'name': 'Research API User',
+ 'user_name': 'research_cmd_user'}
+```
 
-- **(a) Recommended:** let `assign_to_me()` work when identity resolves. Change its
-  guard from "is OAuth" to "try to resolve identity; raise `NotImplementedError`
-  with the existing guidance if it cannot". A bot assigning tickets to its own
-  service account is a genuinely useful capability.
-- **(b) Conservative:** keep `assign_to_me()` restricted to `oauth_user`. Less
-  code, but leaves M2M unable to claim tickets.
+That is the same `Research API User` which already authors RCPond's work notes, so
+identity under M2M is available and correct.
 
-Either way `whoami` should print the service account's details rather than the
-current "user identity not available" message, and should say which mode it is
-reporting for.
+**Decision: `assign_to_me()` stays blocked for Client Credentials anyway.** This
+reverses the plan's original recommendation (a), and on different grounds: the
+capability works, but assigning tickets to the bot is not believed to be a useful
+ServiceNow workflow. Pending review with users. The guard is therefore
+`if not self._acts_as_user`, and the code comments say *why* — so that a later
+reader who re-verifies identity resolution does not take that as licence to unblock.
+
+An important consequence for §7: because identity resolution was the only thing
+gating this, nothing else in the plan is blocked on it.
+
+`whoami` should still print the service account's details rather than the current
+"user identity not available" message, and should say which mode it is reporting
+for — that part of the original recommendation stands.
 
 ---
 

@@ -312,6 +312,8 @@ def _get_client_credentials_token(config: Config) -> str:
     token, and a fresh fetch is a single non-interactive round trip.  Checking expiry
     on every call is what keeps a long-running bot process from 401ing part-way through.
     """
+    ## Config makes client_id mandatory in this mode; assert so the cache key is typed str
+    assert config.servicenow_client_id is not None
     client_id = config.servicenow_client_id
     cached = _CC_TOKEN_CACHE.get(client_id)
 
