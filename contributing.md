@@ -44,9 +44,9 @@ The integration tests require a live connection to a ServiceNow (Dev) instance, 
 Integration test will not load any credentials from the XDG config file (`~/.config/rcpond/default.config`). This is prevented to avoid accidentally running integration tests with real credentials, causing unwanted changes to a production ServiceNow instance. If you want to run integration tests, you must explicitly provide test credentials via a `.env` file or environment variables.
 
 
-# Running RCPond against the example business logic
+# Running RCPond against the example config directory
 
-[`business_logic/`](business_logic/) is a self-contained example of the per-ticket-type
+[`example_config_dir/`](example_config_dir/) is a self-contained example of the per-ticket-type
 configuration — rules, email templates and a `.config` file per type. Running against it
 lets you exercise `process-next` and friends without touching your personal config at
 `~/.config/rcpond/`, and without `--env-file`.
@@ -60,18 +60,18 @@ RCPOND_LLM_MODEL=gpt-4o
 RCPOND_SERVICENOW_URL=https://...
 RCPOND_SERVICENOW_WEB_URL=https://...
 RCPOND_SERVICENOW_TOKEN=your-servicenow-token
-RCPOND_SYSTEM_PROMPT_TEMPLATE_PATH=business_logic/system_prompt_template.txt
+RCPOND_SYSTEM_PROMPT_TEMPLATE_PATH=example_config_dir/system_prompt_template.txt
 ```
 
 Then, **from the repository root**:
 
 ```bash
 set -a; source .env; set +a
-XDG_CONFIG_HOME="$PWD/business_logic" rcpond process-next --ticket-type compute_allocation_request
+XDG_CONFIG_HOME="$PWD/example_config_dir" rcpond process-next --ticket-type compute_allocation_request
 ```
 
 `rules_path`, `email_templates_dir` and `servicenow_query` come from
-`business_logic/rcpond/ticket_types/compute_allocation_request.config`; everything else
+`example_config_dir/rcpond/ticket_types/compute_allocation_request.config`; everything else
 comes from the environment.
 
 ## Why `XDG_CONFIG_HOME` rather than `--env-file`
@@ -90,7 +90,7 @@ personal configuration is completely out of the picture.
 
 1. **`XDG_CONFIG_HOME` must be absolute.** A relative path is silently ignored, and you
    get `~/.config` instead — producing a "No config file found for ticket type" error
-   that names a path you never set. Hence `"$PWD/business_logic"`. The
+   that names a path you never set. Hence `"$PWD/example_config_dir"`. The
    [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir/latest/)
    (*Basics*) requires this: "All paths set in these environment variables must be
    absolute. If an implementation encounters a relative path in any of these variables it
@@ -105,7 +105,7 @@ personal configuration is completely out of the picture.
 
 ## Only one ticket type is currently runnable
 
-`business_logic/` also contains a `software_request` type, but selecting it fails:
+`example_config_dir/` also contains a `software_request` type, but selecting it fails:
 
 ```
 ValueError: Unknown ticket_type 'software_request'. Known types: 'compute_allocation_request'
@@ -113,7 +113,7 @@ ValueError: Unknown ticket_type 'software_request'. Known types: 'compute_alloca
 
 Its files show the layout for a second type; making it work requires registering a
 `Ticket` subclass in `_TICKET_TYPES` (`src/rcpond/servicenow.py`). See
-[business_logic/README.md](business_logic/README.md) and
+[example_config_dir/README.md](example_config_dir/README.md) and
 [planning/multiple-ticket-types.md](planning/multiple-ticket-types.md).
 
 

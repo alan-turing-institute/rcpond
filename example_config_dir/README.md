@@ -9,7 +9,7 @@ Everything here is a toy example. The real rules and templates are not in this p
 ## Layout
 
 ```
-business_logic/                                   <- point XDG_CONFIG_HOME at this
+example_config_dir/                                   <- point XDG_CONFIG_HOME at this
 ├── system_prompt_template.txt                    <- shared by every ticket type
 ├── rcpond/
 │   └── ticket_types/                             <- fixed location; see "Why the nesting?"
@@ -32,8 +32,8 @@ $XDG_CONFIG_HOME/rcpond/ticket_types/<ticket-type>.config
 ```
 
 There is no environment variable or CLI flag that points somewhere else. Setting
-`XDG_CONFIG_HOME=business_logic` is therefore how this directory is used, and it is why
-the `.config` files sit under `business_logic/rcpond/ticket_types/` rather than beside
+`XDG_CONFIG_HOME=example_config_dir` is therefore how this directory is used, and it is why
+the `.config` files sit under `example_config_dir/rcpond/ticket_types/` rather than beside
 the rules they configure.
 
 Relocating `XDG_CONFIG_HOME` also moves where `default.config` is looked up. There isn't
