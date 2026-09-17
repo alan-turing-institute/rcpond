@@ -1,0 +1,19 @@
+{# Toy example, matching the equally toy rule in ../RULES.md. #}
+{# Uses only base Ticket fields, so it stays valid whichever ticket class is active. #}
+email_template:
+  {# Use quotes to prevent a string like '01234' being interpreted as an octal #}
+  ticket_no : "{{ ticket.number }}"
+  to : "rcp@example.com"
+  cc : null
+  subject : Software request approval for '{{ ticket.number }}'
+  body : |
+    "Dear RCP team,
+
+    I have a software installation request from {{ ticket.requested_for }}.
+    This request has been reviewed by RCPond, and can be approved for this reason:
+    {{ reason }}
+
+    Please find the request attached for more details. Let me know if you require any additional information from the applicant to make a decision.
+
+    GLHF
+    "
