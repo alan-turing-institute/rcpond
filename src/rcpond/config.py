@@ -43,7 +43,7 @@ RCPOND_SERVICENOW_TOKEN=your-servicenow-token  # pragma: allowlist secret
 # Interactive OAuth (browser login). Scope must include 'openid'.
 # RCPOND_SERVICENOW_CLIENT_ID=your-client-id
 # RCPOND_SERVICENOW_CLIENT_SECRET=your-client-secret
-# RCPOND_SERVICENOW_OAUTH_SCOPE=useraccount openid
+# RCPOND_SERVICENOW_OAUTH_SCOPE="useraccount openid"
 # RCPOND_SERVICENOW_OAUTH_REDIRECT_PORT=8765
 # RCPOND_SERVICENOW_OAUTH_AUTH_URL=https://alanturingdev.service-now.com/oauth_auth.do
 # RCPOND_SERVICENOW_OAUTH_TOKEN_URL=https://alanturingdev.service-now.com/oauth_token.do
@@ -394,8 +394,24 @@ def _parse_dotenv(env_path: Path) -> dict[str, str]:
             raise ValueError(msg)
 
         # Now we have the actual value
-        result[key] = value.strip()
+        result[key] = _strip_surrounding_quotes(value.strip())
     return result
+
+
+def _strip_surrounding_quotes(value: str) -> str:
+    """Remove one matched pair of surrounding single or double quotes.
+
+    A value containing spaces must be quoted for the file to also be usable as
+    ``set -a; source .env; set +a``, which is how the config is supplied without
+    ``--env-file``.  Without stripping them back off, the quote characters would become
+    part of the value — silently breaking, for example, the ``openid`` scope check.
+
+    Only a matched leading/trailing pair is removed, so quotes that are genuinely part of
+    a value (``say "hi" now``) or unbalanced (``"unbalanced``) are preserved.
+    """
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+        return value[1:-1]
+    return value
 
 
 def _confirm_path_exists(path_as_str: str) -> Path:

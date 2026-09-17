@@ -110,7 +110,7 @@ RCPOND_SERVICENOW_URL=https://turing-api.azure-api.net/dev-research/api/now/tabl
 # RCPOND_SERVICENOW_TOKEN=your-servicenow-token  # required if not using OAuth
 RCPOND_SERVICENOW_CLIENT_ID=your-client-id
 RCPOND_SERVICENOW_CLIENT_SECRET=your-client-secret
-RCPOND_SERVICENOW_OAUTH_SCOPE=workspace openid
+RCPOND_SERVICENOW_OAUTH_SCOPE="workspace openid"
 RCPOND_SERVICENOW_OAUTH_REDIRECT_PORT=8765
 RCPOND_SERVICENOW_OAUTH_AUTH_URL=https://...service-now.com/oauth_auth.do
 RCPOND_SERVICENOW_OAUTH_TOKEN_URL=https://...service-now.com/oauth_token.do
@@ -173,7 +173,7 @@ To enable OAuth, add your client credentials to the configuration:
 ```
 RCPOND_SERVICENOW_CLIENT_ID=your-client-id
 RCPOND_SERVICENOW_CLIENT_SECRET=your-client-secret
-RCPOND_SERVICENOW_OAUTH_SCOPE=workspace openid
+RCPOND_SERVICENOW_OAUTH_SCOPE="workspace openid"
 RCPOND_SERVICENOW_OAUTH_REDIRECT_PORT=8765
 RCPOND_SERVICENOW_OAUTH_AUTH_URL=https://...service-now.com/oauth_auth.do
 RCPOND_SERVICENOW_OAUTH_TOKEN_URL=https://...service-now.com/oauth_token.do

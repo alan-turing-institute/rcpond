@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from rcpond.config import AuthMode, Config
+from rcpond.config import AuthMode, Config, _parse_dotenv
 
 _WORKING_TEMPLATES_DIR = Path("tests/fixtures/working_templates")
 _FAILING_TEMPLATES_DIR = Path("tests/fixtures/failing_templates")
@@ -452,6 +452,67 @@ def test_dotenv_ignores_comments_and_blank_lines(tmp_path, common_config_values)
     config = Config(env_path=env_file)
 
     assert config.llm_model == "gpt-4"
+
+
+@pytest.mark.parametrize(
+    ("raw_value", "expected"),
+    [
+        ('"workspace openid"', "workspace openid"),
+        ("'workspace openid'", "workspace openid"),
+        ("workspace openid", "workspace openid"),
+        ('"gpt-4"', "gpt-4"),
+        ("gpt-4", "gpt-4"),
+        ('""', ""),
+        ("'", "'"),
+        ('"unbalanced', '"unbalanced'),
+        ("trailing-only'", "trailing-only'"),
+        ('say "hi" now', 'say "hi" now'),
+        ("'" '"a"' "'", '"' "a" '"'),
+    ],
+    ids=[
+        "double_quoted_with_space",
+        "single_quoted_with_space",
+        "unquoted_with_space",
+        "double_quoted_no_space",
+        "unquoted_no_space",
+        "empty_quotes",
+        "lone_quote_char",
+        "unbalanced_leading",
+        "unbalanced_trailing",
+        "interior_quotes_preserved",
+        "multiple_nested_quotes",
+    ],
+)
+def test_dotenv_strips_matched_surrounding_quotes(tmp_path, raw_value, expected):
+    """A single .env must work both with --env-file and with `set -a; source .env`.
+
+    The shell needs quotes around any value containing a space; without stripping them
+    back off, --env-file would deliver the quote characters as part of the value. Only a
+    matched leading/trailing pair is removed, so quotes that are part of the value survive.
+    """
+    env_file = tmp_path / ".env"
+    env_file.write_text(f"RCPOND_LLM_MODEL={raw_value}\n")
+
+    assert _parse_dotenv(env_file)["RCPOND_LLM_MODEL"] == expected
+
+
+def test_quoted_oauth_scope_satisfies_the_openid_check(common_config_values, tmp_path):
+    """The case that motivated quote stripping: a scope quoted for the shell.
+
+    Unstripped, the value would be 'workspace openid"' after splitting, which does not
+    equal 'openid', so a correctly-configured file would be rejected.
+    """
+    values = {
+        **common_config_values,
+        **_OAUTH_CREDS,
+        "servicenow_oauth_scope": '"workspace openid"',
+    }
+    env_file = write_dotenv(tmp_path, values)
+
+    config = Config(env_path=env_file)
+
+    assert config.servicenow_oauth_scope == "workspace openid"
+    assert config.servicenow_auth_mode == AuthMode.oauth_user
 
 
 # --- Dataclass structure ---
