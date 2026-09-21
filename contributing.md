@@ -86,6 +86,10 @@ RCPond at a different set of per-type configs.
 It has the useful side effect of relocating the `default.config` lookup too, so your
 personal configuration is completely out of the picture.
 
+The same pattern is how RCPond is configured when running as a bot, where there may be no
+usable home directory for the default `~/.config` path to resolve against — see
+[Running without a home directory](docs/configuration.md#running-without-a-home-directory).
+
 ## Three things that will catch you out
 
 1. **`XDG_CONFIG_HOME` must be absolute.** A relative path is silently ignored, and you
