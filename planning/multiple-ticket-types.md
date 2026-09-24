@@ -612,3 +612,47 @@ cross-type by nature, so `--ticket-type` is not the right answer for it; unlike
 one-line change, deferred rather than ruled out. See "Deferred: the genuinely cross-type
 commands" above.
 
+## TODO
+
+### Survey the real `short_description` values on dev *and* production
+
+Catalogue every distinct `short_description` actually present on both ServiceNow
+instances, and record the exact strings here. This is a prerequisite for registering any
+further ticket type, because `MATCH_CRITERIA` is an **exact** string comparison.
+
+Why it matters:
+
+- The registry cannot be written from guesses. A value that is one character off matches
+  nothing, and — now that the `MATCH_CRITERIA` guard is in place — that shows up as an
+  aborted command rather than a silent mis-classification.
+- **Dev and production may differ.** Descriptions are free text an administrator can
+  reword on either instance independently, so a registry built from dev alone may not hold
+  in production. Both must be surveyed, and any divergence is itself a finding worth
+  recording.
+- Punctuation and whitespace count. One observed value ends in a full stop; trailing
+  spaces or a changed capital would be just as fatal and just as easy to miss when
+  transcribing by eye.
+
+Observed on **dev** so far, from a deliberately broadened query (2026-09-24):
+
+| `short_description` | Status |
+|---|---|
+| `Request access to HPC and cloud computing facilities` | Registered as `compute_allocation_request` |
+| `General Compute Support Request` | Not registered. Matches the hypothetical `GeneralComputeSupportTicket` in Option A above exactly — that example turns out to be the real string. |
+| `Requesting access to licence for research software.` | Not registered. Note the trailing full stop. |
+
+This list is incidental — the by-product of one broadened query, not a survey — so treat
+it as a starting point rather than the complete set. Production has not been surveyed at
+all.
+
+How to collect it: run a query with no `short_description` filter and group the results.
+`display-all` with `RCPOND_SERVICENOW_QUERY` overridden to something broad will abort and
+name the non-matching values, which works but only reports what the current type does not
+match. A short throwaway script that fetches the table and counts distinct
+`short_description` values would give the full picture in one pass, including how many
+tickets each type has.
+
+Related: the note in "Other Notes" above that `RCPOND_SERVICENOW_QUERY` and
+`MATCH_CRITERIA` express overlapping intent independently and can drift. Having the real
+values written down makes that drift detectable.
+
