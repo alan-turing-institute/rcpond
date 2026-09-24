@@ -82,6 +82,7 @@ _GROUP_B_ARGV = [
     ["process-next"],
     ["process-all"],
     ["process-ticket", "RES0001234"],
+    ["display-all"],
     ["display-ticket", "RES0001234"],
     ["browse-ticket", "RES0001234"],
     ["find-related", "RES0001234"],

@@ -226,9 +226,17 @@ def whoami(ctx: typer.Context) -> None:
 
 
 @cli.command()
-def display_all(ctx: typer.Context, ticket_state: TicketState = TicketState.user_focus):
-    """Display tickets from ServiceNow filtered by --ticket-state."""
-    command.display_all_tickets(state=ticket_state, config=_config(ctx))
+def display_all(
+    ctx: typer.Context,
+    ticket_state: TicketState = TicketState.user_focus,
+    ticket_type: TicketTypeOption = DEFAULT_TICKET_TYPE,
+):
+    """Display tickets from ServiceNow filtered by --ticket-state and --ticket-type.
+
+    Shows one ticket type at a time, so the listing matches exactly what `process-all`
+    would act on for the same `--ticket-type`.
+    """
+    command.display_all_tickets(state=ticket_state, config=_config(ctx, ticket_type=ticket_type))
 
 
 @cli.command()

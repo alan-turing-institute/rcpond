@@ -350,7 +350,7 @@ on two values `login` would never read.
 templates, yet it cannot load them from a per-type config either. `check-templates` is
 similar — it exists to validate template directories but cannot see the per-type ones.
 
-### Commands fall into four groups
+### Commands fall into three groups
 
 Worth settling this taxonomy before writing code, because it determines what
 `--ticket-type` should *mean* per command.
@@ -360,7 +360,7 @@ failure above:
 
 - **Type scope** — how many ticket types are in play (the groups below).
 - **Needs rules/templates** — whether the command reads rules or templates at all. This
-  does *not* follow from the group: it varies even *within* group C.
+  does *not* follow from the group.
 
 `rules_path` and `system_prompt_template_path` are read only by `prompt.py`;
 `email_templates_dir` only by `PostTemplatedNoteTool`. Everything else never touches them.
@@ -368,55 +368,77 @@ failure above:
 | Group | Commands | Needs rules/templates | Type scope |
 |---|---|---|---|
 | **A. Needs neither** | `login`, `whoami` | No | None. A `--ticket-type` switch would be meaningless and would confuse users. |
-| **B. One type per invocation** | `process-next`, `process-all`, `process-ticket`, `display-ticket`, `browse-ticket`, `find-related` | `process-*` yes; `display-ticket`, `browse-ticket`, `find-related` no | Exactly one type. `--ticket-type` selects it, **defaulting to `compute_allocation_request`**. |
-| **C. Potentially mixed types** | `display-all`, `analytics`, `evaluate-all` | `evaluate-all` yes; `display-all`, `analytics` no | All types by default. Type derived **per ticket** via `MATCH_CRITERIA`. Optionally narrowed by a repeatable filter switch — see "Two flags, not one" below. |
-| **D. All types, always** | `check-templates` | Templates only | Every configured type; no switch. Deliberately the one command that seeks out other types without being asked. |
+| **B. One type per invocation** | `process-next`, `process-all`, `process-ticket`, `display-all`, `display-ticket`, `browse-ticket`, `find-related` | `process-*` yes; the rest no | Exactly one type. `--ticket-type` selects it, **defaulting to `compute_allocation_request`**. |
+| **C. All types, always** | `check-templates` | Templates only | Every configured type; no switch. Deliberately the one command that seeks out other types without being asked. |
 
-
-
-Three commands are worth calling out individually:
-
-- **`analytics`** already groups by `ticket_type_key(ticket)`, derived per ticket rather
-  than from config. That is the right model for the whole of group C.
-- **`evaluate-all`** is doubly exceptional. Its tickets come from **local HTML files, not
-  a ServiceNow query**, so the query-ordering problem below does not apply to it — it is
-  the one mixed-type command that could derive type per ticket today. It is also
-  **conditionally registered** (inside `try: import rcpond.html_servicenow`, the `html`
-  extra), so it is absent from the CLI unless that dependency group is installed. The future of `evaluate-all` is undecided at this time. It is acceptable for it to remain unable to handle multiple ticket types at this stage
-- **`find-related`** is cleanly group B despite first appearances. Its input is one ticket
-  and its output is many, but the candidates come from `get_tickets(all_including_closed)`
-  filtered by the per-type `servicenow_query`, so the results are always the input
-  ticket's type. Cross-type relations are a *future* possibility — what the "Other Notes"
-  bullet about declaring relatable type combinations anticipates — and would move it to C.
-The current implementation ensures that the output tickets are all of the same type.
+Two commands sit outside the taxonomy for now — see "Deferred: the genuinely cross-type
+commands" below.
 
 So "thread `--ticket-type` through every command" is the wrong goal. The goal is:
 
 - **A**: stop requiring rules or templates at all.
 - **B**: accept `--ticket-type`, defaulted; load that one per-type config.
-- **C**: derive type per ticket; load whichever per-type configs the results need; allow
-  narrowing via a separate filter switch.
-- **D**: enumerate every configured type.
+- **C**: enumerate every configured type.
 
-### Two flags, not one
+`find-related` belongs in B despite first appearances. Its input is one ticket and its
+output is many, but the candidates come from `get_tickets(all_including_closed)` filtered
+by the per-type `servicenow_query`, so the results are always the input ticket's type.
+Cross-type relations are a *future* possibility — what the "Other Notes" bullet about
+declaring relatable type combinations anticipates.
 
-Groups B and C both narrow by ticket type, but with **opposite defaults and different
-arity**:
+### Why there is no "mixed types" group
 
-| | Group B | Group C |
-|---|---|---|
-| Default | `compute_allocation_request` | all types |
-| Arity | exactly one | zero or more |
-| Meaning | "operate on this type" | "restrict to these types" |
+An earlier draft had a fourth group for commands whose result set may span types
+(`display-all`, `analytics`, `evaluate-all`), narrowed by a repeatable
+`--include-ticket-type` filter defaulting to all types. That group has been **eliminated**,
+and with it the second flag. Two moves did it:
 
-Giving both the name `--ticket-type` would be worse than a near-miss naming clash: the
-same flag would mean opposite things depending on the command, undiscoverable from the
-name, and a later "consistency" tidy-up would silently narrow `analytics` to a single
-type and produce a confidently wrong report.
+**`display-all` becomes group B.** Restricting it to a single type is not a loss: it makes
+`display-all` show exactly the set that `process-all` would act on. Under the mixed-type
+design the two would have disagreed, so a user could see tickets that the very next
+command would refuse to touch. One flag, one meaning, and the `MATCH_CRITERIA` guard
+applies to it for free.
 
-**Decided:** group C uses `--include-ticket-type` — repeatable, obviously a filter, and it
-emphasises inclusion rather than exclusion, leaving room for a future
-`--exclude-ticket-type`.
+**`analytics` and `evaluate-all` are deferred**, not redesigned (below).
+
+This removes a substantial amount of machinery that was being introduced for a single
+command: a second CLI flag whose default was the *inverse* of `--ticket-type`'s, a
+per-ticket filtering path through `get_tickets`, and the risk — noted in the earlier
+draft — that a later "consistency" tidy-up would unify the two flags and silently narrow
+`analytics` to one type. None of that has to exist.
+
+The rejected design is preserved here because the reasoning still applies if a genuinely
+cross-type command is ever needed:
+
+> Groups B and C both narrow by ticket type, but with **opposite defaults and different
+> arity** — B defaults to one named type and takes exactly one; C defaulted to all types
+> and took zero or more. Giving both the name `--ticket-type` would mean the same flag
+> meaning opposite things depending on the command, undiscoverable from the name. Hence
+> `--include-ticket-type`: repeatable, obviously a filter, emphasising inclusion and
+> leaving room for a future `--exclude-ticket-type`.
+
+### Deferred: the genuinely cross-type commands
+
+**`analytics`** is the one command that is cross-type by nature: it already groups by
+`ticket_type_key(ticket)`, derived per ticket rather than from config, and reports per
+type. Forcing it into group B would make it report on one type and quietly lose that.
+
+It remains **broken** under a per-type-only config, failing with
+`Missing required configuration: rules_path, email_templates_dir`.
+
+Note this is *not* a ticket-type problem. `analytics` reads no rules and no templates, so
+the one-line fix is `require_rules_and_templates=False` at its `_config(ctx, ...)` call
+site — the same treatment as `login` and `whoami`, for the same reason. No per-type
+config, no filter switch and no `per_type` mapping are needed to unbreak it. Accepted as
+broken for now by explicit decision, but the cost of fixing it is one line, not a feature.
+
+**`evaluate-all`** is doubly exceptional and its future is undecided. Its tickets come
+from **local HTML files, not a ServiceNow query**, so the query-ordering problem below
+does not apply to it. It is also **conditionally registered** (inside
+`try: import rcpond.html_servicenow`, the `html` extra), so it is absent from the CLI
+unless that dependency group is installed. It does need rules and templates, so unlike
+`analytics` it cannot be unbroken with a one-line change. Acceptable that it remains
+unable to handle multiple ticket types at this stage.
 
 ### Why inference is deferred
 
@@ -449,29 +471,34 @@ cheap to close — and it serves the fail-early preference directly:
 everywhere is more consistent and catches a mistyped flag, and there is no use case for
 deliberately applying one type's rules to another type's ticket.
 
-### Group C implies per-type config must be loadable on demand
+### Group C needs per-type config loadable for every type
 
 Today the per-type file is read once, inside `Config.__post_init__`, and flattened into
 `config.rules_path` / `config.email_templates_dir` — a single type's values on a single
-object. Group C needs several types' values simultaneously, which that shape cannot
-express.
+object. Group C (`check-templates`) needs every configured type's values simultaneously,
+which that shape cannot express.
+
+With the mixed-types group eliminated, `check-templates` is now the **only** driver for
+this work: nothing else needs more than one type's config at a time. It stays accepted —
+validating templates for just one type is not much of a check — but it is no longer
+blocking anything else, and could reasonably be scheduled after the rest.
 
 Options:
 
 - Accepted **C-i. `Config` holds a mapping.** `config.per_type: dict[str, PerTypeConfig]`, keyed
   by registry key, populated for every `.config` file present in
-  `$XDG_CONFIG_HOME/rcpond/ticket_types/`. Group B selects one entry; group C looks up
-  per ticket. Flat `rules_path` becomes a convenience accessor for group B, or goes away.
+  `$XDG_CONFIG_HOME/rcpond/ticket_types/`. Group B selects one entry; `check-templates`
+  iterates all. Flat `rules_path` becomes a convenience accessor for group B, or goes away.
 - Rejected **C-ii. Lazy per-type loader.** `config.for_ticket_type(key) -> PerTypeConfig`, reading
   and caching on demand. Smaller change, but errors surface late and are harder to
   report up front.
--  Rejected **C-iii. Leave group C unable to reach per-type config.** Acceptable only while
-  `analytics` is the sole group C command that needs rules or templates — which it
-  isn't, since `evaluate-all` does.
+- Rejected **C-iii. Leave `check-templates` unable to reach per-type config.** It would
+  then validate only the default type's templates, silently passing a deployment whose
+  other types' templates are broken — the opposite of what the command exists to do.
 
 C-i is accepted: it makes "which types are configured on this host" an explicit,
-inspectable fact, which also gives `check-templates` (group D) something to iterate over,
-and lets an unknown-type ticket be detected at startup rather than mid-run.
+inspectable fact, gives `check-templates` something to iterate over, and lets an
+unknown-type ticket be detected at startup rather than mid-run.
 
 Two consequences, both decided:
 
@@ -531,7 +558,7 @@ Settled during review, and folded into the sections above:
 
 | Question | Decision |
 |---|---|
-| Name for group C's filter switch | `--include-ticket-type`, repeatable |
+| Name for a mixed-types filter switch | Moot — the mixed-types group was eliminated, so no second flag is needed. The `--include-ticket-type` reasoning is preserved above in case one is ever required. |
 | Does explicit `--ticket-type` skip the `MATCH_CRITERIA` check? | No — the check applies either way |
 | Ticket matching no registered type | Abort the run; do not skip with a warning |
 | `require_rules_and_templates` mechanism | `Config` `InitVar`, not a separate `AuthConfig` |
@@ -544,9 +571,9 @@ Settled during review, and folded into the sections above:
 `require_rules_and_templates=False` in its own `_config(ctx, ...)` call. No central table in
 `cli.py` — that would duplicate the command list and fall out of step with it.
 
-Note this cannot be derived from the group: group C is mixed, since `evaluate-all` reads
-rules and templates while `display-all` and `analytics` do not. It has to be stated per
-command.
+Note this cannot be derived from the group: group B is mixed, since `process-*` reads rules
+and templates while `display-all`, `display-ticket`, `browse-ticket` and `find-related` do
+not. It has to be stated per command.
 
 The arrangement fails safe. `require_rules_and_templates` defaults to `True`, so a new command
 whose author forgets to declare it gets today's over-strict validation — a loud, spurious
@@ -570,14 +597,18 @@ rcpond browse-ticket RES0001 -> ValueError: Missing required configuration: rule
 So seven commands read neither rules nor templates: `login`, `whoami`, `display-all`,
 `display-ticket`, `browse-ticket`, `find-related`, `analytics`.
 
-**Decided: `login` and `whoami` only, for now.** The other five stay broken under a
-per-type-only config, pending the `--ticket-type` / `--include-ticket-type` work above,
-which will give them a route to a per-type config rather than exempting them from needing
-one.
+**Decided: `login` and `whoami` only.** They will *never* need rules or templates, so
+exempting them is permanent and correct.
 
-The distinction is deliberate, not arbitrary: `login` and `whoami` will *never* need rules
-or templates, so exempting them is permanent and correct. `display-all`, `display-ticket`,
-`browse-ticket`, `find-related` and `analytics` need neither today, but they do need to
-resolve a ticket type once groups B and C land — so exempting them now would be a
-short-lived workaround in the wrong direction.
+Of the other five, four are now resolved a different way: `display-all`, `display-ticket`,
+`browse-ticket` and `find-related` joined group B and take `--ticket-type`, so they reach
+a per-type config and no longer fail. Exempting them would have been the wrong fix — they
+need a ticket type for the *query*, not just for rules and templates.
+
+`analytics` is the exception and stays broken by decision. Unlike the other four it is
+cross-type by nature, so `--ticket-type` is not the right answer for it; unlike
+`process-*` it reads no rules or templates. It is therefore the one command for which the
+`require_rules_and_templates=False` exemption *would* be the correct permanent fix — a
+one-line change, deferred rather than ruled out. See "Deferred: the genuinely cross-type
+commands" above.
 
