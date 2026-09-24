@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Tokens are held in memory for the life of the process, keyed by client ID, and never written to the on-disk token cache. That cache has no notion of which principal it belongs to, so sharing it would let a bot and an interactive user on one host act as each other. There is no refresh step: the grant issues no refresh token, and expiry is re-checked on every call so long-running bots do not fail part-way through.
   - `rcpond login` is not required in this mode; running it verifies the credentials. `rcpond whoami` now reports the auth mode alongside the identity, and says when that identity is a service account rather than your own user.
 - `--servicenow-client-secret` help now warns that a secret given on the command line is visible in the process list, and points to the environment variable instead.
+- `--ticket-type` is now accepted by every command that acts on tickets of a single type: `display-ticket`, `browse-ticket`, `find-related` and `process-ticket` alongside the existing `process-next` and `process-all`. Those four previously had no way to reach a per-ticket-type config, so they could not be used with rules and templates declared only in `ticket_types/*.config`.
+- RCPond now verifies that every ticket it fetches really is of the ticket type it is applying rules and templates for, and aborts naming the offending tickets if not. Because `--ticket-type` defaults rather than being required, a mismatch would otherwise be silent: a ticket of another type would be reviewed against the wrong rules and answered from the wrong email templates. A ticket matching no registered type aborts too — that means the ServiceNow query and the ticket type registry disagree, and skipping it would quietly under-process a batch. Commands that legitimately span types are unaffected.
 
 ### Changed
 
@@ -29,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Ticket filtering now keys on whether a human user is behind the session rather than on whether OAuth is in use. A Client Credentials session is OAuth-authenticated but is a bot, and sees exactly what static token auth sees; behaviour for existing token and interactive users is unchanged.
 - `assign_to_me()` remains restricted to the interactive flow. The service account identity does resolve correctly under Client Credentials, so this is a product decision — assigning tickets to the bot is not believed to be a useful ServiceNow workflow — rather than a technical limitation. Under review.
 - `Config.rules_path`, `Config.system_prompt_template_path` and `Config.email_templates_dir` are now typed `Path | None`. They are `None` only when the config was built with `require_rules_and_templates=False`; for every other caller they are set exactly as before. Code reading them directly must handle (or assert away) the `None` case.
+- `--ticket-type` is no longer required on `process-next` and `process-all`: it defaults to `compute_allocation_request`. Passing it explicitly behaves exactly as before, but `rcpond process-next` now runs instead of erroring. The default is a fixed, named type rather than "whichever type happens to be registered", so it will not change meaning when further ticket types are added.
 - `.env` files may now quote values, and a matched pair of surrounding single or double quotes is stripped. This lets one file serve both `--env-file` and `set -a; source .env; set +a`: the shell needs quotes around any value containing a space — `RCPOND_SERVICENOW_QUERY` and an `openid`-bearing `RCPOND_SERVICENOW_OAUTH_SCOPE` both do — while previously the quotes would have been read as part of the value. Unquoted and unbalanced values are unaffected.
 
 ### Fixed
@@ -42,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The `analytics --refresh` flag is accepted but currently has no effect: a single bulk fetch is sufficient for the implemented metrics, so the ticket-history cache described in the design is deferred until a later stage needs per-ticket fetches.
 - Outcome-classification metrics (a later stage) rely on the work-note tool-name prefix; tickets processed before that prefix was deployed will fall into an "unknown outcome" category.
+- The ticket-type check compares each ticket's `short_description` against the registry's match criteria. `short_description` is free text that a ServiceNow administrator can reword at any time, so a reworded description will stop tickets matching and abort commands that previously worked. The fix is to update the match criteria; the alternative — carrying on with the wrong rules — is worse. Only one ticket type is registered so far, so a mismatch currently reports "matches no registered type" rather than naming the type it did match.
 
 ## [0.3.0] - 2026-06-24
 

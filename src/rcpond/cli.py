@@ -39,7 +39,7 @@ from rich import print
 from rcpond import command
 from rcpond.command import ReplyMode
 from rcpond.config import Config
-from rcpond.servicenow import TicketState
+from rcpond.servicenow import DEFAULT_TICKET_TYPE, TicketState
 
 cli = typer.Typer(name="rcpond", no_args_is_help=True)
 
@@ -118,18 +118,43 @@ def common_options(
     }
 
 
-def _config(ctx: typer.Context, *, require_rules_and_templates: bool = True) -> Config:
+def _config(
+    ctx: typer.Context,
+    *,
+    require_rules_and_templates: bool = True,
+    ticket_type: str | None = None,
+) -> Config:
     """Build the Config for a subcommand.
 
     ``require_rules_and_templates=False`` is for commands that authenticate only and never
     read the rules or the email templates. Defaults to True, so a command that does not
     say otherwise gets the strict validation.
+
+    ``ticket_type`` selects which per-type config is loaded. Group B commands pass their
+    ``--ticket-type`` option here; commands with no ticket type of their own omit it.
     """
+    cli_args = ctx.obj["cli_args"]
+    if ticket_type is not None:
+        cli_args = {**cli_args, "ticket_type": ticket_type}
     return Config(
         env_path=ctx.obj["env_path"],
-        cli_args=ctx.obj["cli_args"],
+        cli_args=cli_args,
         require_rules_and_templates=require_rules_and_templates,
     )
+
+
+_TICKET_TYPE_HELP = (
+    "Ticket type key to process (e.g. 'compute_allocation_request'). Must match a key in "
+    "the ticket type registry and have a corresponding config file."
+)
+
+TicketTypeOption = Annotated[str, typer.Option("--ticket-type", help=_TICKET_TYPE_HELP)]
+"""The ``--ticket-type`` option shared by every command that acts on a single ticket type.
+
+Declared once and applied per command rather than as a group-level option: a group-level
+default would set a ticket type for *every* command, which would make ``login`` and
+``whoami`` require a per-type config file in order to authenticate. Commands with no
+ticket type of their own simply do not take it. See planning/multiple-ticket-types.md."""
 
 
 @cli.command()
@@ -207,15 +232,15 @@ def display_all(ctx: typer.Context, ticket_state: TicketState = TicketState.user
 
 
 @cli.command()
-def display_ticket(ctx: typer.Context, ticket_number: str):
+def display_ticket(ctx: typer.Context, ticket_number: str, ticket_type: TicketTypeOption = DEFAULT_TICKET_TYPE):
     """Display the details of a specific ticket (e.g. RES0001234)."""
-    command.display_single_ticket(ticket_number=ticket_number, config=_config(ctx))
+    command.display_single_ticket(ticket_number=ticket_number, config=_config(ctx, ticket_type=ticket_type))
 
 
 @cli.command()
-def browse_ticket(ctx: typer.Context, ticket_number: str):
+def browse_ticket(ctx: typer.Context, ticket_number: str, ticket_type: TicketTypeOption = DEFAULT_TICKET_TYPE):
     """Opens a ticket in your default the browser (e.g. RES0001234)."""
-    url = command.get_ticket_url(ticket_number=ticket_number, config=_config(ctx))
+    url = command.get_ticket_url(ticket_number=ticket_number, config=_config(ctx, ticket_type=ticket_type))
     print(f"Opening ticket: {url}")
     webbrowser.open(url)
 
@@ -228,18 +253,15 @@ _REPLY_MODE_HELP = (
 )
 
 
-_TICKET_TYPE_HELP = "Ticket type key to process (e.g. 'compute_allocation_request'). Must match a key in the ticket type registry and have a corresponding config file."
-
-
 @cli.command()
 def process_next(
     ctx: typer.Context,
-    ticket_type: Annotated[str, typer.Option("--ticket-type", help=_TICKET_TYPE_HELP)],
+    ticket_type: TicketTypeOption = DEFAULT_TICKET_TYPE,
     dry_run: bool = False,
     reply_mode: Annotated[ReplyMode, typer.Option(help=_REPLY_MODE_HELP)] = ReplyMode.default,
 ):
     """Review an arbitrarily selected unassigned ticket via the LLM."""
-    cfg = Config(env_path=ctx.obj["env_path"], cli_args={**ctx.obj["cli_args"], "ticket_type": ticket_type})
+    cfg = _config(ctx, ticket_type=ticket_type)
     command.process_next_ticket(dry_run=dry_run, reply_mode=reply_mode, config=cfg)
 
 
@@ -247,12 +269,16 @@ def process_next(
 def process_ticket(
     ctx: typer.Context,
     ticket_number: str,
+    ticket_type: TicketTypeOption = DEFAULT_TICKET_TYPE,
     dry_run: bool = False,
     reply_mode: Annotated[ReplyMode, typer.Option(help=_REPLY_MODE_HELP)] = ReplyMode.default,
 ):
     """Review a specific ticket (e.g. RES0001234) via the LLM."""
     command.process_specific_ticket(
-        ticket_number=ticket_number, dry_run=dry_run, reply_mode=reply_mode, config=_config(ctx)
+        ticket_number=ticket_number,
+        dry_run=dry_run,
+        reply_mode=reply_mode,
+        config=_config(ctx, ticket_type=ticket_type),
     )
 
 
@@ -291,13 +317,16 @@ except ImportError:
 
 
 @cli.command()
-def find_related(ctx: typer.Context, ticket_number: str):
+def find_related(ctx: typer.Context, ticket_number: str, ticket_type: TicketTypeOption = DEFAULT_TICKET_TYPE):
     """List tickets related to the given ticket number.
 
     Searches all ticket states (including closed and resolved) and reports which
     heuristic matched each related ticket (finance code, PI email, project title, etc.).
+
+    Candidates come from the ticket type's own ServiceNow query, so related tickets are
+    always of the same type as ``ticket_number``.
     """
-    command.find_related_tickets(ticket_number=ticket_number, config=_config(ctx))
+    command.find_related_tickets(ticket_number=ticket_number, config=_config(ctx, ticket_type=ticket_type))
 
 
 try:
@@ -350,7 +379,7 @@ def check_templates(
 @cli.command()
 def process_all(
     ctx: typer.Context,
-    ticket_type: Annotated[str, typer.Option("--ticket-type", help=_TICKET_TYPE_HELP)],
+    ticket_type: TicketTypeOption = DEFAULT_TICKET_TYPE,
     dry_run: bool = False,
     reply_mode: ReplyMode = ReplyMode.default,
     ## Single flag name (no "--flag/--no-flag" form) suppresses Typer's auto-generated
@@ -360,7 +389,7 @@ def process_all(
     ] = False,
 ):
     """Review all unassigned tickets via the LLM."""
-    cfg = Config(env_path=ctx.obj["env_path"], cli_args={**ctx.obj["cli_args"], "ticket_type": ticket_type})
+    cfg = _config(ctx, ticket_type=ticket_type)
     if yes_i_am_sure:
         command.batch_process_tickets(dry_run=dry_run, reply_mode=reply_mode, config=cfg)
     else:

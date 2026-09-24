@@ -13,6 +13,7 @@ from typer.testing import CliRunner
 
 from rcpond.cli import cli
 from rcpond.config import AuthMode
+from rcpond.servicenow import _TICKET_TYPES, DEFAULT_TICKET_TYPE
 
 ## Note: importing typer.testing raises a Click 9 DeprecationWarning from inside typer.
 ## The project turns warnings into errors, so pyproject's filterwarnings carries a
@@ -71,6 +72,62 @@ def test_auth_mode_option_forwarded_verbatim(argv, expected):
 
     assert result.exit_code == 0, result.output
     assert captured["servicenow_auth_mode"] == expected
+
+
+# --- Group B: --ticket-type ---
+
+## Group B acts on tickets of a single type. Each accepts --ticket-type and defaults to
+## DEFAULT_TICKET_TYPE. See planning/multiple-ticket-types.md.
+_GROUP_B_ARGV = [
+    ["process-next"],
+    ["process-all"],
+    ["process-ticket", "RES0001234"],
+    ["display-ticket", "RES0001234"],
+    ["browse-ticket", "RES0001234"],
+    ["find-related", "RES0001234"],
+]
+## Derived, not restated, so the ids cannot drift from the argv list above.
+_GROUP_B_IDS = [c[0] for c in _GROUP_B_ARGV]
+
+
+def _capture_config_kwargs(argv):
+    """Invoke the CLI with Config stubbed, returning the kwargs it was constructed with."""
+    captured = {}
+
+    def _capture_and_abort(**kwargs):
+        captured.update(kwargs)
+        raise typer.Exit(0)
+
+    with patch("rcpond.cli.Config", side_effect=_capture_and_abort):
+        result = CliRunner().invoke(cli, argv)
+
+    return result, captured
+
+
+@pytest.mark.parametrize("argv", _GROUP_B_ARGV, ids=_GROUP_B_IDS)
+def test_group_b_defaults_to_the_default_ticket_type(argv):
+    """Omitting --ticket-type must select the default, not fail or leave it unset.
+
+    Leaving it unset would skip per-type config loading entirely, which is how these
+    commands came to require rules and templates from the environment.
+    """
+    result, captured = _capture_config_kwargs(argv)
+
+    assert result.exit_code == 0, result.output
+    assert captured["cli_args"]["ticket_type"] == DEFAULT_TICKET_TYPE
+
+
+@pytest.mark.parametrize("argv", _GROUP_B_ARGV, ids=_GROUP_B_IDS)
+def test_group_b_accepts_an_explicit_ticket_type(argv):
+    result, captured = _capture_config_kwargs([*argv, "--ticket-type", "some_other_type"])
+
+    assert result.exit_code == 0, result.output
+    assert captured["cli_args"]["ticket_type"] == "some_other_type"
+
+
+def test_default_ticket_type_is_a_registered_type():
+    """A default that is not in the registry would make every group B command fail."""
+    assert DEFAULT_TICKET_TYPE in _TICKET_TYPES
 
 
 # --- Which commands require rules and templates ---
