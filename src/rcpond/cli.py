@@ -118,8 +118,18 @@ def common_options(
     }
 
 
-def _config(ctx: typer.Context) -> Config:
-    return Config(env_path=ctx.obj["env_path"], cli_args=ctx.obj["cli_args"])
+def _config(ctx: typer.Context, *, require_rules_and_templates: bool = True) -> Config:
+    """Build the Config for a subcommand.
+
+    ``require_rules_and_templates=False`` is for commands that authenticate only and never
+    read the rules or the email templates. Defaults to True, so a command that does not
+    say otherwise gets the strict validation.
+    """
+    return Config(
+        env_path=ctx.obj["env_path"],
+        cli_args=ctx.obj["cli_args"],
+        require_rules_and_templates=require_rules_and_templates,
+    )
 
 
 @cli.command()
@@ -139,7 +149,10 @@ def login(ctx: typer.Context) -> None:
     from rcpond.auth import get_bearer_token
     from rcpond.config import AuthMode
 
-    config = _config(ctx)
+    ## Authenticating only: never reads the rules or the email templates, so must not
+    ## require them — they may be declared solely in a per-type config this command
+    ## cannot reach.
+    config = _config(ctx, require_rules_and_templates=False)
 
     if config.servicenow_auth_mode is AuthMode.token:
         print(
@@ -168,7 +181,8 @@ def whoami(ctx: typer.Context) -> None:
     """
     from rcpond.servicenow import ServiceNow
 
-    sn = ServiceNow(_config(ctx))
+    ## Reports identity only; reads no rules or templates. See login() above.
+    sn = ServiceNow(_config(ctx, require_rules_and_templates=False))
     if not sn._is_oauth:
         print("[yellow]Static token authentication — user identity not available.[/yellow]")
         return

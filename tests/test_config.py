@@ -378,6 +378,10 @@ def test_system_prompt_template_invalid_jinja_raises(common_config_values, tmp_p
 
 def test_email_templates_dir_valid_j2_passes(common_config_values):
     config = Config(cli_args=common_config_values)
+    ## Asserting the resolved path, not just .exists(): confirms the configured directory
+    ## was stored, and stays type-correct now the field is Path | None.
+    assert config.email_templates_dir == _WORKING_TEMPLATES_DIR.resolve()
+    assert config.email_templates_dir is not None
     assert config.email_templates_dir.exists()
 
 
@@ -416,6 +420,8 @@ def test_email_templates_dir_valid_ticket_fields_pass(common_config_values, tmp_
     (good_dir / "good.yaml.j2").write_text("subject: {{ ticket.number }} - {{ ticket.project_title }}")
     valid = dict(common_config_values, email_templates_dir=str(good_dir))
     config = Config(cli_args=valid)
+    assert config.email_templates_dir == good_dir.resolve()
+    assert config.email_templates_dir is not None
     assert config.email_templates_dir.exists()
 
 
@@ -801,6 +807,62 @@ def test_explicit_token_mode_still_requires_servicenow_token(common_config_value
 def test_explicit_oauth_user_mode_requires_client_credentials(common_config_values):
     with pytest.raises(ValueError, match="servicenow_client_id"):
         Config(cli_args={**common_config_values, "servicenow_auth_mode": "oauth_user"})
+
+
+# --- require_rules_and_templates ---
+
+_RULES_AND_TEMPLATES = ("rules_path", "email_templates_dir", "system_prompt_template_path")
+
+
+def test_rules_and_templates_required_by_default(common_config_values):
+    """The default must stay strict: a command that needs them still fails fast without them."""
+    values = {k: v for k, v in common_config_values.items() if k not in _RULES_AND_TEMPLATES}
+
+    with pytest.raises(ValueError, match="rules_path"):
+        Config(cli_args=values)
+
+
+def test_rules_and_templates_optional_when_not_required(common_config_values):
+    """login/whoami authenticate only; they must not demand config they never read.
+
+    This is the failure that prompted the flag: with rules and templates declared solely
+    in a per-type config, `rcpond login` could not construct a Config at all.
+    """
+    values = {k: v for k, v in common_config_values.items() if k not in _RULES_AND_TEMPLATES}
+
+    config = Config(cli_args=values, require_rules_and_templates=False)
+
+    assert config.rules_path is None
+    assert config.email_templates_dir is None
+    assert config.system_prompt_template_path is None
+    ## The rest of the config must still be validated
+    assert config.llm_model == "gpt-4"
+    assert config.servicenow_auth_mode == AuthMode.token
+
+
+def test_other_required_fields_still_enforced_when_not_requiring_rules(common_config_values):
+    """Relaxing rules/templates must not relax anything else."""
+    values = {k: v for k, v in common_config_values.items() if k not in _RULES_AND_TEMPLATES}
+    del values["llm_model"]
+
+    with pytest.raises(ValueError, match="llm_model"):
+        Config(cli_args=values, require_rules_and_templates=False)
+
+
+def test_invalid_templates_not_validated_when_not_required(common_config_values):
+    """Jinja validation must be skipped, not merely tolerated, when the paths are unused.
+
+    Pointing at a directory of templates known to fail validation proves the check does
+    not run, rather than passing by luck on valid fixtures.
+    """
+    values = {**common_config_values, "email_templates_dir": str(_FAILING_TEMPLATES_DIR)}
+
+    with pytest.raises(ValueError, match="Invalid Jinja2 templates"):
+        Config(cli_args=values)
+
+    ## Constructing at all is the assertion: the same input raises above.
+    config = Config(cli_args=values, require_rules_and_templates=False)
+    assert config.email_templates_dir == _FAILING_TEMPLATES_DIR.resolve()
 
 
 # --- Per-type config loading ---

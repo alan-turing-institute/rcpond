@@ -86,6 +86,12 @@ class AuthMode(StrEnum):
     """OAuth Client Credentials. Non-interactive machine-to-machine; acts as a service account."""
 
 
+_RULES_AND_TEMPLATES_FIELDS = ("rules_path", "email_templates_dir", "system_prompt_template_path")
+"""The config that drives what RCPond says: the rules, the system prompt template and the
+email templates. Read only by ``prompt.py`` and ``PostTemplatedNoteTool``; commands that
+do not use either can opt out via ``Config(require_rules_and_templates=False)``."""
+
+
 AUTH_MODE_AUTO = "auto"
 """Accepted input value for ``servicenow_auth_mode`` meaning "infer from the credentials
 supplied".  Resolved during construction, so ``Config.servicenow_auth_mode`` never holds it."""
@@ -104,6 +110,12 @@ class Config:
         present); it cannot rely on the XDG file to fill in missing values.
     cli_args : dict | None
         Dict of config field names to values from the CLI. None values are ignored.
+    require_rules_and_templates : bool
+        When False, ``rules_path``, ``system_prompt_template_path`` and
+        ``email_templates_dir`` become optional and their Jinja2 templates are not
+        validated; those attributes are then ``None``. For commands that authenticate
+        only — ``login`` and ``whoami`` — which never read any of them. Defaults to True,
+        so a command that forgets to opt out gets the strict validation.
 
     Attributes
     ----------
@@ -145,16 +157,20 @@ class Config:
         the Client Credentials grant never visits the authorisation endpoint.
     servicenow_oauth_token_url : str | None
         ServiceNow OAuth token endpoint URL. Required in both OAuth modes.
-    rules_path : Path
+    rules_path : Path | None
         Path to the RULES.md file used to construct the system prompt.
-    system_prompt_template_path : Path
+        ``None`` when built with ``require_rules_and_templates=False``.
+    system_prompt_template_path : Path | None
         Path to the Jinja2 template used to render the system prompt.
-    email_templates_dir : Path
-        Path of the directory of Jinja2 templates used to render messages to end users
+        ``None`` when built with ``require_rules_and_templates=False``.
+    email_templates_dir : Path | None
+        Path of the directory of Jinja2 templates used to render messages to end users.
+        ``None`` when built with ``require_rules_and_templates=False``.
     """
 
     env_path: InitVar[str | None] = None
     cli_args: InitVar[dict | None] = None
+    require_rules_and_templates: InitVar[bool] = True
 
     llm_chat_completions_url: str = field(init=False)
     llm_api_key: str = field(init=False)
@@ -169,16 +185,21 @@ class Config:
     servicenow_oauth_redirect_port: int | None = field(init=False)
     servicenow_oauth_auth_url: str | None = field(init=False)
     servicenow_oauth_token_url: str | None = field(init=False)
-    rules_path: Path = field(init=False)
-    system_prompt_template_path: Path = field(init=False)
-    email_templates_dir: Path = field(init=False)
+    rules_path: Path | None = field(init=False)
+    system_prompt_template_path: Path | None = field(init=False)
+    email_templates_dir: Path | None = field(init=False)
     ticket_type: str | None = field(init=False)
     """Registry key identifying the active ticket type (e.g. ``'compute_allocation_request'``).
     When set, per-type config is loaded from ``$XDG_CONFIG_HOME/rcpond/ticket_types/{ticket_type}.config``."""
     servicenow_query: str | None = field(init=False)
     """ServiceNow sysparm_query string used by ``get_tickets()``. Loaded from the per-type config file."""
 
-    def __post_init__(self, env_path: str | None, cli_args: dict | None) -> None:
+    def __post_init__(
+        self,
+        env_path: str | None,
+        cli_args: dict | None,
+        require_rules_and_templates: bool = True,
+    ) -> None:
         values: dict[str, str] = {}
 
         # 1. Load from $XDG_CONFIG_HOME/rcpond/default.config (lowest precedence)
@@ -268,6 +289,13 @@ class Config:
         ## Fields that are optional whatever the auth mode
         _ALWAYS_OPTIONAL = {"servicenow_auth_mode", "ticket_type", "servicenow_query"}
 
+        ## Commands that authenticate only (login, whoami) never read the rules or the
+        ## templates. Requiring them would be a false early failure — and an impossible
+        ## one once they are declared solely in a per-type config, which those commands
+        ## cannot reach. See planning/multiple-ticket-types.md.
+        if not require_rules_and_templates:
+            _ALWAYS_OPTIONAL = _ALWAYS_OPTIONAL | set(_RULES_AND_TEMPLATES_FIELDS)
+
         _OAUTH_CREDENTIALS = {"servicenow_client_id", "servicenow_client_secret"}
 
         ## Fields only the browser-based Authorization Code flow uses
@@ -310,7 +338,9 @@ class Config:
             raw = values.get(f.name)
             if raw is None:
                 setattr(self, f.name, None)
-            elif hints[f.name] is Path:
+            ## Matches `Path` and `Path | None` alike — the optional path fields are
+            ## still paths when set. Mirrors the union handling in the int branch below.
+            elif Path in (typing.get_args(hints[f.name]) or (hints[f.name],)):
                 setattr(self, f.name, _confirm_path_exists(raw))
             elif int in (typing.get_args(hints[f.name]) or (hints[f.name],)):
                 setattr(self, f.name, int(raw))
@@ -328,8 +358,14 @@ class Config:
             raise ValueError(msg)
         _ticket_class = _TICKET_TYPES[_ticket_type_val] if _ticket_type_val else ComputeAllocationRequestTicket
 
-        _validate_jinja_template(self.system_prompt_template_path)
-        _validate_email_templates_dir(self.email_templates_dir, _ticket_class)
+        ## Skipped rather than tolerated: with the paths unset there is nothing to validate,
+        ## and an unused invalid template must not block a command that never renders it.
+        if require_rules_and_templates:
+            ## Required in this branch, so the missing-fields check above has already run
+            assert self.system_prompt_template_path is not None
+            assert self.email_templates_dir is not None
+            _validate_jinja_template(self.system_prompt_template_path)
+            _validate_email_templates_dir(self.email_templates_dir, _ticket_class)
 
 
 def _env_var_name(field_name: str) -> str:

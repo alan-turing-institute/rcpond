@@ -73,6 +73,41 @@ def test_auth_mode_option_forwarded_verbatim(argv, expected):
     assert captured["servicenow_auth_mode"] == expected
 
 
+# --- Which commands require rules and templates ---
+
+
+@pytest.mark.parametrize(
+    ("argv", "requires"),
+    [
+        (["login"], False),
+        (["whoami"], False),
+        (["check-templates"], True),
+        (["display-all"], True),
+        (["process-next", "--ticket-type", "compute_allocation_request"], True),
+    ],
+    ids=["login", "whoami", "check_templates", "display_all", "process_next"],
+)
+def test_only_auth_commands_opt_out_of_rules_and_templates(argv, requires):
+    """`login` and `whoami` authenticate only, so must not demand config they never read.
+
+    Every other command keeps the strict default. The opt-out is permanent and narrow:
+    the other commands that read no rules or templates are served by `--ticket-type`
+    giving them a route to a per-type config, not by exempting them here.
+    """
+    captured = {}
+
+    def _capture_and_abort(**kwargs):
+        captured.update(kwargs)
+        raise typer.Exit(0)
+
+    with patch("rcpond.cli.Config", side_effect=_capture_and_abort):
+        result = CliRunner().invoke(cli, argv)
+
+    assert result.exit_code == 0, result.output
+    ## Commands constructing Config directly never pass the flag, so absent means strict.
+    assert captured.get("require_rules_and_templates", True) is requires
+
+
 # --- login ---
 
 
