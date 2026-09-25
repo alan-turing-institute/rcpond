@@ -8,6 +8,7 @@ import pytest
 import requests as _requests  ## used by test_token_introspection
 
 from rcpond import config, servicenow
+from rcpond.config import AuthMode
 from rcpond.servicenow import (
     ComputeAllocationRequestTicket,
     NoteEntry,
@@ -63,16 +64,127 @@ def ticket():
     )
 
 
-@pytest.fixture()
-def sn_instance():
-    """A ServiceNow instance with the HTTP session replaced by a MagicMock."""
-    sn = ServiceNow.__new__(ServiceNow)
-    sn._base_api_url = "https://example.com/api/now/table"
-    sn._web_base_url = "https://example.com"
-    sn._id_token = None
-    sn._query = "short_description=Request access to HPC and cloud computing facilities"
+## ── Authentication wiring in __init__ ───────────────────────────────────────
+
+_SUBSCRIPTION_KEY_HEADER = "Ocp-Apim-Subscription-Key"
+_TEST_QUERY = "short_description=Request access to HPC and cloud computing facilities"
+
+
+def _sn_config(auth_mode: AuthMode, servicenow_token: str | None = None) -> MagicMock:
+    """A config sufficient to construct ServiceNow, in the given auth mode."""
+    cfg = MagicMock()
+    cfg.servicenow_auth_mode = auth_mode
+    cfg.servicenow_url = "https://example.com/api/now/table"
+    cfg.servicenow_web_url = "https://example.com"
+    cfg.servicenow_query = _TEST_QUERY
+    cfg.servicenow_token = servicenow_token
+    cfg.servicenow_client_id = "cid"
+    cfg.servicenow_client_secret = "csec"
+    return cfg
+
+
+def _make_sn(
+    auth_mode: AuthMode = AuthMode.token,
+    *,
+    id_token: str | None = None,
+    servicenow_token: str | None = "gw-key",
+) -> ServiceNow:
+    """Build a ServiceNow through its real constructor, then stub out the HTTP session.
+
+    Going through ``__init__`` means the auth wiring under test — mode, headers, whether
+    an id_token is adopted — is exercised rather than bypassed. Tests therefore describe
+    a *configuration*, not a set of internal attributes to poke.
+
+    The token functions are patched at their source so no browser opens and no token
+    endpoint is contacted; ``id_token`` is what ``get_id_token()`` would have returned.
+    """
+    cfg = _sn_config(auth_mode, servicenow_token)
+    with (
+        patch("rcpond.auth.get_bearer_token", return_value="tok"),
+        patch("rcpond.auth.get_id_token", return_value=id_token),
+    ):
+        sn = ServiceNow(cfg)
+
+    ## Replace the real session; every test below asserts on calls, not on the wire.
+    ## Header assertions live in test_auth_header_composition, which keeps the real one.
     sn.session = MagicMock()
     return sn
+
+
+@pytest.fixture()
+def sn_instance():
+    """A ServiceNow in static-token mode with the HTTP session replaced by a MagicMock."""
+    return _make_sn()
+
+
+@pytest.mark.parametrize(
+    ("auth_mode", "servicenow_token", "expect_bearer", "expect_subscription_key"),
+    [
+        (AuthMode.token, "gw-key", False, True),
+        (AuthMode.oauth_user, None, True, False),
+        (AuthMode.oauth_user, "gw-key", True, True),
+        (AuthMode.oauth_client_credentials, None, True, False),
+        (AuthMode.oauth_client_credentials, "gw-key", True, True),
+    ],
+    ids=[
+        "token_sends_key_only",
+        "interactive_sends_bearer_only",
+        "interactive_sends_both_when_key_configured",
+        "client_credentials_sends_bearer_only",
+        "client_credentials_sends_both_when_key_configured",
+    ],
+)
+def test_auth_header_composition(auth_mode, servicenow_token, expect_bearer, expect_subscription_key):
+    """The gateway subscription key and the OAuth bearer are independent.
+
+    The key authenticates the caller to the API gateway; the bearer authenticates the
+    principal to ServiceNow. Either, both or neither may be needed, so presence of one
+    must not suppress the other.
+    """
+    cfg = _sn_config(auth_mode, servicenow_token)
+
+    with (
+        patch("rcpond.auth.get_bearer_token", return_value="tok") as mock_bearer,
+        patch("rcpond.auth.get_id_token", return_value=None),
+    ):
+        sn = ServiceNow(cfg)
+
+    headers = sn.session.headers
+    assert ("Authorization" in headers) is expect_bearer
+    assert (_SUBSCRIPTION_KEY_HEADER in headers) is expect_subscription_key
+    if expect_bearer:
+        assert headers["Authorization"] == "Bearer tok"
+    else:
+        mock_bearer.assert_not_called()
+    if expect_subscription_key:
+        assert headers[_SUBSCRIPTION_KEY_HEADER] == servicenow_token
+
+
+def test_client_credentials_does_not_adopt_a_cached_user_id_token():
+    """A machine session must not inherit a human's identity from the on-disk cache.
+
+    get_id_token() reads $XDG_CACHE_HOME/rcpond/tokens.json, which only the browser-based
+    flow ever writes — a Client Credentials `rcpond login` leaves it untouched. It
+    therefore holds the tokens of whoever last completed a browser login on this host,
+    who need not be the person or process running now. Reading it in Client Credentials
+    mode would make the bot act as that person.
+    """
+    cfg = _sn_config(AuthMode.oauth_client_credentials)
+
+    with (
+        patch("rcpond.auth.get_bearer_token", return_value="tok"),
+        patch("rcpond.auth.get_id_token", return_value=_make_jwt("some-human-sys-id")) as mock_id_token,
+    ):
+        sn = ServiceNow(cfg)
+
+    assert sn._id_token is None
+    mock_id_token.assert_not_called()
+
+
+## No direct test of the _acts_as_user / _is_oauth flags: they are internal derivations,
+## and their observable effects are covered by test_auth_header_composition (bearer vs
+## gateway key), test_client_credentials_does_not_adopt_a_cached_user_id_token (identity)
+## and test_get_tickets_state_combinations (which filtering branch is taken).
 
 
 def test_web_url_returns_correct_url(sn_instance, ticket):
@@ -89,19 +201,29 @@ def test_web_url_strips_trailing_slash(sn_instance, ticket):
 ## ── assign_to_me ────────────────────────────────────────────────────────────
 
 
-def test_assign_to_me_raises_without_oauth(sn_instance, ticket):
-    """Static token auth must raise NotImplementedError with a helpful message."""
-    sn_instance._is_oauth = False
+@pytest.mark.parametrize(
+    "auth_mode",
+    [AuthMode.token, AuthMode.oauth_client_credentials],
+    ids=["static_token", "client_credentials"],
+)
+def test_assign_to_me_raises_without_an_interactive_user(ticket, auth_mode):
+    """Only the interactive flow may claim a ticket.
+
+    Static token auth carries no identity at all. Client Credentials resolves to a
+    service account and *could* technically assign — see the recorded result in
+    test_client_credentials_identity_resolution — but assigning tickets to the bot is
+    not believed to be a useful ServiceNow workflow, so it is blocked by choice.
+    """
+    sn = _make_sn(auth_mode)
     with pytest.raises(NotImplementedError, match="OAuth"):
-        sn_instance.assign_to_me(ticket)
+        sn.assign_to_me(ticket)
 
 
-def test_assign_to_me_calls_assign_to_with_current_user(sn_instance, ticket):
+def test_assign_to_me_calls_assign_to_with_current_user(ticket):
     """With OAuth, assign_to_me decodes the id_token sub and calls assign_to."""
-    sn_instance._is_oauth = True
-    sn_instance._id_token = _make_jwt("user-sys-id-123")
-    with patch.object(sn_instance, "assign_to") as mock_assign:
-        sn_instance.assign_to_me(ticket)
+    sn = _make_sn(AuthMode.oauth_user, id_token=_make_jwt("user-sys-id-123"))
+    with patch.object(sn, "assign_to") as mock_assign:
+        sn.assign_to_me(ticket)
     mock_assign.assert_called_once_with(ticket, "user-sys-id-123")
 
 
@@ -543,60 +665,74 @@ _COMMON_RAW_TICKETS = [
 ]
 
 
+## Filtering keys on whether a human is behind the session, NOT on whether OAuth is in
+## use. Client Credentials is OAuth *and* a bot, so it must produce byte-for-byte the
+## same sets as static token auth — these rows are the regression guard for that.
+_INTERACTIVE_ALL_OPEN = {
+    "unassigned_new",
+    "current_user",
+    "other_user",
+    "rcpond_latest_comment",
+    "rcpond_early_comment",
+    "human_note",
+    "unassigned_in_progress",
+}
+_INTERACTIVE_USER_FOCUS = {
+    "unassigned_new",
+    "current_user",
+    "rcpond_latest_comment",
+    "rcpond_early_comment",
+    "human_note",
+    "unassigned_in_progress",
+}
+_BOT_ALL_OPEN = {"unassigned_new", "current_user", "other_user", "human_note", "unassigned_in_progress"}
+_BOT_USER_FOCUS = {"unassigned_new", "human_note", "unassigned_in_progress"}
+
+
 @pytest.mark.parametrize(
-    ("oauth", "state", "expected"),
+    ("auth_mode", "state", "expected"),
     [
-        (
-            True,
-            TicketState.all_open,
-            {
-                "unassigned_new",
-                "current_user",
-                "other_user",
-                "rcpond_latest_comment",
-                "rcpond_early_comment",
-                "human_note",
-                "unassigned_in_progress",
-            },
-        ),
-        (
-            True,
-            TicketState.user_focus,
-            {
-                "unassigned_new",
-                "current_user",
-                "rcpond_latest_comment",
-                "rcpond_early_comment",
-                "human_note",
-                "unassigned_in_progress",
-            },
-        ),
-        (
-            False,
-            TicketState.all_open,
-            {"unassigned_new", "current_user", "other_user", "human_note", "unassigned_in_progress"},
-        ),
-        (False, TicketState.user_focus, {"unassigned_new", "human_note", "unassigned_in_progress"}),
+        (AuthMode.oauth_user, TicketState.all_open, _INTERACTIVE_ALL_OPEN),
+        (AuthMode.oauth_user, TicketState.user_focus, _INTERACTIVE_USER_FOCUS),
+        (AuthMode.token, TicketState.all_open, _BOT_ALL_OPEN),
+        (AuthMode.token, TicketState.user_focus, _BOT_USER_FOCUS),
+        ## Same expectations as static token, deliberately:
+        (AuthMode.oauth_client_credentials, TicketState.all_open, _BOT_ALL_OPEN),
+        (AuthMode.oauth_client_credentials, TicketState.user_focus, _BOT_USER_FOCUS),
+    ],
+    ids=[
+        "interactive_all_open",
+        "interactive_user_focus",
+        "static_token_all_open",
+        "static_token_user_focus",
+        "client_credentials_all_open_matches_bot",
+        "client_credentials_user_focus_matches_bot",
     ],
 )
-def test_get_tickets_state_combinations(sn_instance, oauth, state, expected):
-    _setup_session(sn_instance, _COMMON_RAW_TICKETS)
-    sn_instance._is_oauth = oauth
+def test_get_tickets_state_combinations(auth_mode, state, expected):
+    sn = _make_sn(auth_mode)
+    _setup_session(sn, _COMMON_RAW_TICKETS)
 
-    if oauth:
-        with patch.object(sn_instance, "_current_user_display_name", return_value="Current OAuth User"):
-            tickets = sn_instance.get_tickets(state=state)
+    ## The interactive path resolves a display name to filter on; the bot paths must not.
+    ## Making that call explode for bots turns "routed through the wrong branch" into a
+    ## failure, rather than something the expected-set comparison might mask.
+    if auth_mode is AuthMode.oauth_user:
+        stub = patch.object(sn, "_current_user_display_name", return_value="Current OAuth User")
     else:
-        tickets = sn_instance.get_tickets(state=state)
+        stub = patch.object(sn, "_current_user_display_name", side_effect=AssertionError("bot took the user path"))
+
+    with stub:
+        tickets = sn.get_tickets(state=state)
 
     assert {t.number for t in tickets} == expected
 
 
 def test_get_tickets_all_including_closed_returns_everything(sn_instance):
     """TicketState.all_including_closed bypasses all filters: returns every ticket regardless of state or assignment."""
-    _setup_session(sn_instance, _COMMON_RAW_TICKETS)
-    sn_instance._is_oauth = False
 
+    assert sn_instance._auth_mode is AuthMode.token
+
+    _setup_session(sn_instance, _COMMON_RAW_TICKETS)
     tickets = sn_instance.get_tickets(state=TicketState.all_including_closed)
 
     assert {t.number for t in tickets} == {
@@ -661,6 +797,50 @@ def test_ticket_type_key_returns_none_for_unknown_type(ticket):
 
 
 ## ── _current_user_sys_id / _current_user_display_name ──────────────────────
+
+
+@pytest.mark.integration()
+def test_client_credentials_identity_resolution(dev_instance_sn):
+    """Diagnostic: what identity does a Client Credentials token resolve to on our instance?
+
+    Answers open question §7 of planning/oauth-client-credentials.md.
+
+    Result (dev instance, 2026-09-16)::
+
+        Client Credentials identity claims: {
+            'sub': 'b04b7606fbbd3e100b8cf46daeefdccb',
+            'name': 'Research API User',
+            'user_name': 'research_cmd_user',
+        }
+
+    So ``gs.getUserID()`` does resolve to the service account, as ServiceNow documents —
+    and it is the same 'Research API User' that already authors RCPond's work notes.
+
+    Identity resolution is therefore **not** the reason ``assign_to_me()`` is blocked for
+    this mode. It is blocked because assigning tickets to the bot is not believed to be a
+    useful ServiceNow workflow, a decision pending review with users. Do not unblock on
+    the strength of this result alone.
+
+    Re-run with a Client Credentials config against the dev instance::
+
+        RCPOND_SERVICENOW_AUTH_MODE=oauth_client_credentials uv run pytest -m integration \\
+            tests/test_servicenow.py::test_client_credentials_identity_resolution -s
+    """
+    if dev_instance_sn._auth_mode is not AuthMode.oauth_client_credentials:
+        pytest.skip("Requires RCPOND_SERVICENOW_AUTH_MODE=oauth_client_credentials")
+
+    ## This grant issues no id_token, so identity must come from the sys_user fallback
+    assert dev_instance_sn._id_token is None, "Unexpected id_token under Client Credentials"
+
+    try:
+        claims = dev_instance_sn._fetch_current_user_claims()
+    except RuntimeError as exc:
+        pytest.fail(f"Client Credentials token did not resolve to any ServiceNow user: {exc}")
+
+    print(f"\nClient Credentials identity claims: {claims}")
+    print("  → Expected the service account ('Research API User'); see this test's docstring.")
+
+    assert claims.get("sub"), "gs.getUserID() resolved no sys_id for this token"
 
 
 @pytest.mark.integration()

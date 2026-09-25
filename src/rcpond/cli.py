@@ -72,8 +72,27 @@ def common_options(
     servicenow_token: Annotated[str | None, typer.Option(help="ServiceNow API token (static auth).")] = None,
     servicenow_url: Annotated[str | None, typer.Option(help="ServiceNow API base URL.")] = None,
     servicenow_web_url: Annotated[str | None, typer.Option(help="ServiceNow Web UI base URL.")] = None,
+    servicenow_auth_mode: Annotated[
+        str | None,
+        typer.Option(
+            help=(
+                "How to authenticate to ServiceNow: 'auto' (default), 'token', 'oauth_user', "
+                "or 'oauth_client_credentials' for non-interactive machine-to-machine use. "
+                "'auto' selects oauth_user when client credentials are set, otherwise token."
+            )
+        ),
+    ] = None,
     servicenow_client_id: Annotated[str | None, typer.Option(help="ServiceNow OAuth client ID.")] = None,
-    servicenow_client_secret: Annotated[str | None, typer.Option(help="ServiceNow OAuth client secret.")] = None,
+    servicenow_client_secret: Annotated[
+        str | None,
+        typer.Option(
+            help=(
+                ## Names the env var, does not contain a value — see pre-commit-scripts/check_secrets.py
+                "ServiceNow OAuth client secret. Prefer RCPOND_SERVICENOW_CLIENT_SECRET: "  # pragma: allowlist secret
+                "a secret given on the command line is visible in the process list."
+            )
+        ),
+    ] = None,
     rules_path: Annotated[str | None, typer.Option(help="Path to the rules file.")] = None,
     system_prompt_template_path: Annotated[str | None, typer.Option(help="Path to the system prompt template.")] = None,
     email_templates_dir: Annotated[str | None, typer.Option(help="Path to the email templates directory.")] = None,
@@ -89,6 +108,7 @@ def common_options(
             "servicenow_token": servicenow_token,
             "servicenow_url": servicenow_url,
             "servicenow_web_url": servicenow_web_url,
+            "servicenow_auth_mode": servicenow_auth_mode,
             "servicenow_client_id": servicenow_client_id,
             "servicenow_client_secret": servicenow_client_secret,
             "rules_path": rules_path,
@@ -104,34 +124,66 @@ def _config(ctx: typer.Context) -> Config:
 
 @cli.command()
 def login(ctx: typer.Context) -> None:
-    """Authorise rcpond with ServiceNow via OAuth (browser-based flow).
+    """Authorise rcpond with ServiceNow via OAuth.
 
-    Opens a browser, completes the Authorization Code + PKCE flow, and caches
-    the resulting tokens. Subsequent commands will use the cached token
-    automatically without prompting again.
+    For ``oauth_user`` (the interactive flow) this opens a browser, completes the
+    Authorization Code + PKCE flow, and caches the resulting tokens; subsequent
+    commands reuse the cached token without prompting again.
+
+    For ``oauth_client_credentials`` there is nothing interactive to do — tokens are
+    fetched on demand and held only in memory — so this simply verifies that the
+    configured credentials are accepted by the token endpoint.
+
+    Exits with code 1 under ``token`` auth, which has no login step at all.
     """
     from rcpond.auth import get_bearer_token
+    from rcpond.config import AuthMode
 
-    get_bearer_token(_config(ctx))
-    print("[green]Login successful.[/green] Token cached.")
+    config = _config(ctx)
+
+    if config.servicenow_auth_mode is AuthMode.token:
+        print(
+            "[red]Nothing to log in to:[/red] auth mode is 'token', which uses a static "
+            "subscription key rather than OAuth.\n"
+            "Set RCPOND_SERVICENOW_AUTH_MODE and OAuth credentials to use 'rcpond login'."
+        )
+        raise typer.Exit(1)
+
+    get_bearer_token(config)
+
+    if config.servicenow_auth_mode is AuthMode.oauth_client_credentials:
+        ## Deliberately does not say "cached": machine tokens live in memory for the life
+        ## of one process, so nothing persists for a later invocation to reuse.
+        print("[green]Credentials verified.[/green] Client Credentials mode needs no interactive login.")
+    else:
+        print("[green]Login successful.[/green] Token cached.")
 
 
 @cli.command()
 def whoami(ctx: typer.Context) -> None:
-    """Show the identity of the currently authenticated OAuth user."""
+    """Show the identity rcpond is authenticating as, and how.
+
+    Under ``oauth_client_credentials`` the identity is a service account rather than
+    the person running the command, so the auth mode is always reported alongside it.
+    """
     from rcpond.servicenow import ServiceNow
 
     sn = ServiceNow(_config(ctx))
     if not sn._is_oauth:
         print("[yellow]Static token authentication — user identity not available.[/yellow]")
         return
+
     claims = sn._fetch_current_user_claims()
     if not claims:
         print("[red]Unable to determine user identity.[/red]")
         raise typer.Exit(1)
+
     print(f"[bold]Name:[/bold]      {claims.get('name', '?')}")
     print(f"[bold]Username:[/bold]  {claims.get('user_name', '?')}")
     print(f"[bold]sys_id:[/bold]    {claims.get('sub', '?')}")
+    print(f"[bold]Auth mode:[/bold] {sn._auth_mode}")
+    if not sn._acts_as_user:
+        print("[yellow]This is a service account, not your own user.[/yellow]")
 
 
 @cli.command()

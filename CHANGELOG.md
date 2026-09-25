@@ -16,10 +16,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Analytics is computed on a pandas DataFrame (one row per ticket) and rendered with `tabulate`; both are part of the `html` optional dependency group, which now also gates the `analytics` subcommand.
 - `servicenow.ticket_type_key()`: resolves a ticket to its `_TICKET_TYPES` registry key via `MATCH_CRITERIA` (now also used by `get_full_ticket`'s dispatch).
 - Note-classification and timing helpers on `Ticket`: `rcpond_note_count()`, `manual_note_count()`, `has_subsequent_manual_interaction()`, `first_rcpond_note_datetime()`, `first_manual_note_datetime()`, `is_closed()`, `resolution_datetime()`, and `opened_datetime()`.
+- OAuth 2.0 **Client Credentials** authentication, for non-interactive machine-to-machine use (bots, scripts, CI). RCPond authenticates as a ServiceNow service account, giving the bot a real identity in ServiceNow, short-lived access tokens and central revocation, instead of an indefinitely valid shared subscription key.
+  - New `RCPOND_SERVICENOW_AUTH_MODE` / `--servicenow-auth-mode` selects between `auto` (default), `token`, `oauth_user` and `oauth_client_credentials`. `auto` resolves to `oauth_user` when client credentials are set and `token` otherwise, so existing configurations behave exactly as before. `oauth_client_credentials` is never selected automatically: it shares its config fields with the browser flow, so it must be requested explicitly.
+  - Needs only the client credentials and `RCPOND_SERVICENOW_OAUTH_TOKEN_URL`. The redirect port and authorisation URL are unused, and the scope is optional — it need not include `openid`, as there is no end user to identify.
+  - Tokens are held in memory for the life of the process, keyed by client ID, and never written to the on-disk token cache. That cache has no notion of which principal it belongs to, so sharing it would let a bot and an interactive user on one host act as each other. There is no refresh step: the grant issues no refresh token, and expiry is re-checked on every call so long-running bots do not fail part-way through.
+  - `rcpond login` is not required in this mode; running it verifies the credentials. `rcpond whoami` now reports the auth mode alongside the identity, and says when that identity is a service account rather than your own user.
+- `--servicenow-client-secret` help now warns that a secret given on the command line is visible in the process list, and points to the environment variable instead.
+
+### Changed
+
+- The API gateway subscription key and the OAuth bearer token are now independent: `RCPOND_SERVICENOW_TOKEN` is sent whenever it is set, in any auth mode. Previously the two were mutually exclusive, so a deployment whose gateway required both could not be configured.
+- Ticket filtering now keys on whether a human user is behind the session rather than on whether OAuth is in use. A Client Credentials session is OAuth-authenticated but is a bot, and sees exactly what static token auth sees; behaviour for existing token and interactive users is unchanged.
+- `assign_to_me()` remains restricted to the interactive flow. The service account identity does resolve correctly under Client Credentials, so this is a product decision — assigning tickets to the bot is not believed to be a useful ServiceNow workflow — rather than a technical limitation. Under review.
 
 ### Fixed
 
 - Blank `RCPOND_*` environment variables are treated as unset, so required values produce a clear missing-configuration error instead of propagating empty strings.
+- A Client Credentials session no longer reads the interactive user's cached `id_token`. Only the browser-based flow ever writes the on-disk cache, so it holds the tokens of whoever last completed a browser login on that host — not necessarily the person or process running the current command. A bot sharing the host could therefore have adopted that person's identity.
+- `docs/configuration.md` gave `RCPOND_SERVICENOW_OAUTH_SCOPE=workspace` in its examples, which fails validation: the interactive flow requires `openid` in the scope to obtain an `id_token`.
 
 ### Notes
 
