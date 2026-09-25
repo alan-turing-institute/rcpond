@@ -590,9 +590,16 @@ class ServiceNow:
         if self._is_oauth:
             ## Imported here, not at module level: this pulls authlib and cryptography,
             ## ~400ms that static-token runs would otherwise pay on every invocation.
-            from rcpond.auth import get_bearer_token, get_id_token
+            from rcpond.auth import BearerAuth, get_bearer_token, get_id_token
 
-            self.session.headers["Authorization"] = f"Bearer {get_bearer_token(config)}"
+            ## Auth token is refreshed per request, rather than at initialisation.
+            ## One ServiceNow can outlive its access token
+            ## during a batch run, and a header written now would keep being sent after
+            ## expiry. BearerAuth re-checks expiry on every request; while the token is
+            ## valid that is an in-memory cache hit.
+            self.session.auth = BearerAuth(config)
+            ## Fetch once eagerly so bad credentials fail here rather than mid-run.
+            get_bearer_token(config)
             ## Only the interactive flow issues an id_token, and only it writes the token
             ## cache. Reading that cache in any other mode would adopt the identity of
             ## whoever last completed a browser login on this host — who need not be the
