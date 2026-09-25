@@ -29,14 +29,17 @@ def construct_prompt(full_ticket: Ticket, config: Config) -> tuple[str, str]:
         The full ServiceNow ticket to construct the prompt for.
     config : Config
         The loaded configuration. ``config.rules_path`` and
-        ``config.system_prompt_template_path`` must point to existing files
-        (guaranteed by ``Config.__post_init__``).
+        ``config.system_prompt_template_path`` must point to existing files —
+        guaranteed by ``Config.__post_init__`` unless the config was built with
+        ``require_rules_and_templates=False``, which no caller of this function does.
 
     Returns
     -------
     tuple[str, str]
         A (system_prompt, user_prompt) tuple.
     """
+    assert config.rules_path is not None
+    assert config.system_prompt_template_path is not None
     rules_text = config.rules_path.read_text()
     template_text = config.system_prompt_template_path.read_text()
     system_prompt = template_text.format(rules=rules_text)

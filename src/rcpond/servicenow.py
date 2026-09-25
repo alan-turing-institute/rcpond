@@ -288,6 +288,13 @@ _TICKET_TYPES: dict[str, type[Ticket]] = {
     "compute_allocation_request": ComputeAllocationRequestTicket,
 }
 
+DEFAULT_TICKET_TYPE = "compute_allocation_request"
+"""Ticket type assumed when ``--ticket-type`` is not given.
+
+A fixed, named default rather than "whichever type happens to be registered": the latter
+would silently change meaning the moment a second type is added. Must be a key of
+``_TICKET_TYPES``."""
+
 
 def ticket_type_key(ticket: Ticket) -> str | None:
     """Return the ``_TICKET_TYPES`` registry key whose ``MATCH_CRITERIA`` all match ``ticket``.
@@ -576,6 +583,7 @@ class ServiceNow:
         self._query: str = config.servicenow_query or _DEFAULT_SERVICENOW_QUERY
         self._id_token: str | None = None
         self._auth_mode: AuthMode = config.servicenow_auth_mode
+        self._ticket_type: str | None = config.ticket_type
         self.session = requests.Session()
         self.session.headers.update({"Content-Type": "application/json", "Accept": "application/json"})
 
@@ -596,6 +604,46 @@ class ServiceNow:
         ## API gateway, not the principal to ServiceNow, so both may be needed at once.
         if config.servicenow_token:
             self.session.headers["Ocp-Apim-Subscription-Key"] = config.servicenow_token
+
+    def _assert_expected_ticket_type(self, tickets: list[Ticket]) -> None:
+        """Raise if any ticket is not of the configured ticket type.
+
+        ``--ticket-type`` defaults rather than being required, so without this a user
+        working on a different ticket type would silently have the default type's rules
+        and email templates applied to it. The check runs whether the type came from the
+        default or from an explicit flag: an explicit value can just as easily be a typo,
+        and there is no use case for deliberately applying one type's rules to another.
+
+        A ticket matching no registered type aborts too. It means the query and the
+        registry disagree, and skipping it would silently under-process a batch.
+
+        Does nothing when no ticket type is configured — commands that span types resolve
+        the type per ticket instead.
+
+        Raises
+        ------
+        ValueError
+            If any ticket's ``MATCH_CRITERIA`` do not identify it as ``self._ticket_type``.
+        """
+        if self._ticket_type is None:
+            return
+
+        mismatched = [t for t in tickets if ticket_type_key(t) != self._ticket_type]
+        if not mismatched:
+            return
+
+        detail = "\n".join(
+            f"  {t.number}: {ticket_type_key(t) or 'matches no registered type'}"
+            f" (short_description={t.short_description!r})"
+            for t in mismatched
+        )
+        msg = (
+            f"ServiceNow returned {len(mismatched)} ticket(s) that are not of the expected type "
+            f"'{self._ticket_type}':\n{detail}\n"
+            f"Either the query for '{self._ticket_type}' is too broad, or --ticket-type "
+            f"(default: '{DEFAULT_TICKET_TYPE}') does not match the tickets you meant."
+        )
+        raise ValueError(msg)
 
     @property
     def _acts_as_user(self) -> bool:
@@ -633,6 +681,7 @@ class ServiceNow:
         resp.raise_for_status()
 
         tickets = [Ticket(**_extract_ticket_fields(tkt, ticket_fields)) for tkt in resp.json()["result"]]
+        self._assert_expected_ticket_type(tickets)
 
         if state is TicketState.all_including_closed:
             return tickets

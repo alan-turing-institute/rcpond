@@ -39,7 +39,7 @@ from rich import print
 from rcpond import command
 from rcpond.command import ReplyMode
 from rcpond.config import Config
-from rcpond.servicenow import TicketState
+from rcpond.servicenow import DEFAULT_TICKET_TYPE, TicketState
 
 cli = typer.Typer(name="rcpond", no_args_is_help=True)
 
@@ -118,8 +118,43 @@ def common_options(
     }
 
 
-def _config(ctx: typer.Context) -> Config:
-    return Config(env_path=ctx.obj["env_path"], cli_args=ctx.obj["cli_args"])
+def _config(
+    ctx: typer.Context,
+    *,
+    require_rules_and_templates: bool = True,
+    ticket_type: str | None = None,
+) -> Config:
+    """Build the Config for a subcommand.
+
+    ``require_rules_and_templates=False`` is for commands that authenticate only and never
+    read the rules or the email templates. Defaults to True, so a command that does not
+    say otherwise gets the strict validation.
+
+    ``ticket_type`` selects which per-type config is loaded. Group B commands pass their
+    ``--ticket-type`` option here; commands with no ticket type of their own omit it.
+    """
+    cli_args = ctx.obj["cli_args"]
+    if ticket_type is not None:
+        cli_args = {**cli_args, "ticket_type": ticket_type}
+    return Config(
+        env_path=ctx.obj["env_path"],
+        cli_args=cli_args,
+        require_rules_and_templates=require_rules_and_templates,
+    )
+
+
+_TICKET_TYPE_HELP = (
+    "Ticket type key to process (e.g. 'compute_allocation_request'). Must match a key in "
+    "the ticket type registry and have a corresponding config file."
+)
+
+TicketTypeOption = Annotated[str, typer.Option("--ticket-type", help=_TICKET_TYPE_HELP)]
+"""The ``--ticket-type`` option shared by every command that acts on a single ticket type.
+
+Declared once and applied per command rather than as a group-level option: a group-level
+default would set a ticket type for *every* command, which would make ``login`` and
+``whoami`` require a per-type config file in order to authenticate. Commands with no
+ticket type of their own simply do not take it. See planning/multiple-ticket-types.md."""
 
 
 @cli.command()
@@ -139,7 +174,10 @@ def login(ctx: typer.Context) -> None:
     from rcpond.auth import get_bearer_token
     from rcpond.config import AuthMode
 
-    config = _config(ctx)
+    ## Authenticating only: never reads the rules or the email templates, so must not
+    ## require them — they may be declared solely in a per-type config this command
+    ## cannot reach.
+    config = _config(ctx, require_rules_and_templates=False)
 
     if config.servicenow_auth_mode is AuthMode.token:
         print(
@@ -168,7 +206,8 @@ def whoami(ctx: typer.Context) -> None:
     """
     from rcpond.servicenow import ServiceNow
 
-    sn = ServiceNow(_config(ctx))
+    ## Reports identity only; reads no rules or templates. See login() above.
+    sn = ServiceNow(_config(ctx, require_rules_and_templates=False))
     if not sn._is_oauth:
         print("[yellow]Static token authentication — user identity not available.[/yellow]")
         return
@@ -187,21 +226,29 @@ def whoami(ctx: typer.Context) -> None:
 
 
 @cli.command()
-def display_all(ctx: typer.Context, ticket_state: TicketState = TicketState.user_focus):
-    """Display tickets from ServiceNow filtered by --ticket-state."""
-    command.display_all_tickets(state=ticket_state, config=_config(ctx))
+def display_all(
+    ctx: typer.Context,
+    ticket_state: TicketState = TicketState.user_focus,
+    ticket_type: TicketTypeOption = DEFAULT_TICKET_TYPE,
+):
+    """Display tickets from ServiceNow filtered by --ticket-state and --ticket-type.
+
+    Shows one ticket type at a time, so the listing matches exactly what `process-all`
+    would act on for the same `--ticket-type`.
+    """
+    command.display_all_tickets(state=ticket_state, config=_config(ctx, ticket_type=ticket_type))
 
 
 @cli.command()
-def display_ticket(ctx: typer.Context, ticket_number: str):
+def display_ticket(ctx: typer.Context, ticket_number: str, ticket_type: TicketTypeOption = DEFAULT_TICKET_TYPE):
     """Display the details of a specific ticket (e.g. RES0001234)."""
-    command.display_single_ticket(ticket_number=ticket_number, config=_config(ctx))
+    command.display_single_ticket(ticket_number=ticket_number, config=_config(ctx, ticket_type=ticket_type))
 
 
 @cli.command()
-def browse_ticket(ctx: typer.Context, ticket_number: str):
+def browse_ticket(ctx: typer.Context, ticket_number: str, ticket_type: TicketTypeOption = DEFAULT_TICKET_TYPE):
     """Opens a ticket in your default the browser (e.g. RES0001234)."""
-    url = command.get_ticket_url(ticket_number=ticket_number, config=_config(ctx))
+    url = command.get_ticket_url(ticket_number=ticket_number, config=_config(ctx, ticket_type=ticket_type))
     print(f"Opening ticket: {url}")
     webbrowser.open(url)
 
@@ -214,18 +261,15 @@ _REPLY_MODE_HELP = (
 )
 
 
-_TICKET_TYPE_HELP = "Ticket type key to process (e.g. 'compute_allocation_request'). Must match a key in the ticket type registry and have a corresponding config file."
-
-
 @cli.command()
 def process_next(
     ctx: typer.Context,
-    ticket_type: Annotated[str, typer.Option("--ticket-type", help=_TICKET_TYPE_HELP)],
+    ticket_type: TicketTypeOption = DEFAULT_TICKET_TYPE,
     dry_run: bool = False,
     reply_mode: Annotated[ReplyMode, typer.Option(help=_REPLY_MODE_HELP)] = ReplyMode.default,
 ):
     """Review an arbitrarily selected unassigned ticket via the LLM."""
-    cfg = Config(env_path=ctx.obj["env_path"], cli_args={**ctx.obj["cli_args"], "ticket_type": ticket_type})
+    cfg = _config(ctx, ticket_type=ticket_type)
     command.process_next_ticket(dry_run=dry_run, reply_mode=reply_mode, config=cfg)
 
 
@@ -233,12 +277,16 @@ def process_next(
 def process_ticket(
     ctx: typer.Context,
     ticket_number: str,
+    ticket_type: TicketTypeOption = DEFAULT_TICKET_TYPE,
     dry_run: bool = False,
     reply_mode: Annotated[ReplyMode, typer.Option(help=_REPLY_MODE_HELP)] = ReplyMode.default,
 ):
     """Review a specific ticket (e.g. RES0001234) via the LLM."""
     command.process_specific_ticket(
-        ticket_number=ticket_number, dry_run=dry_run, reply_mode=reply_mode, config=_config(ctx)
+        ticket_number=ticket_number,
+        dry_run=dry_run,
+        reply_mode=reply_mode,
+        config=_config(ctx, ticket_type=ticket_type),
     )
 
 
@@ -277,13 +325,16 @@ except ImportError:
 
 
 @cli.command()
-def find_related(ctx: typer.Context, ticket_number: str):
+def find_related(ctx: typer.Context, ticket_number: str, ticket_type: TicketTypeOption = DEFAULT_TICKET_TYPE):
     """List tickets related to the given ticket number.
 
     Searches all ticket states (including closed and resolved) and reports which
     heuristic matched each related ticket (finance code, PI email, project title, etc.).
+
+    Candidates come from the ticket type's own ServiceNow query, so related tickets are
+    always of the same type as ``ticket_number``.
     """
-    command.find_related_tickets(ticket_number=ticket_number, config=_config(ctx))
+    command.find_related_tickets(ticket_number=ticket_number, config=_config(ctx, ticket_type=ticket_type))
 
 
 try:
@@ -322,21 +373,53 @@ except ImportError:
 def check_templates(
     ctx: typer.Context,
 ) -> None:
-    """Render all Jinja2 templates in a directory with dummy values (for CI).
+    """Render every configured ticket type's Jinja2 templates with dummy values (for CI).
 
     This subcommand is to help those editing templates. It is not expected that most users will need to use this directly.
 
-    Exits with code 1 if any template fails to render. No ServiceNow or LLM
-    configuration is required.
+    Unlike the other subcommands this takes no ``--ticket-type``: Every ``*.config`` file under
+    ``$XDG_CONFIG_HOME/rcpond/ticket_types/`` is checked.
+
+    Exits with code 1 if any template fails to render, or if any type's configuration
+    cannot be loaded at all. All configured (or partially configured) ticket types are checked - the
+    command does not exit on the first failure encountered. A CI run should report every identified problem.
+    No ServiceNow or LLM configuration is required.
     """
-    if not command.check_templates(_config(ctx)):
+    from rcpond.config import configured_ticket_types
+
+    ticket_types = configured_ticket_types()
+    if not ticket_types:
+        print(
+            "[red]No ticket type configuration found.[/red] Expected one or more "
+            "'*.config' files in $XDG_CONFIG_HOME/rcpond/ticket_types/."
+        )
+        raise typer.Exit(1)
+
+    all_passed = True
+    for name in ticket_types:
+        print(f"\n[bold]{name}[/bold]")
+        try:
+            cfg = _config(ctx, ticket_type=name)
+        except ValueError as exc:
+            ## Covers an unregistered type and a template whose Jinja2 is invalid, both of
+            ## which Config raises on. Reported and carried past rather than aborting.
+            print(f"  [red]FAIL[/red]  {exc}")
+            all_passed = False
+            continue
+        ## Deliberately not `all_passed = all_passed and ...`: `and` short-circuits, so
+        ## after the first failing type no further type would be checked and a CI run
+        ## would surface one problem per run.
+        if not command.check_templates(cfg):
+            all_passed = False
+
+    if not all_passed:
         raise typer.Exit(1)
 
 
 @cli.command()
 def process_all(
     ctx: typer.Context,
-    ticket_type: Annotated[str, typer.Option("--ticket-type", help=_TICKET_TYPE_HELP)],
+    ticket_type: TicketTypeOption = DEFAULT_TICKET_TYPE,
     dry_run: bool = False,
     reply_mode: ReplyMode = ReplyMode.default,
     ## Single flag name (no "--flag/--no-flag" form) suppresses Typer's auto-generated
@@ -346,7 +429,7 @@ def process_all(
     ] = False,
 ):
     """Review all unassigned tickets via the LLM."""
-    cfg = Config(env_path=ctx.obj["env_path"], cli_args={**ctx.obj["cli_args"], "ticket_type": ticket_type})
+    cfg = _config(ctx, ticket_type=ticket_type)
     if yes_i_am_sure:
         command.batch_process_tickets(dry_run=dry_run, reply_mode=reply_mode, config=cfg)
     else:

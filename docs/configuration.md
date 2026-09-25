@@ -110,7 +110,7 @@ RCPOND_SERVICENOW_URL=https://turing-api.azure-api.net/dev-research/api/now/tabl
 # RCPOND_SERVICENOW_TOKEN=your-servicenow-token  # required if not using OAuth
 RCPOND_SERVICENOW_CLIENT_ID=your-client-id
 RCPOND_SERVICENOW_CLIENT_SECRET=your-client-secret
-RCPOND_SERVICENOW_OAUTH_SCOPE=workspace openid
+RCPOND_SERVICENOW_OAUTH_SCOPE="workspace openid"
 RCPOND_SERVICENOW_OAUTH_REDIRECT_PORT=8765
 RCPOND_SERVICENOW_OAUTH_AUTH_URL=https://...service-now.com/oauth_auth.do
 RCPOND_SERVICENOW_OAUTH_TOKEN_URL=https://...service-now.com/oauth_token.do
@@ -173,7 +173,7 @@ To enable OAuth, add your client credentials to the configuration:
 ```
 RCPOND_SERVICENOW_CLIENT_ID=your-client-id
 RCPOND_SERVICENOW_CLIENT_SECRET=your-client-secret
-RCPOND_SERVICENOW_OAUTH_SCOPE=workspace openid
+RCPOND_SERVICENOW_OAUTH_SCOPE="workspace openid"
 RCPOND_SERVICENOW_OAUTH_REDIRECT_PORT=8765
 RCPOND_SERVICENOW_OAUTH_AUTH_URL=https://...service-now.com/oauth_auth.do
 RCPOND_SERVICENOW_OAUTH_TOKEN_URL=https://...service-now.com/oauth_token.do
@@ -236,6 +236,32 @@ Credentials verified. Client Credentials mode needs no interactive login.
 ```
 
 Use `rcpond whoami` to confirm which service account you are acting as — it reports the auth mode alongside the identity, and warns when that identity is not your own user.
+
+#### Running without a home directory
+
+Bots and CI jobs often have no usable home directory — `HOME` may be unset, point somewhere non-existent, or be read-only. That matters because RCPond reads a ticket type's config from a **fixed** path, `$XDG_CONFIG_HOME/rcpond/ticket_types/<ticket-type>.config`, and `--ticket-type` is a required option on `process-next` and `process-all`.
+
+With no `XDG_CONFIG_HOME` set, that path is derived from the home directory, so a bot with `HOME=/nonexistent` looks for `/nonexistent/.config/rcpond/ticket_types/...` and fails with "No config file found for ticket type".
+
+Set `XDG_CONFIG_HOME` to a directory you control, laid out like [`example_config_dir/`](https://github.com/alan-turing-institute/rcpond/tree/main/example_config_dir):
+
+```bash
+export XDG_CONFIG_HOME=/srv/rcpond/config   # must be absolute
+rcpond process-next --ticket-type compute_allocation_request
+```
+
+This pairs well with Client Credentials, which makes a bot **fully stateless**:
+
+| | Needs a writable home? |
+|---|---|
+| Per-type config | No — a read-only `XDG_CONFIG_HOME` is enough |
+| Client Credentials tokens | No — held in memory, never written to disk |
+| Interactive OAuth tokens | **Yes** — cached at `$XDG_CACHE_HOME/rcpond/tokens.json` |
+
+So a Client Credentials bot needs no writable filesystem at all: mount the config read-only, supply credentials through the environment, and nothing is persisted between runs. An `oauth_user` bot would additionally need a writable `XDG_CACHE_HOME` for its token cache — a further reason to prefer Client Credentials for automation.
+
+> [!NOTE]
+> `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` are separate variables. Setting the former does **not** relocate the token cache.
 
 #### Assigning tickets
 

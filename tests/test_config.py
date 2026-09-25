@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from rcpond.config import AuthMode, Config
+from rcpond.config import AuthMode, Config, _parse_dotenv, configured_ticket_types
 
 _WORKING_TEMPLATES_DIR = Path("tests/fixtures/working_templates")
 _FAILING_TEMPLATES_DIR = Path("tests/fixtures/failing_templates")
@@ -378,6 +378,10 @@ def test_system_prompt_template_invalid_jinja_raises(common_config_values, tmp_p
 
 def test_email_templates_dir_valid_j2_passes(common_config_values):
     config = Config(cli_args=common_config_values)
+    ## Asserting the resolved path, not just .exists(): confirms the configured directory
+    ## was stored, and stays type-correct now the field is Path | None.
+    assert config.email_templates_dir == _WORKING_TEMPLATES_DIR.resolve()
+    assert config.email_templates_dir is not None
     assert config.email_templates_dir.exists()
 
 
@@ -416,6 +420,8 @@ def test_email_templates_dir_valid_ticket_fields_pass(common_config_values, tmp_
     (good_dir / "good.yaml.j2").write_text("subject: {{ ticket.number }} - {{ ticket.project_title }}")
     valid = dict(common_config_values, email_templates_dir=str(good_dir))
     config = Config(cli_args=valid)
+    assert config.email_templates_dir == good_dir.resolve()
+    assert config.email_templates_dir is not None
     assert config.email_templates_dir.exists()
 
 
@@ -452,6 +458,67 @@ def test_dotenv_ignores_comments_and_blank_lines(tmp_path, common_config_values)
     config = Config(env_path=env_file)
 
     assert config.llm_model == "gpt-4"
+
+
+@pytest.mark.parametrize(
+    ("raw_value", "expected"),
+    [
+        ('"workspace openid"', "workspace openid"),
+        ("'workspace openid'", "workspace openid"),
+        ("workspace openid", "workspace openid"),
+        ('"gpt-4"', "gpt-4"),
+        ("gpt-4", "gpt-4"),
+        ('""', ""),
+        ("'", "'"),
+        ('"unbalanced', '"unbalanced'),
+        ("trailing-only'", "trailing-only'"),
+        ('say "hi" now', 'say "hi" now'),
+        ("'" '"a"' "'", '"' "a" '"'),
+    ],
+    ids=[
+        "double_quoted_with_space",
+        "single_quoted_with_space",
+        "unquoted_with_space",
+        "double_quoted_no_space",
+        "unquoted_no_space",
+        "empty_quotes",
+        "lone_quote_char",
+        "unbalanced_leading",
+        "unbalanced_trailing",
+        "interior_quotes_preserved",
+        "multiple_nested_quotes",
+    ],
+)
+def test_dotenv_strips_matched_surrounding_quotes(tmp_path, raw_value, expected):
+    """A single .env must work both with --env-file and with `set -a; source .env`.
+
+    The shell needs quotes around any value containing a space; without stripping them
+    back off, --env-file would deliver the quote characters as part of the value. Only a
+    matched leading/trailing pair is removed, so quotes that are part of the value survive.
+    """
+    env_file = tmp_path / ".env"
+    env_file.write_text(f"RCPOND_LLM_MODEL={raw_value}\n")
+
+    assert _parse_dotenv(env_file)["RCPOND_LLM_MODEL"] == expected
+
+
+def test_quoted_oauth_scope_satisfies_the_openid_check(common_config_values, tmp_path):
+    """The case that motivated quote stripping: a scope quoted for the shell.
+
+    Unstripped, the value would be 'workspace openid"' after splitting, which does not
+    equal 'openid', so a correctly-configured file would be rejected.
+    """
+    values = {
+        **common_config_values,
+        **_OAUTH_CREDS,
+        "servicenow_oauth_scope": '"workspace openid"',
+    }
+    env_file = write_dotenv(tmp_path, values)
+
+    config = Config(env_path=env_file)
+
+    assert config.servicenow_oauth_scope == "workspace openid"
+    assert config.servicenow_auth_mode == AuthMode.oauth_user
 
 
 # --- Dataclass structure ---
@@ -740,6 +807,90 @@ def test_explicit_token_mode_still_requires_servicenow_token(common_config_value
 def test_explicit_oauth_user_mode_requires_client_credentials(common_config_values):
     with pytest.raises(ValueError, match="servicenow_client_id"):
         Config(cli_args={**common_config_values, "servicenow_auth_mode": "oauth_user"})
+
+
+# --- require_rules_and_templates ---
+
+_RULES_AND_TEMPLATES = ("rules_path", "email_templates_dir", "system_prompt_template_path")
+
+
+def test_rules_and_templates_required_by_default(common_config_values):
+    """The default must stay strict: a command that needs them still fails fast without them."""
+    values = {k: v for k, v in common_config_values.items() if k not in _RULES_AND_TEMPLATES}
+
+    with pytest.raises(ValueError, match="rules_path"):
+        Config(cli_args=values)
+
+
+def test_rules_and_templates_optional_when_not_required(common_config_values):
+    """login/whoami authenticate only; they must not demand config they never read.
+
+    This is the failure that prompted the flag: with rules and templates declared solely
+    in a per-type config, `rcpond login` could not construct a Config at all.
+    """
+    values = {k: v for k, v in common_config_values.items() if k not in _RULES_AND_TEMPLATES}
+
+    config = Config(cli_args=values, require_rules_and_templates=False)
+
+    assert config.rules_path is None
+    assert config.email_templates_dir is None
+    assert config.system_prompt_template_path is None
+    ## The rest of the config must still be validated
+    assert config.llm_model == "gpt-4"
+    assert config.servicenow_auth_mode == AuthMode.token
+
+
+def test_other_required_fields_still_enforced_when_not_requiring_rules(common_config_values):
+    """Relaxing rules/templates must not relax anything else."""
+    values = {k: v for k, v in common_config_values.items() if k not in _RULES_AND_TEMPLATES}
+    del values["llm_model"]
+
+    with pytest.raises(ValueError, match="llm_model"):
+        Config(cli_args=values, require_rules_and_templates=False)
+
+
+def test_invalid_templates_not_validated_when_not_required(common_config_values):
+    """Jinja validation must be skipped, not merely tolerated, when the paths are unused.
+
+    Pointing at a directory of templates known to fail validation proves the check does
+    not run, rather than passing by luck on valid fixtures.
+    """
+    values = {**common_config_values, "email_templates_dir": str(_FAILING_TEMPLATES_DIR)}
+
+    with pytest.raises(ValueError, match="Invalid Jinja2 templates"):
+        Config(cli_args=values)
+
+    ## Constructing at all is the assertion: the same input raises above.
+    config = Config(cli_args=values, require_rules_and_templates=False)
+    assert config.email_templates_dir == _FAILING_TEMPLATES_DIR.resolve()
+
+
+# --- configured_ticket_types ---
+
+
+def test_configured_ticket_types_empty_when_directory_absent(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+
+    assert configured_ticket_types() == []
+
+
+def test_configured_ticket_types_lists_config_stems_sorted(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    write_per_type_config(tmp_path, "zebra_request", {"servicenow_query": "q"})
+    write_per_type_config(tmp_path, "compute_allocation_request", {"servicenow_query": "q"})
+
+    assert configured_ticket_types() == ["compute_allocation_request", "zebra_request"]
+
+
+def test_configured_ticket_types_ignores_other_files(tmp_path, monkeypatch):
+    """Only *.config counts, so stray notes or backups in the directory are not types."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    write_per_type_config(tmp_path, "compute_allocation_request", {"servicenow_query": "q"})
+    type_dir = tmp_path / "rcpond" / "ticket_types"
+    (type_dir / "README.md").write_text("notes")
+    (type_dir / "old.config.bak").write_text("stale")
+
+    assert configured_ticket_types() == ["compute_allocation_request"]
 
 
 # --- Per-type config loading ---

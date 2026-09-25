@@ -317,3 +317,342 @@ RCPOND_SERVICENOW_QUERY=assigned_toISEMPTY^short_description=Request access to H
 * `RCPOND_SERVICENOW_QUERY` (which tickets get fetched) and a registry entry's `match` criteria (how a fetched ticket is dispatched) express overlapping intent independently and could drift out of sync — e.g. a query broadened to fetch more tickets without updating `match` to discriminate them. Not a blocker for the single-field (`short_description`-only) case, but worth keeping in mind once `match` grows additional fields.
 * `get_tickets()` will later gain a `TicketState` parameter (from the `combine-ticket-history` feature) to support fetching closed, resolved, and cancelled tickets. The function signature should be designed to accommodate this as an orthogonal parameter alongside the per-type query system — state filtering and type filtering are independent concerns.
 * The `_TICKET_TYPES` registry (or per-type config) should support declaring which ticket type combinations are considered potentially related, for use by the `find_related` subcommand (from the `combine-ticket-history` feature). Some combinations will never have related tickets (e.g. a GitHub organisation membership ticket and a compute allocation request) and this can be used as a cheap pre-filter before the more expensive field-matching heuristics are applied.
+
+## Threading ticket-type into all layers of RCPond
+
+Surfaced on 2026-09-21 by this, which fails:
+
+```bash
+(set -a; source .env; set +a; XDG_CONFIG_HOME="$PWD/example_config_dir" rcpond login)
+ValueError: Missing required configuration: rules_path, email_templates_dir
+```
+
+Once `rules_path` and `email_templates_dir` live *only* in per-type config files — which
+is the point of the feature — every command that cannot reach a per-type config breaks,
+including commands that have no need to read the rules or templates at all.
+
+### Two distinct problems
+
+**1. `Config` validates every field for every command.**
+
+`login` needs only the auth settings, but `rules_path` and `email_templates_dir` are
+unconditionally required. They can now only come from the per-type loader, which runs
+only when `ticket_type` is set, and `login` has no `--ticket-type`. So validation fails
+on two values `login` would never read.
+
+**2. Per-type config is wired into only 2 of 12 subcommands.**
+
+| Takes `--ticket-type` | Does not |
+|---|---|
+| `process-next`, `process-all` | `login`, `whoami`, `display-all`, `display-ticket`, `browse-ticket`, **`process-ticket`**, `evaluate-all`, `find-related`, `analytics`, `check-templates` |
+
+`process-ticket` is the one to note: it runs the LLM, so it genuinely needs rules and
+templates, yet it cannot load them from a per-type config either. `check-templates` is
+similar — it exists to validate template directories but cannot see the per-type ones.
+
+### Commands fall into three groups
+
+Worth settling this taxonomy before writing code, because it determines what
+`--ticket-type` should *mean* per command.
+
+Two independent axes matter, and conflating them is what produced the `rcpond login`
+failure above:
+
+- **Type scope** — how many ticket types are in play (the groups below).
+- **Needs rules/templates** — whether the command reads rules or templates at all. This
+  does *not* follow from the group.
+
+`rules_path` and `system_prompt_template_path` are read only by `prompt.py`;
+`email_templates_dir` only by `PostTemplatedNoteTool`. Everything else never touches them.
+
+| Group | Commands | Needs rules/templates | Type scope |
+|---|---|---|---|
+| **A. Needs neither** | `login`, `whoami` | No | None. A `--ticket-type` switch would be meaningless and would confuse users. |
+| **B. One type per invocation** | `process-next`, `process-all`, `process-ticket`, `display-all`, `display-ticket`, `browse-ticket`, `find-related` | `process-*` yes; the rest no | Exactly one type. `--ticket-type` selects it, **defaulting to `compute_allocation_request`**. |
+| **C. All types, always** | `check-templates` | Templates only | Every configured type; no switch. Deliberately the one command that seeks out other types without being asked. |
+
+Two commands sit outside the taxonomy for now — see "Deferred: the genuinely cross-type
+commands" below.
+
+So "thread `--ticket-type` through every command" is the wrong goal. The goal is:
+
+- **A**: stop requiring rules or templates at all.
+- **B**: accept `--ticket-type`, defaulted; load that one per-type config.
+- **C**: enumerate every configured type.
+
+`find-related` belongs in B despite first appearances. Its input is one ticket and its
+output is many, but the candidates come from `get_tickets(all_including_closed)` filtered
+by the per-type `servicenow_query`, so the results are always the input ticket's type.
+Cross-type relations are a *future* possibility — what the "Other Notes" bullet about
+declaring relatable type combinations anticipates.
+
+### Why there is no "mixed types" group
+
+An earlier draft had a fourth group for commands whose result set may span types
+(`display-all`, `analytics`, `evaluate-all`), narrowed by a repeatable
+`--include-ticket-type` filter defaulting to all types. That group has been **eliminated**,
+and with it the second flag. Two moves did it:
+
+**`display-all` becomes group B.** Restricting it to a single type is not a loss: it makes
+`display-all` show exactly the set that `process-all` would act on. Under the mixed-type
+design the two would have disagreed, so a user could see tickets that the very next
+command would refuse to touch. One flag, one meaning, and the `MATCH_CRITERIA` guard
+applies to it for free.
+
+**`analytics` and `evaluate-all` are deferred**, not redesigned (below).
+
+This removes a substantial amount of machinery that was being introduced for a single
+command: a second CLI flag whose default was the *inverse* of `--ticket-type`'s, a
+per-ticket filtering path through `get_tickets`, and the risk — noted in the earlier
+draft — that a later "consistency" tidy-up would unify the two flags and silently narrow
+`analytics` to one type. None of that has to exist.
+
+The rejected design is preserved here because the reasoning still applies if a genuinely
+cross-type command is ever needed:
+
+> Groups B and C both narrow by ticket type, but with **opposite defaults and different
+> arity** — B defaults to one named type and takes exactly one; C defaulted to all types
+> and took zero or more. Giving both the name `--ticket-type` would mean the same flag
+> meaning opposite things depending on the command, undiscoverable from the name. Hence
+> `--include-ticket-type`: repeatable, obviously a filter, emphasising inclusion and
+> leaving room for a future `--exclude-ticket-type`.
+
+### Deferred: the genuinely cross-type commands
+
+**`analytics`** is the one command that is cross-type by nature: it already groups by
+`ticket_type_key(ticket)`, derived per ticket rather than from config, and reports per
+type. Forcing it into group B would make it report on one type and quietly lose that.
+
+It remains **broken** under a per-type-only config, failing with
+`Missing required configuration: rules_path, email_templates_dir`.
+
+Note this is *not* a ticket-type problem. `analytics` reads no rules and no templates, so
+the one-line fix is `require_rules_and_templates=False` at its `_config(ctx, ...)` call
+site — the same treatment as `login` and `whoami`, for the same reason. No per-type
+config, no filter switch and no `per_type` mapping are needed to unbreak it. Accepted as
+broken for now by explicit decision, but the cost of fixing it is one line, not a feature.
+
+**`evaluate-all`** is doubly exceptional and its future is undecided. Its tickets come
+from **local HTML files, not a ServiceNow query**, so the query-ordering problem below
+does not apply to it. It is also **conditionally registered** (inside
+`try: import rcpond.html_servicenow`, the `html` extra), so it is absent from the CLI
+unless that dependency group is installed. It does need rules and templates, so unlike
+`analytics` it cannot be unbroken with a one-line change. Acceptable that it remains
+unable to handle multiple ticket types at this stage.
+
+### Why inference is deferred
+
+Group B's long-term ideal is to infer a single ticket's type from the ticket itself rather
+than from a flag or default. That is not currently possible, and the reason is worth
+recording so it is not rediscovered:
+
+`get_ticket()` locates a ticket by filtering `get_tickets(all_including_closed)` through
+`self._query` (`servicenow.py`), and `servicenow_query` comes from the **per-type**
+config. So the type is needed in order to fetch the ticket whose type was to be inferred.
+
+Escaping this needs either a type-agnostic query for single-ticket lookup, or the union of
+all configured types' queries — which is another argument for `Config` knowing about every
+configured type (C-i below).
+
+### Guarding the default
+
+A fixed default is good ergonomics but has one real hazard: a user working on a different
+ticket type silently gets `compute_allocation_request` rules and templates applied, with
+no error.
+
+Because `ticket_type_key()` already derives a ticket's type from its own fields, this is
+cheap to close — and it serves the fail-early preference directly:
+
+> When the ticket type came from the **default** rather than an explicit `--ticket-type`,
+> assert that each fetched ticket actually satisfies that type's `MATCH_CRITERIA`, and
+> fail if it does not.
+
+**Decided:** an explicit `--ticket-type` is subject to the same check. Applying it
+everywhere is more consistent and catches a mistyped flag, and there is no use case for
+deliberately applying one type's rules to another type's ticket.
+
+### Group C needs per-type config loadable for every type
+
+Today the per-type file is read once, inside `Config.__post_init__`, and flattened into
+`config.rules_path` / `config.email_templates_dir` — a single type's values on a single
+object. Group C (`check-templates`) needs every configured type's values simultaneously,
+which that shape cannot express.
+
+With the mixed-types group eliminated, `check-templates` is now the **only** driver for
+this work: nothing else needs more than one type's config at a time. It stays accepted —
+validating templates for just one type is not much of a check — but it is no longer
+blocking anything else, and could reasonably be scheduled after the rest.
+
+Options:
+
+- Accepted **C-i. `Config` holds a mapping.** `config.per_type: dict[str, PerTypeConfig]`, keyed
+  by registry key, populated for every `.config` file present in
+  `$XDG_CONFIG_HOME/rcpond/ticket_types/`. Group B selects one entry; `check-templates`
+  iterates all. Flat `rules_path` becomes a convenience accessor for group B, or goes away.
+- Rejected **C-ii. Lazy per-type loader.** `config.for_ticket_type(key) -> PerTypeConfig`, reading
+  and caching on demand. Smaller change, but errors surface late and are harder to
+  report up front.
+- Rejected **C-iii. Leave `check-templates` unable to reach per-type config.** It would
+  then validate only the default type's templates, silently passing a deployment whose
+  other types' templates are broken — the opposite of what the command exists to do.
+
+C-i is accepted: it makes "which types are configured on this host" an explicit,
+inspectable fact, gives `check-templates` something to iterate over, and lets an
+unknown-type ticket be detected at startup rather than mid-run.
+
+Two consequences, both decided:
+
+- **All consumers move to the mapping.** The flat `config.rules_path` and
+  `config.email_templates_dir` attributes do not survive as group B conveniences —
+  keeping both shapes would let them drift. `prompt.py` and `PostTemplatedNoteTool` take
+  a `PerTypeConfig` (or the key to look up) instead.
+- **A ticket matching no registered type aborts the run.** It is not skipped with a
+  warning. A ticket RCPond cannot classify is a configuration or query error, and
+  skipping would silently under-process a batch — the failure mode hardest to notice.
+  This also settles the question left open in "Other Notes" above.
+
+### Immediate fix for problem 1
+
+Independent of the above, and unblocks `rcpond login` today:
+
+```python
+## config.py — InitVar, defaulting to today's strict behaviour
+def __post_init__(self, env_path, cli_args, require_rules_and_templates=True):
+    ...
+    ## login/whoami authenticate only; they never read rules or templates
+    if not require_rules_and_templates:
+        optional |= {"rules_path", "email_templates_dir", "system_prompt_template_path"}
+```
+
+with `_config(ctx, require_rules_and_templates=False)` in `login` and `whoami`, and the Jinja
+template validation skipped on that path.
+
+**Decided:** the `InitVar` above, rather than a separate narrower `AuthConfig` object for
+group A. The `InitVar` is a contained change that keeps one config type; an `AuthConfig`
+would be cleaner in principle but is a much larger refactor for two commands.
+
+Note this is **complementary to the default ticket type, not an alternative to it.** A
+default would incidentally make `rcpond login` work, because per-type config would always
+load and would always supply `rules_path`. But that fixes the symptom: `login` would still
+*require* a `compute_allocation_request.config` to exist in order to authenticate, for
+values it never reads. Fail-early validation earns its keep when what is validated is
+genuinely needed; validating a superset is not early failure but false failure — which is
+exactly the bug being fixed here. Do both.
+
+Rejected alternatives:
+
+- **Give `login` a `--ticket-type`.** Semantically wrong: authenticating has no ticket
+  type, and it would train users to pass a meaningless flag.
+- **Auto-default to whichever type happens to be registered, when only one is.** Silently
+  changes behaviour the moment a second type is registered — exactly the transition this
+  feature is meant to make safe. Note this objection does *not* apply to a **fixed,
+  named** default of `compute_allocation_request`: that is stable, visible in `--help`,
+  and unaffected by new registrations. The named default is adopted above.
+- **Make `rules_path` / `email_templates_dir` optional for everyone, validated at point
+  of use.** Defers errors from startup to mid-run, and worsens the failure mode for the
+  process commands, which are the ones that actually need these values.
+
+### Open questions
+
+Settled during review, and folded into the sections above:
+
+| Question | Decision |
+|---|---|
+| Name for a mixed-types filter switch | Moot — the mixed-types group was eliminated, so no second flag is needed. The `--include-ticket-type` reasoning is preserved above in case one is ever required. |
+| Does explicit `--ticket-type` skip the `MATCH_CRITERIA` check? | No — the check applies either way |
+| Ticket matching no registered type | Abort the run; do not skip with a warning |
+| `require_rules_and_templates` mechanism | `Config` `InitVar`, not a separate `AuthConfig` |
+| Flat `rules_path` vs `per_type` mapping | Move all consumers to the mapping |
+| Does `find-related` span types? | No — candidates come from the per-type query, so results are always the input ticket's type. Cleanly group B. |
+
+### Where each command declares whether it needs rules or templates
+
+**Decided: at the call site.** A command that does not need rules or templates passes
+`require_rules_and_templates=False` in its own `_config(ctx, ...)` call. No central table in
+`cli.py` — that would duplicate the command list and fall out of step with it.
+
+Note this cannot be derived from the group: group B is mixed, since `process-*` reads rules
+and templates while `display-all`, `display-ticket`, `browse-ticket` and `find-related` do
+not. It has to be stated per command.
+
+The arrangement fails safe. `require_rules_and_templates` defaults to `True`, so a new command
+whose author forgets to declare it gets today's over-strict validation — a loud, spurious
+"missing configuration" error rather than silently skipped validation.
+
+### Which commands get the flag
+
+Under a per-type-only config (rules and templates declared *only* in
+`ticket_types/*.config`), every command that cannot reach a per-type config fails
+identically today. Confirmed by running each against an environment with no
+`RCPOND_RULES_PATH` or `RCPOND_EMAIL_TEMPLATES_DIR`:
+
+```
+rcpond login                 -> ValueError: Missing required configuration: rules_path, email_templates_dir
+rcpond whoami                -> ValueError: Missing required configuration: rules_path, email_templates_dir
+rcpond display-all           -> ValueError: Missing required configuration: rules_path, email_templates_dir
+rcpond analytics             -> ValueError: Missing required configuration: rules_path, email_templates_dir
+rcpond browse-ticket RES0001 -> ValueError: Missing required configuration: rules_path, email_templates_dir
+```
+
+So seven commands read neither rules nor templates: `login`, `whoami`, `display-all`,
+`display-ticket`, `browse-ticket`, `find-related`, `analytics`.
+
+**Decided: `login` and `whoami` only.** They will *never* need rules or templates, so
+exempting them is permanent and correct.
+
+Of the other five, four are now resolved a different way: `display-all`, `display-ticket`,
+`browse-ticket` and `find-related` joined group B and take `--ticket-type`, so they reach
+a per-type config and no longer fail. Exempting them would have been the wrong fix — they
+need a ticket type for the *query*, not just for rules and templates.
+
+`analytics` is the exception and stays broken by decision. Unlike the other four it is
+cross-type by nature, so `--ticket-type` is not the right answer for it; unlike
+`process-*` it reads no rules or templates. It is therefore the one command for which the
+`require_rules_and_templates=False` exemption *would* be the correct permanent fix — a
+one-line change, deferred rather than ruled out. See "Deferred: the genuinely cross-type
+commands" above.
+
+## TODO
+
+### Survey the real `short_description` values on dev *and* production
+
+Catalogue every distinct `short_description` actually present on both ServiceNow
+instances, and record the exact strings here. This is a prerequisite for registering any
+further ticket type, because `MATCH_CRITERIA` is an **exact** string comparison.
+
+Why it matters:
+
+- The registry cannot be written from guesses. A value that is one character off matches
+  nothing, and — now that the `MATCH_CRITERIA` guard is in place — that shows up as an
+  aborted command rather than a silent mis-classification.
+- **Dev and production may differ.** Descriptions are free text an administrator can
+  reword on either instance independently, so a registry built from dev alone may not hold
+  in production. Both must be surveyed, and any divergence is itself a finding worth
+  recording.
+- Punctuation and whitespace count. One observed value ends in a full stop; trailing
+  spaces or a changed capital would be just as fatal and just as easy to miss when
+  transcribing by eye.
+
+Observed on **dev** so far, from a deliberately broadened query (2026-09-24):
+
+| `short_description` | Status |
+|---|---|
+| `Request access to HPC and cloud computing facilities` | Registered as `compute_allocation_request` |
+| `General Compute Support Request` | Not registered. Matches the hypothetical `GeneralComputeSupportTicket` in Option A above exactly — that example turns out to be the real string. |
+| `Requesting access to licence for research software.` | Not registered. Note the trailing full stop. |
+
+This list is incidental — the by-product of one broadened query, not a survey — so treat
+it as a starting point rather than the complete set. Production has not been surveyed at
+all.
+
+How to collect it: run a query with no `short_description` filter and group the results.
+`display-all` with `RCPOND_SERVICENOW_QUERY` overridden to something broad will abort and
+name the non-matching values, which works but only reports what the current type does not
+match. A short throwaway script that fetches the table and counts distinct
+`short_description` values would give the full picture in one pass, including how many
+tickets each type has.
+
+Related: the note in "Other Notes" above that `RCPOND_SERVICENOW_QUERY` and
+`MATCH_CRITERIA` express overlapping intent independently and can drift. Having the real
+values written down makes that drift detectable.
+

@@ -86,6 +86,9 @@ class PostTemplatedNoteTool(Tool):
     """
 
     def __init__(self, config: Config) -> None:
+        ## Guaranteed by Config.__post_init__ unless built with
+        ## require_rules_and_templates=False, which no caller of this class should do.
+        assert config.email_templates_dir is not None
         self._dir = config.email_templates_dir
         self._templates: dict[str, Path] = {f.name: f for f in sorted(self._dir.glob("*.j2"))}
         self._jinja_env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(self._dir)))

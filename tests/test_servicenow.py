@@ -70,9 +70,14 @@ _SUBSCRIPTION_KEY_HEADER = "Ocp-Apim-Subscription-Key"
 _TEST_QUERY = "short_description=Request access to HPC and cloud computing facilities"
 
 
-def _sn_config(auth_mode: AuthMode, servicenow_token: str | None = None) -> MagicMock:
+def _sn_config(
+    auth_mode: AuthMode,
+    servicenow_token: str | None = None,
+    ticket_type: str | None = None,
+) -> MagicMock:
     """A config sufficient to construct ServiceNow, in the given auth mode."""
     cfg = MagicMock()
+    cfg.ticket_type = ticket_type
     cfg.servicenow_auth_mode = auth_mode
     cfg.servicenow_url = "https://example.com/api/now/table"
     cfg.servicenow_web_url = "https://example.com"
@@ -88,6 +93,7 @@ def _make_sn(
     *,
     id_token: str | None = None,
     servicenow_token: str | None = "gw-key",
+    ticket_type: str | None = None,
 ) -> ServiceNow:
     """Build a ServiceNow through its real constructor, then stub out the HTTP session.
 
@@ -98,7 +104,7 @@ def _make_sn(
     The token functions are patched at their source so no browser opens and no token
     endpoint is contacted; ``id_token`` is what ``get_id_token()`` would have returned.
     """
-    cfg = _sn_config(auth_mode, servicenow_token)
+    cfg = _sn_config(auth_mode, servicenow_token, ticket_type)
     with (
         patch("rcpond.auth.get_bearer_token", return_value="tok"),
         patch("rcpond.auth.get_id_token", return_value=id_token),
@@ -725,6 +731,65 @@ def test_get_tickets_state_combinations(auth_mode, state, expected):
         tickets = sn.get_tickets(state=state)
 
     assert {t.number for t in tickets} == expected
+
+
+## ── MATCH_CRITERIA guard ────────────────────────────────────────────────────
+##
+## --ticket-type now defaults rather than being required, so a user working a different
+## ticket type would otherwise get compute_allocation_request rules applied silently.
+## Each fetched ticket is therefore checked against the resolved type's MATCH_CRITERIA.
+
+_FOREIGN_TYPE_TICKET = {**_raw_ticket(number="foreign_type"), "short_description": "Request software installation"}
+_UNCLASSIFIABLE_TICKET = {**_raw_ticket(number="unknown_type"), "short_description": "Something nobody registered"}
+
+
+def test_get_tickets_rejects_a_ticket_of_another_type():
+    """A ticket the query returned but the expected type does not match aborts the run."""
+    sn = _make_sn(ticket_type="compute_allocation_request")
+    _setup_session(sn, [_raw_ticket(number="ok"), _FOREIGN_TYPE_TICKET])
+
+    with pytest.raises(ValueError, match="foreign_type"):
+        sn.get_tickets(state=TicketState.all_open)
+
+
+def test_get_tickets_rejects_an_unclassifiable_ticket():
+    """A ticket matching no registered type is a config or query error, not something to skip.
+
+    Skipping would silently under-process a batch — the failure mode hardest to notice.
+    """
+    sn = _make_sn(ticket_type="compute_allocation_request")
+    _setup_session(sn, [_raw_ticket(number="ok"), _UNCLASSIFIABLE_TICKET])
+
+    with pytest.raises(ValueError, match="unknown_type"):
+        sn.get_tickets(state=TicketState.all_open)
+
+
+def test_get_tickets_error_names_the_expected_type():
+    """The message must say what was expected, or the user cannot tell which flag to fix."""
+    sn = _make_sn(ticket_type="compute_allocation_request")
+    _setup_session(sn, [_FOREIGN_TYPE_TICKET])
+
+    with pytest.raises(ValueError, match="compute_allocation_request"):
+        sn.get_tickets(state=TicketState.all_open)
+
+
+def test_get_tickets_accepts_tickets_of_the_expected_type():
+    sn = _make_sn(ticket_type="compute_allocation_request")
+    _setup_session(sn, _COMMON_RAW_TICKETS)
+
+    tickets = sn.get_tickets(state=TicketState.all_including_closed)
+
+    assert len(tickets) == len(_COMMON_RAW_TICKETS)
+
+
+def test_get_tickets_skips_the_check_without_an_expected_type():
+    """Group C commands resolve type per ticket, so a mixed result set is legitimate there."""
+    sn = _make_sn(ticket_type=None)
+    _setup_session(sn, [_raw_ticket(number="ok"), _FOREIGN_TYPE_TICKET, _UNCLASSIFIABLE_TICKET])
+
+    tickets = sn.get_tickets(state=TicketState.all_including_closed)
+
+    assert {t.number for t in tickets} == {"ok", "foreign_type", "unknown_type"}
 
 
 def test_get_tickets_all_including_closed_returns_everything(sn_instance):
