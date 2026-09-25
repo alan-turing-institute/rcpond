@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from rcpond.config import AuthMode, Config, _parse_dotenv
+from rcpond.config import AuthMode, Config, _parse_dotenv, configured_ticket_types
 
 _WORKING_TEMPLATES_DIR = Path("tests/fixtures/working_templates")
 _FAILING_TEMPLATES_DIR = Path("tests/fixtures/failing_templates")
@@ -863,6 +863,34 @@ def test_invalid_templates_not_validated_when_not_required(common_config_values)
     ## Constructing at all is the assertion: the same input raises above.
     config = Config(cli_args=values, require_rules_and_templates=False)
     assert config.email_templates_dir == _FAILING_TEMPLATES_DIR.resolve()
+
+
+# --- configured_ticket_types ---
+
+
+def test_configured_ticket_types_empty_when_directory_absent(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+
+    assert configured_ticket_types() == []
+
+
+def test_configured_ticket_types_lists_config_stems_sorted(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    write_per_type_config(tmp_path, "zebra_request", {"servicenow_query": "q"})
+    write_per_type_config(tmp_path, "compute_allocation_request", {"servicenow_query": "q"})
+
+    assert configured_ticket_types() == ["compute_allocation_request", "zebra_request"]
+
+
+def test_configured_ticket_types_ignores_other_files(tmp_path, monkeypatch):
+    """Only *.config counts, so stray notes or backups in the directory are not types."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    write_per_type_config(tmp_path, "compute_allocation_request", {"servicenow_query": "q"})
+    type_dir = tmp_path / "rcpond" / "ticket_types"
+    (type_dir / "README.md").write_text("notes")
+    (type_dir / "old.config.bak").write_text("stale")
+
+    assert configured_ticket_types() == ["compute_allocation_request"]
 
 
 # --- Per-type config loading ---

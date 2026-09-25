@@ -55,20 +55,24 @@ def test_auth_mode_option_forwarded_verbatim(argv, expected):
     either; that is Config's job, so even a mode the chosen subcommand would reject
     must pass through unchanged.
 
-    check-templates is used as the vehicle deliberately: it is the one subcommand whose
-    own docstring states that no ServiceNow configuration is required, so it has no
-    auth-mode behaviour of its own to confuse matters. _config is additionally stubbed to
-    abort, so no command body runs at all and every mode value reaches the assertion
-    unchanged — including ones a command such as `login` would reject.
+    display-all is used as the vehicle deliberately: it has no auth-mode behaviour of its
+    own, and it calls _config immediately with no precondition to satisfy first. _config
+    is additionally stubbed to abort, so no command body runs at all and every mode value
+    reaches the assertion unchanged — including ones a command such as `login` would
+    reject.
+
+    (check-templates was the original vehicle, but it now consults
+    configured_ticket_types() before building a Config, so it can exit before _config is
+    ever reached.)
     """
     captured = {}
 
-    def _capture_and_abort(ctx):
+    def _capture_and_abort(ctx, **_kwargs):
         captured.update(ctx.obj["cli_args"])
         raise typer.Exit(0)
 
     with patch("rcpond.cli._config", side_effect=_capture_and_abort):
-        result = CliRunner().invoke(cli, [*argv, "check-templates"])
+        result = CliRunner().invoke(cli, [*argv, "display-all"])
 
     assert result.exit_code == 0, result.output
     assert captured["servicenow_auth_mode"] == expected
@@ -131,6 +135,109 @@ def test_default_ticket_type_is_a_registered_type():
     assert DEFAULT_TICKET_TYPE in _TICKET_TYPES
 
 
+# --- check-templates across every configured type ---
+
+
+def _invoke_check_templates(configured, *, templates_pass=True, config_error=None):
+    """Run check-templates with the configured type list and Config stubbed out.
+
+    ``templates_pass`` is what the stubbed ``command.check_templates`` reports — whether
+    every template rendered, not an instruction to check anything.
+    """
+    calls = []
+    ## A bool applies to every type; a list gives a result per call, in order.
+    results = iter(templates_pass if isinstance(templates_pass, list) else [templates_pass] * len(configured))
+
+    def _fake_config(_ctx, **kwargs):
+        if config_error is not None and kwargs.get("ticket_type") in config_error:
+            raise ValueError(config_error[kwargs["ticket_type"]])
+        cfg = MagicMock()
+        cfg.ticket_type = kwargs.get("ticket_type")
+        return cfg
+
+    def _fake_check(cfg):
+        ## Recorded here rather than in _fake_config, so `calls` means "reached the
+        ## template check" — which is what short-circuiting would skip.
+        calls.append(cfg.ticket_type)
+        return next(results)
+
+    with (
+        patch("rcpond.config.configured_ticket_types", return_value=configured),
+        patch("rcpond.cli._config", side_effect=_fake_config),
+        patch("rcpond.command.check_templates", side_effect=_fake_check),
+    ):
+        result = CliRunner().invoke(cli, ["check-templates"])
+
+    return result, calls
+
+
+def test_check_templates_validates_every_configured_type():
+    """Validating only the default type would silently pass a broken deployment.
+
+    The ordered comparison is deliberate, not incidental: ``configured_ticket_types()``
+    returns a sorted list and the command iterates it in order, so a CI log lists types
+    the same way every run. Asserting the order pins that as a requirement.
+    """
+    result, calls = _invoke_check_templates(["compute_allocation_request", "other_request"])
+
+    assert result.exit_code == 0, result.output
+    assert calls == ["compute_allocation_request", "other_request"]
+
+
+def test_check_templates_names_each_type_in_the_output():
+    result, _ = _invoke_check_templates(["compute_allocation_request", "other_request"])
+
+    assert "compute_allocation_request" in result.output
+    assert "other_request" in result.output
+
+
+def test_check_templates_exits_nonzero_when_a_type_fails():
+    result, _ = _invoke_check_templates(["compute_allocation_request"], templates_pass=False)
+
+    assert result.exit_code == 1
+
+
+def test_check_templates_reports_all_types_even_when_one_is_unusable():
+    """A broken config for one type must not hide the remaining types' results.
+
+    Config raises on an unrenderable template or an unregistered type, so without
+    catching per type the run would stop at the first problem — the opposite of what a
+    CI check should do.
+    """
+    result, calls = _invoke_check_templates(
+        ["broken_request", "compute_allocation_request"],
+        config_error={"broken_request": "Unknown ticket_type 'broken_request'"},
+    )
+
+    assert result.exit_code == 1
+    assert "broken_request" in result.output
+    ## Order is not at issue here — the point is only that the sound type was still
+    ## reached after the broken one raised, so exactly one call is expected.
+    assert calls == ["compute_allocation_request"]
+
+
+def test_check_templates_checks_later_types_after_an_earlier_one_fails():
+    """A failing type must not stop the remaining types being checked.
+
+    Guards the non-short-circuiting accumulation in the command: rewriting it as
+    `all_passed = all_passed and command.check_templates(cfg)` would skip every type after
+    the first failure, so a CI run would surface one broken type per run.
+    """
+    result, calls = _invoke_check_templates(["a_request", "b_request"], templates_pass=[False, True])
+
+    assert result.exit_code == 1
+    assert calls == ["a_request", "b_request"]
+
+
+def test_check_templates_fails_when_no_types_are_configured():
+    """Silently passing with nothing to check would make the CI gate meaningless."""
+    result, _ = _invoke_check_templates([])
+
+    assert result.exit_code == 1
+    assert "no ticket type" in result.output.lower()
+    # OK
+
+
 # --- Which commands require rules and templates ---
 
 
@@ -158,7 +265,12 @@ def test_only_auth_commands_opt_out_of_rules_and_templates(argv, requires):
         captured.update(kwargs)
         raise typer.Exit(0)
 
-    with patch("rcpond.cli.Config", side_effect=_capture_and_abort):
+    with (
+        ## check-templates consults this before building any Config, and would otherwise
+        ## read the developer's real XDG config and exit early with nothing configured.
+        patch("rcpond.config.configured_ticket_types", return_value=["compute_allocation_request"]),
+        patch("rcpond.cli.Config", side_effect=_capture_and_abort),
+    ):
         result = CliRunner().invoke(cli, argv)
 
     assert result.exit_code == 0, result.output

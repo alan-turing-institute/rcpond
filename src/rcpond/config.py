@@ -368,6 +368,24 @@ class Config:
             _validate_email_templates_dir(self.email_templates_dir, _ticket_class)
 
 
+def configured_ticket_types() -> list[str]:
+    """Return the ticket type keys that have a per-type config file on this host.
+
+    Reads the stems of ``$XDG_CONFIG_HOME/rcpond/ticket_types/*.config``. A key appearing
+    here means only that someone has configured it; it may not be registered in
+    ``_TICKET_TYPES``, and callers should expect ``Config`` to reject such a key.
+
+    Returns
+    -------
+    list[str]
+        Sorted, so callers iterate in a stable order. Empty if the directory is absent.
+    """
+    type_dir = xdg_config_home() / "rcpond" / "ticket_types"
+    if not type_dir.is_dir():
+        return []
+    return sorted(path.stem for path in type_dir.glob("*.config"))
+
+
 def _env_var_name(field_name: str) -> str:
     return f"RCPOND_{field_name.upper()}"
 

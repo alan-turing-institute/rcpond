@@ -373,14 +373,46 @@ except ImportError:
 def check_templates(
     ctx: typer.Context,
 ) -> None:
-    """Render all Jinja2 templates in a directory with dummy values (for CI).
+    """Render every configured ticket type's Jinja2 templates with dummy values (for CI).
 
     This subcommand is to help those editing templates. It is not expected that most users will need to use this directly.
 
-    Exits with code 1 if any template fails to render. No ServiceNow or LLM
-    configuration is required.
+    Unlike the other subcommands this takes no ``--ticket-type``: Every ``*.config`` file under
+    ``$XDG_CONFIG_HOME/rcpond/ticket_types/`` is checked.
+
+    Exits with code 1 if any template fails to render, or if any type's configuration
+    cannot be loaded at all. All configured (or partially configured) ticket types are checked - the
+    command does not exit on the first failure encountered. A CI run should report every identified problem.
+    No ServiceNow or LLM configuration is required.
     """
-    if not command.check_templates(_config(ctx)):
+    from rcpond.config import configured_ticket_types
+
+    ticket_types = configured_ticket_types()
+    if not ticket_types:
+        print(
+            "[red]No ticket type configuration found.[/red] Expected one or more "
+            "'*.config' files in $XDG_CONFIG_HOME/rcpond/ticket_types/."
+        )
+        raise typer.Exit(1)
+
+    all_passed = True
+    for name in ticket_types:
+        print(f"\n[bold]{name}[/bold]")
+        try:
+            cfg = _config(ctx, ticket_type=name)
+        except ValueError as exc:
+            ## Covers an unregistered type and a template whose Jinja2 is invalid, both of
+            ## which Config raises on. Reported and carried past rather than aborting.
+            print(f"  [red]FAIL[/red]  {exc}")
+            all_passed = False
+            continue
+        ## Deliberately not `all_passed = all_passed and ...`: `and` short-circuits, so
+        ## after the first failing type no further type would be checked and a CI run
+        ## would surface one problem per run.
+        if not command.check_templates(cfg):
+            all_passed = False
+
+    if not all_passed:
         raise typer.Exit(1)
 
 
