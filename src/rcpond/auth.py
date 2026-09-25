@@ -55,6 +55,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+import requests
 from authlib.integrations.requests_client import OAuth2Session  # type: ignore[import-not-found]
 from xdg_base_dirs import xdg_cache_home
 
@@ -279,6 +280,31 @@ def _refresh_access_token(config: Config, refresh_token: str) -> dict | None:
 
 
 ## ---- Public API ----
+
+
+class BearerAuth(requests.auth.AuthBase):
+    """Attach a currently-valid Bearer token to every request.
+
+    Installed as ``session.auth`` rather than writing the ``Authorization`` header once,
+    because a single client can outlive its access token: a batch run holds one
+    ``ServiceNow`` for the whole job, and a header set at construction would keep being
+    sent after the token lapsed, 401ing every request from then on.
+
+    ``get_bearer_token`` is an in-memory cache hit while the token is valid, so the
+    per-request cost is negligible; the point is that expiry is re-checked at all.
+
+    Under ``oauth_client_credentials`` a lapsed token is re-fetched silently. Under
+    ``oauth_user`` it is refreshed silently where possible, but a failed refresh can open
+    a browser part-way through a long command — still preferable to every subsequent
+    request failing.
+    """
+
+    def __init__(self, config: Config) -> None:
+        self._config = config
+
+    def __call__(self, request: requests.PreparedRequest) -> requests.PreparedRequest:
+        request.headers["Authorization"] = f"Bearer {get_bearer_token(self._config)}"
+        return request
 
 
 def get_bearer_token(config: Config) -> str:
