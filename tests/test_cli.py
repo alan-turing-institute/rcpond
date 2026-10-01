@@ -308,6 +308,56 @@ def test_login_client_credentials_does_not_claim_a_cached_token(mock_config):
     assert "no interactive login" in result.output.lower()
 
 
+@pytest.mark.parametrize(
+    "auth_mode",
+    [AuthMode.oauth_user, AuthMode.oauth_client_credentials],
+    ids=["interactive", "client_credentials"],
+)
+@pytest.mark.parametrize(
+    ("argv", "expect_cleared"),
+    [(["login"], False), (["login", "--force"], True)],
+    ids=["default_may_use_cache", "force_discards_cache"],
+)
+def test_login_force_discards_cached_tokens(mock_config, auth_mode, argv, expect_cleared):
+    """Without --force, `login` can succeed from a cached token without contacting the endpoint.
+
+    That makes a plain `rcpond login` unreliable as a credential check — it reported
+    success against a wrong client secret, because a still-valid cached token short
+    circuits the fetch. --force discards cached tokens so the credentials are exercised.
+
+    The flaw is specific to ``oauth_user``, whose tokens persist on disk between runs; a
+    Client Credentials token lives in memory only, so a fresh process has nothing cached
+    and already contacts the endpoint. --force behaves identically in both modes anyway,
+    so the option means one thing wherever it is used.
+    """
+    mock_config.servicenow_auth_mode = auth_mode
+
+    with (
+        patch("rcpond.auth.clear_token_cache") as mock_clear,
+        patch("rcpond.auth.get_bearer_token", return_value="tok") as mock_token,
+    ):
+        result = _invoke(argv, mock_config)
+
+    assert result.exit_code == 0, result.output
+    assert mock_clear.called is expect_cleared
+    ## Either way a token is obtained; --force only changes whether the cache is consulted
+    mock_token.assert_called_once()
+
+
+def test_login_force_does_not_clear_the_cache_in_token_mode(mock_config):
+    """Static token auth exits first: there is nothing to log in to, so nothing to discard."""
+    mock_config.servicenow_auth_mode = AuthMode.token
+
+    with (
+        patch("rcpond.auth.clear_token_cache") as mock_clear,
+        patch("rcpond.auth.get_bearer_token"),
+    ):
+        result = _invoke(["login", "--force"], mock_config)
+
+    assert result.exit_code == 1
+    mock_clear.assert_not_called()
+
+
 def test_login_static_token_mode_is_rejected(mock_config):
     """There is nothing to log in to without OAuth; saying so beats a confusing failure."""
     mock_config.servicenow_auth_mode = AuthMode.token
