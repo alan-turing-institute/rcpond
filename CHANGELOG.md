@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `rcpond login --force` discards cached tokens and authenticates from scratch. Without it, `login` can succeed from a cached token without checking the configured credentials.
 
+### Fixed
+
+- The OAuth token is now refreshed for each request rather than just once when the ServiceNow client is created. Previously, if a token expired part way through a long-running job such as `process-all`, the expired token kept being sent and every remaining request failed.
+
 ### Changed
 
 - A rejected token request now names the settings to check and warns that a shell may have altered the secret. The original error is preserved.

@@ -1,6 +1,9 @@
 import base64
 import dataclasses
+import itertools
 import json
+import os
+import time
 from datetime import datetime
 from unittest.mock import MagicMock, call, patch
 
@@ -70,12 +73,33 @@ _SUBSCRIPTION_KEY_HEADER = "Ocp-Apim-Subscription-Key"
 _TEST_QUERY = "short_description=Request access to HPC and cloud computing facilities"
 
 
+_CLIENT_ID_COUNTER = itertools.count()
+
+
+def _unique_client_id() -> str:
+    """Return a client ID unique to the calling test.
+
+    The client-credentials token cache is process-wide and keyed by client ID, so two
+    tests sharing one would share cached tokens — and a test could pass by reading a
+    token another test fetched. pytest exports the running test's node ID, so deriving
+    the default from it makes uniqueness automatic rather than something each test author
+    has to remember. The counter disambiguates several configs built within one test.
+    """
+    node = os.environ.get("PYTEST_CURRENT_TEST", "unknown-test").partition(" ")[0]
+    return f"{node}-{next(_CLIENT_ID_COUNTER)}"
+
+
 def _sn_config(
     auth_mode: AuthMode,
     servicenow_token: str | None = None,
     ticket_type: str | None = None,
+    client_id: str | None = None,
 ) -> MagicMock:
-    """A config sufficient to construct ServiceNow, in the given auth mode."""
+    """A config sufficient to construct ServiceNow, in the given auth mode.
+
+    ``client_id`` defaults to a value unique to the running test; pass one explicitly
+    only when the test asserts on it.
+    """
     cfg = MagicMock()
     cfg.ticket_type = ticket_type
     cfg.servicenow_auth_mode = auth_mode
@@ -83,7 +107,7 @@ def _sn_config(
     cfg.servicenow_web_url = "https://example.com"
     cfg.servicenow_query = _TEST_QUERY
     cfg.servicenow_token = servicenow_token
-    cfg.servicenow_client_id = "cid"
+    cfg.servicenow_client_id = client_id or _unique_client_id()
     cfg.servicenow_client_secret = "csec"
     return cfg
 
@@ -154,16 +178,90 @@ def test_auth_header_composition(auth_mode, servicenow_token, expect_bearer, exp
         patch("rcpond.auth.get_id_token", return_value=None),
     ):
         sn = ServiceNow(cfg)
+        ## Applied inside the patch: the hook calls get_bearer_token at request time, so
+        ## outside this block it would reach the real one and the MagicMock config.
+        actual_auth_token = (
+            sn.session.auth(_prepared_request()).headers.get("Authorization") if sn.session.auth else None
+        )
 
     headers = sn.session.headers
-    assert ("Authorization" in headers) is expect_bearer
+    ## The bearer arrives per request via session.auth, not as a fixed header — see
+    ## "Per-request token refresh" below. The subscription key is a fixed header.
+    assert (sn.session.auth is not None) is expect_bearer
     assert (_SUBSCRIPTION_KEY_HEADER in headers) is expect_subscription_key
     if expect_bearer:
-        assert headers["Authorization"] == "Bearer tok"
+        assert actual_auth_token == "Bearer tok"
     else:
+        assert "Authorization" not in headers
         mock_bearer.assert_not_called()
     if expect_subscription_key:
         assert headers[_SUBSCRIPTION_KEY_HEADER] == servicenow_token
+
+
+## ── Per-request token refresh ───────────────────────────────────────────────
+##
+## A batch run holds one ServiceNow for the whole job. Setting the Authorization header
+## once at construction means a token that expires mid-run keeps being sent until every
+## request 401s — so the expiry check has to run per request, not per instance.
+
+
+def _prepared_request():
+    return _requests.Request("GET", "https://example.com/api").prepare()
+
+
+def _token_factory(fetches: list, lifetime: int):
+    """Return a _run_client_credentials_flow stand-in issuing distinct, numbered tokens."""
+
+    def _flow(_config):
+        fetches.append(1)
+        return {"access_token": f"token-{len(fetches)}", "expires_at": time.time() + lifetime}
+
+    return _flow
+
+
+def test_expired_token_is_refetched_on_a_long_lived_instance():
+    """The case the construction-time fetch cannot cover: expiry during a long run.
+
+    Token-cache isolation is automatic: _sn_config derives a client ID from the running
+    test's node ID, so no two tests share a cache entry.
+    """
+    fetches: list = []
+    ## lifetime -1: every issued token is already expired, modelling a token that lapses
+    ## partway through a batch.
+    flow = _token_factory(fetches, lifetime=-1)
+
+    with patch("rcpond.auth._run_client_credentials_flow", side_effect=flow):
+        sn = ServiceNow(_sn_config(AuthMode.oauth_client_credentials))
+        first = sn.session.auth(_prepared_request()).headers["Authorization"]
+        second = sn.session.auth(_prepared_request()).headers["Authorization"]
+
+    ## One fetch at construction (so bad credentials fail early), then one per request
+    ## because each cached token is already expired.
+    assert len(fetches) == 3
+    assert first == "Bearer token-2"
+    assert second == "Bearer token-3"
+
+
+def test_valid_token_is_reused_across_requests():
+    """Per-request refresh must not mean per-request refetch."""
+    fetches: list = []
+    flow = _token_factory(fetches, lifetime=3600)
+
+    with patch("rcpond.auth._run_client_credentials_flow", side_effect=flow):
+        sn = ServiceNow(_sn_config(AuthMode.oauth_client_credentials))
+        headers = [sn.session.auth(_prepared_request()).headers["Authorization"] for _ in range(3)]
+
+    assert len(fetches) == 1
+    assert headers == ["Bearer token-1"] * 3
+
+
+def test_static_token_mode_installs_no_auth_hook():
+    """Nothing to refresh without OAuth; the subscription key is a fixed header."""
+    with patch("rcpond.auth.get_bearer_token") as mock_bearer:
+        sn = ServiceNow(_sn_config(AuthMode.token, "gw-key"))
+
+    assert sn.session.auth is None
+    mock_bearer.assert_not_called()
 
 
 def test_client_credentials_does_not_adopt_a_cached_user_id_token():
