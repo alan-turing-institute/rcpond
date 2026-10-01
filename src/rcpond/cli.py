@@ -158,20 +158,35 @@ ticket type of their own simply do not take it. See planning/multiple-ticket-typ
 
 
 @cli.command()
-def login(ctx: typer.Context) -> None:
+def login(
+    ctx: typer.Context,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help=(
+                "Run all parts of the authentication process from scratch, without relying on any cached information."
+            ),
+        ),
+    ] = False,
+) -> None:
     """Authorise rcpond with ServiceNow via OAuth.
 
-    For ``oauth_user`` (the interactive flow) this opens a browser, completes the
+    For `oauth_user` (the interactive flow) this opens a browser, completes the
     Authorization Code + PKCE flow, and caches the resulting tokens; subsequent
     commands reuse the cached token without prompting again.
 
-    For ``oauth_client_credentials`` there is nothing interactive to do — tokens are
+    For `oauth_client_credentials` there is nothing interactive to do — tokens are
     fetched on demand and held only in memory — so this simply verifies that the
     configured credentials are accepted by the token endpoint.
 
-    Exits with code 1 under ``token`` auth, which has no login step at all.
+    Use `--force` to verify your credentials. In `oauth_user` mode a plain `login`
+    may reuse cached information, and will succeed if that is still valid. Using `--force` is
+    recommended whenever the credentials have changed and need checking.
+
+    Exits with code 1 under `token` auth, which has no login step at all.
     """
-    from rcpond.auth import get_bearer_token
+    from rcpond.auth import clear_token_cache, get_bearer_token
     from rcpond.config import AuthMode
 
     ## Authenticating only: never reads the rules or the email templates, so must not
@@ -186,6 +201,12 @@ def login(ctx: typer.Context) -> None:
             "Set RCPOND_SERVICENOW_AUTH_MODE and OAuth credentials to use 'rcpond login'."
         )
         raise typer.Exit(1)
+
+    if force:
+        ## After the token-mode check: there is nothing to discard in that mode, and
+        ## clearing would be a side effect of a command that then refuses to run.
+        clear_token_cache()
+        print("[yellow]Discarded cached tokens.[/yellow] Authenticating from scratch...")
 
     get_bearer_token(config)
 
