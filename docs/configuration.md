@@ -220,6 +220,9 @@ If your API gateway requires a subscription key alongside the bearer token, set 
 
 **Supply the secret through the environment**, not on the command line — a secret passed as `--servicenow-client-secret` is visible to anyone who can list processes.
 
+> [!WARNING]
+> If you set the secret by `source`-ing a file, quote it with **single** quotes. Inside double quotes the shell expands `$`, backticks and `\`, so a secret containing any of them is silently altered before RCPond ever sees it — there is no error, just an authentication failure later. Inside a `--env-file` or `default.config` either quote style is safe: that parser performs no expansion.
+
 #### Prerequisites in ServiceNow
 
 An instance administrator must create (or extend) an OAuth application registry entry with the **Client Credentials** grant type enabled, associated with a service account holding the roles needed to read and update the request table.

@@ -272,7 +272,9 @@ class Config:
             if env_key in os.environ:
                 env_value = os.environ[env_key]
                 if env_value.strip():
-                    values[f.name] = env_value
+                    ## Stripped here as well as in _parse_dotenv, so the same text means the
+                    ## same thing whether it was written in a config file or exported.
+                    values[f.name] = _strip_surrounding_quotes(env_value)
                 else:
                     values.pop(f.name, None)
 
