@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `rcpond login --force` discards cached tokens and authenticates from scratch. Without it, `login` can succeed from a cached token without checking the configured credentials.
+
+### Changed
+
+- A rejected token request now names the settings to check and warns that a shell may have altered the secret. The original error is preserved.
+- Surrounding quotes are now stripped from environment variables as well as config files, so the same text means the same thing in both.
+
+### Documentation
+
+- Secrets set by `source`-ing a file must use **single** quotes: double quotes let the shell expand `$`, backticks and `\`, silently altering the value. `--env-file` is unaffected.
+
 ## [0.4.0] - 2026-09-28
 
 ### Summary of changes
