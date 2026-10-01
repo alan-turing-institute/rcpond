@@ -102,9 +102,23 @@ usable home directory for the default `~/.config` path to resolve against — se
 2. **Quote any value containing a space** in a file you `source`. `RCPOND_SERVICENOW_QUERY`
    is the one that bites: unquoted, the shell reports `command not found` for the word
    after the space and leaves the variable *unset*, so RCPond silently falls back to its
-   default query. (`--env-file` tolerates unquoted values, and now also strips matched
+   default query. (`--env-file` tolerates unquoted values, and also strips matched
    surrounding quotes, so one correctly quoted file works with both mechanisms.)
-3. **Run from the repository root.** Paths inside the example `.config` files are
+3. **Use SINGLE quotes for secrets** in a file you `source`. Inside *double* quotes the
+   shell still expands `$`, backticks and `\`, so a secret containing any of them is
+   silently altered — no error, just a plausible-looking wrong value and an
+   authentication failure later:
+
+   ```bash
+   SECRET="s3cr$et!value"   # becomes  s3cr!value     ($et expanded to nothing)
+   SECRET='s3cr$et!value'   # stays    s3cr$et!value
+   ```
+
+   Applies to `RCPOND_SERVICENOW_CLIENT_SECRET`, `RCPOND_SERVICENOW_TOKEN` and
+   `RCPOND_LLM_API_KEY`. This is shell behaviour, not RCPond's — by the time RCPond runs,
+   the original value is gone and cannot be recovered. Inside a `--env-file` or
+   `default.config` either quote style is safe, because that parser performs no expansion.
+4. **Run from the repository root.** Paths inside the example `.config` files are
    relative to the working directory.
 
 ## Only one ticket type is currently runnable

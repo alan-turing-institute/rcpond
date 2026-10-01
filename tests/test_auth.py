@@ -377,6 +377,58 @@ def test_get_id_token_is_none_after_client_credentials(cc_config):
     assert get_id_token() is None
 
 
+# --- Token endpoint rejection ---
+##
+## A wrong client secret surfaces here, and authlib's own error does not say which
+## setting is at fault — nor that the shell may have altered it. Both flows wrap it.
+
+
+class _FakeOAuthError(Exception):
+    """Stands in for authlib's OAuthError without depending on its constructor."""
+
+
+@pytest.mark.parametrize(
+    ("flow", "config_fixture"),
+    [
+        ("_run_client_credentials_flow", "cc_config"),
+        ("_run_authorization_code_flow", "mock_config"),
+    ],
+    ids=["client_credentials", "interactive"],
+)
+def test_token_endpoint_rejection_names_the_credentials(request, flow, config_fixture):
+    """The error must name the setting to check, not just relay authlib's wording."""
+    config = request.getfixturevalue(config_fixture)
+
+    with (
+        patch("rcpond.auth.OAuth2Session") as mock_session_cls,
+        patch("rcpond.auth.webbrowser"),
+        patch("rcpond.auth._capture_redirect", return_value={"code": ["c"], "state": ["s"]}),
+    ):
+        mock_session_cls.return_value.create_authorization_url.return_value = ("https://auth", "state")
+        mock_session_cls.return_value.fetch_token.side_effect = _FakeOAuthError("invalid_client")
+
+        with pytest.raises(RuntimeError) as excinfo:
+            getattr(auth, flow)(config)
+
+    message = str(excinfo.value)
+    assert "RCPOND_SERVICENOW_CLIENT_SECRET" in message
+    ## The shell-quoting trap is the non-obvious cause, so the message must mention it
+    assert "single quote" in message.lower()
+    ## authlib's own wording is preserved rather than swallowed
+    assert "invalid_client" in message
+
+
+def test_token_endpoint_rejection_chains_the_original_error(cc_config):
+    """`raise ... from exc` keeps the underlying traceback available for debugging."""
+    with patch("rcpond.auth.OAuth2Session") as mock_session_cls:
+        mock_session_cls.return_value.fetch_token.side_effect = _FakeOAuthError("invalid_client")
+
+        with pytest.raises(RuntimeError) as excinfo:
+            auth._run_client_credentials_flow(cc_config)
+
+    assert isinstance(excinfo.value.__cause__, _FakeOAuthError)
+
+
 # --- Loopback server ---
 
 

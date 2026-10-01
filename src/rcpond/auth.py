@@ -162,6 +162,29 @@ def _capture_redirect(port: int) -> dict[str, list[str]]:
 ## ---- OAuth flows ----
 
 
+def _fetch_token(oauth: OAuth2Session, token_url: str | None, **kwargs) -> dict:
+    """Exchange credentials for a token, explaining the likely cause on failure.
+
+    authlib reports the protocol-level error (``invalid_client`` and similar) but cannot
+    say which setting produced it, and the most common cause — a client secret altered by
+    the shell before RCPond ever saw it — is invisible from here. The original error is
+    preserved in the message and chained, so nothing is hidden.
+    """
+    try:
+        return dict(oauth.fetch_token(token_url, **kwargs))
+    except Exception as exc:
+        msg = (
+            f"ServiceNow authentication failed while requesting a token from {token_url}\n"
+            f"  Underlying error: {exc}\n"
+            ## Names the env vars, contains no value — see pre-commit-scripts/check_secrets.py
+            "Check RCPOND_SERVICENOW_CLIENT_ID and RCPOND_SERVICENOW_CLIENT_SECRET.\n"  # pragma: allowlist secret
+            "One possible cause is the shell altering the secret: if it is set by sourcing\n"
+            "a file, you must quote it with SINGLE quotes. If double quotes are used, the shell will expand\n"
+            "$, backticks and \\, silently altering the value before it reaches RCPond."
+        )
+        raise RuntimeError(msg) from exc
+
+
 def _run_authorization_code_flow(config: Config) -> dict:
     """Run the full browser-based Authorization Code + PKCE flow.
 
@@ -205,13 +228,13 @@ def _run_authorization_code_flow(config: Config) -> dict:
         msg = "OAuth redirect did not include a 'code' parameter"
         raise RuntimeError(msg)
 
-    token = oauth.fetch_token(
+    return _fetch_token(
+        oauth,
         config.servicenow_oauth_token_url,
         code=code,
         client_secret=config.servicenow_client_secret,
         grant_type="authorization_code",
     )
-    return dict(token)
 
 
 def _run_client_credentials_flow(config: Config) -> dict:
@@ -241,11 +264,11 @@ def _run_client_credentials_flow(config: Config) -> dict:
         grant_type="client_credentials",
     )
 
-    token = oauth.fetch_token(
+    return _fetch_token(
+        oauth,
         config.servicenow_oauth_token_url,
         grant_type="client_credentials",
     )
-    return dict(token)
 
 
 def _refresh_access_token(config: Config, refresh_token: str) -> dict | None:

@@ -9,11 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `analytics` subcommand: generates a markdown report (written to stdout) summarising RCPond performance across all tickets, per ticket type. Notes authored by the automated `System` user (e.g. auto-close comments) are treated as automated, not manual.
-  - Stage 1 (processing mix): total tickets, tickets processed by RCPond, tickets processed manually (without RCPond), and RCPond tickets that had a subsequent manual interaction.
-  - Stage 2 (distributions and time intervals): distribution of RCPond and manual interactions per ticket; and time intervals (in days, summarised as n/median/mean/min/max) for creation→first RCPond, creation→first manual, creation→resolution, and first RCPond→resolution. Resolution time for closed/resolved/cancelled tickets is taken from the final note (falling back to the open date); open tickets have no resolution interval.
-  - Stage 3 (trends over time): a `--period {month,quarter,year}` option (default quarter) adds per-period trend tables — the processing-mix counts plus median resolution time — bucketed by each ticket's creation date.
-  - Analytics is computed on a pandas DataFrame (one row per ticket) and rendered with `tabulate`; both are part of the `html` optional dependency group, which now also gates the `analytics` subcommand.
+- `rcpond login --force` discards cached tokens and authenticates from scratch. Without it, `login` can succeed from a cached token without checking the configured credentials.
+
+### Changed
+
+- A rejected token request now names the settings to check and warns that a shell may have altered the secret. The original error is preserved.
+- Surrounding quotes are now stripped from environment variables as well as config files, so the same text means the same thing in both.
+
+### Documentation
+
+- Secrets set by `source`-ing a file must use **single** quotes: double quotes let the shell expand `$`, backticks and `\`, silently altering the value. `--env-file` is unaffected.
+
+## [0.4.0] - 2026-09-28
+
+### Summary of changes
+
+This release lets RCPond run unattended as a ServiceNow service account, makes the kind of ticket it is working on explicit, and adds reporting on how it has been performing:
+
+- **Machine-to-machine authentication.** RCPond can authenticate as a ServiceNow service account using OAuth Client Credentials, so a bot or CI job no longer needs a shared, indefinitely valid subscription key. Its actions are attributed to a named account, its tokens are short-lived, and access can be revoked centrally without redeploying anything.
+- **Ticket types are explicit.** Commands that act on tickets take `--ticket-type` (defaulting to `compute_allocation_request`) and read that type's rules, email templates and ServiceNow query from the type's own config file. RCPond also checks that the tickets it fetched really are of that type, rather than quietly applying one type's rules to another's ticket.
+
+### Added
+
 - `servicenow.ticket_type_key()`: resolves a ticket to its `_TICKET_TYPES` registry key via `MATCH_CRITERIA` (now also used by `get_full_ticket`'s dispatch).
 - Note-classification and timing helpers on `Ticket`: `rcpond_note_count()`, `manual_note_count()`, `has_subsequent_manual_interaction()`, `first_rcpond_note_datetime()`, `first_manual_note_datetime()`, `is_closed()`, `resolution_datetime()`, and `opened_datetime()`.
 - OAuth 2.0 **Client Credentials** authentication, for non-interactive machine-to-machine use (bots, scripts, CI). RCPond authenticates as a ServiceNow service account, giving the bot a real identity in ServiceNow, short-lived access tokens and central revocation, instead of an indefinitely valid shared subscription key.
@@ -24,6 +41,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--servicenow-client-secret` help now warns that a secret given on the command line is visible in the process list, and points to the environment variable instead.
 - `--ticket-type` is now accepted by every command that acts on tickets of a single type: `display-ticket`, `browse-ticket`, `find-related` and `process-ticket` alongside the existing `process-next` and `process-all`. Those four previously had no way to reach a per-ticket-type config, so they could not be used with rules and templates declared only in `ticket_types/*.config`.
 - RCPond now verifies that every ticket it fetches really is of the ticket type it is applying rules and templates for, and aborts naming the offending tickets if not. Because `--ticket-type` defaults rather than being required, a mismatch would otherwise be silent: a ticket of another type would be reviewed against the wrong rules and answered from the wrong email templates. A ticket matching no registered type aborts too — that means the ServiceNow query and the ticket type registry disagree, and skipping it would quietly under-process a batch. Commands that legitimately span types are unaffected.
+- `analytics` subcommand (**work in progress** — see Notes): generates a markdown report (written to stdout) summarising RCPond performance across all tickets, per ticket type. Notes authored by the automated `System` user (e.g. auto-close comments) are treated as automated, not manual.
+  - Stage 1 (processing mix): total tickets, tickets processed by RCPond, tickets processed manually (without RCPond), and RCPond tickets that had a subsequent manual interaction.
+  - Stage 2 (distributions and time intervals): distribution of RCPond and manual interactions per ticket; and time intervals (in days, summarised as n/median/mean/min/max) for creation→first RCPond, creation→first manual, creation→resolution, and first RCPond→resolution. Resolution time for closed/resolved/cancelled tickets is taken from the final note (falling back to the open date); open tickets have no resolution interval.
+  - Stage 3 (trends over time): a `--period {month,quarter,year}` option (default quarter) adds per-period trend tables — the processing-mix counts plus median resolution time — bucketed by each ticket's creation date.
+  - Analytics is computed on a pandas DataFrame (one row per ticket) and rendered with `tabulate`; both are part of the `html` optional dependency group, which now also gates the `analytics` subcommand.
 
 ### Changed
 
@@ -43,6 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Notes
 
+- **`analytics` is work in progress and was not brought into the ticket-type work.** It already groups its results per ticket type, derived from each ticket rather than from configuration, but it takes no `--ticket-type` and cannot reach a per-ticket-type config. Consequently it fails at startup with `Missing required configuration: rules_path, email_templates_dir` when those values are declared *only* in `ticket_types/*.config`. It can be run by setting these values globally, in `default.config` or the environment. A more ergonomic solution is deferred until a later date.
 - The `analytics --refresh` flag is accepted but currently has no effect: a single bulk fetch is sufficient for the implemented metrics, so the ticket-history cache described in the design is deferred until a later stage needs per-ticket fetches.
 - Outcome-classification metrics (a later stage) rely on the work-note tool-name prefix; tickets processed before that prefix was deployed will fall into an "unknown outcome" category.
 - The ticket-type check compares each ticket's `short_description` against the registry's match criteria. `short_description` is free text that a ServiceNow administrator can reword at any time, so a reworded description will stop tickets matching and abort commands that previously worked. The fix is to update the match criteria; the alternative — carrying on with the wrong rules — is worse. Only one ticket type is registered so far, so a mismatch currently reports "matches no registered type" rather than naming the type it did match.
@@ -140,7 +163,8 @@ No functional changes — version bump only.
 - Read the Docs documentation site with MkDocs, including a configuration guide, API reference,
   and quick-start.
 
-[Unreleased]: https://github.com/alan-turing-institute/rcpond/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/alan-turing-institute/rcpond/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/alan-turing-institute/rcpond/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/alan-turing-institute/rcpond/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/alan-turing-institute/rcpond/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/alan-turing-institute/rcpond/compare/v0.1.2...v0.1.3

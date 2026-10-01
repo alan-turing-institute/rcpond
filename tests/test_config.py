@@ -865,6 +865,34 @@ def test_invalid_templates_not_validated_when_not_required(common_config_values)
     assert config.email_templates_dir == _FAILING_TEMPLATES_DIR.resolve()
 
 
+# --- Quote stripping applies to environment variables too ---
+
+
+@pytest.mark.parametrize(
+    ("raw_value", "expected"),
+    [
+        ('"gpt-4"', "gpt-4"),
+        ("'gpt-4'", "gpt-4"),
+        ("gpt-4", "gpt-4"),
+        ('"unbalanced', '"unbalanced'),
+        ('say "hi" now', 'say "hi" now'),
+    ],
+    ids=["double_quoted", "single_quoted", "unquoted", "unbalanced", "interior_quotes"],
+)
+def test_env_var_quotes_are_stripped_like_file_values(monkeypatch, common_config_values, raw_value, expected):
+    """A value quoted in the environment must behave as it does in a config file.
+
+    Without this, `export RCPOND_LLM_MODEL='"gpt-4"'` yields a value with the quotes still
+    attached while the identical line in a config file does not — the same input meaning
+    two different things depending on where it was written.
+    """
+    for key, value in common_config_values.items():
+        monkeypatch.setenv(f"RCPOND_{key.upper()}", value)
+    monkeypatch.setenv("RCPOND_LLM_MODEL", raw_value)
+
+    assert Config().llm_model == expected
+
+
 # --- configured_ticket_types ---
 
 
