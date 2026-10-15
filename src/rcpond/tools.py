@@ -265,6 +265,53 @@ class CombineTicketHistoryTool(Tool):
         return history
 
 
+class GitHubOnboardingTool(Tool):
+    """
+    A Tool to support the Onboarding process for the Turing's Github Organisation
+    """
+
+    @property
+    def name(self) -> str:
+        return "github_onboarding"
+
+    @property
+    def description(self) -> str:
+        return (
+            "A tool to guide the process of onboarding someone into the "
+            "Turing's Github Organisation."
+            "Based on the user's email address and github_username, it will"
+            "determine the next step"
+            "a) An admin should invite them to GitHub Org"
+            "b) The user has been invited via Github and they should also be notified vis ServiceNow"
+            "c) The user has been notified by ServiceNow and the ticket should be put on hold the user has accepted, or until 7 days have elapsed"
+            "d) The user has accepted the invitation and the ticket should be marked as accepted and closed"
+            "e) The user has not accepted the invitation and the ticket should be marked as rejected and closed"
+        )
+
+    @property
+    def is_terminal(self) -> bool:
+        return True
+
+    def to_openai_dict(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    # Are the email_address and github_username actually required here
+                    # given they can be pulled directly from the ticket?
+                    "properties": {"email_address": {"type": "string"}, "github_username": {"type": "string"}},
+                    "required": ["email_address", "github_username"],
+                },
+            },
+        }
+
+    def execute(self, service_now: ServiceNow, ticket: Ticket, *, dry_run: bool = False, **kwargs) -> str | None:
+        pass
+
+
 ## --------------------------------------------------------------------------------
 ## Interface to this module
 

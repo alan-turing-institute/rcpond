@@ -287,28 +287,42 @@ class GitHubOnboardingRequestTicket(Ticket):
     MATCH_CRITERIA: ClassVar[MappingProxyType[str, str]] = MappingProxyType(
         {"short_description": "Requesting Membership of Turing GitHub organisation"}
     )
+    """Field/value pairs that a base ``Ticket`` must satisfy to be classified as this type."""
 
-    github_username: str  # GitHub Username
-    person_to_be_added_to_github_organisation: str  # Person to be added to GitHub Organisation
-    requested_by: str  # Requested by
-    turing_email_address_of_the_person_being_added_to_the_github_organisation: (
-        str  # Turing email address of the person being added to the GitHub organisation
-    )
-    turing_email_address_of_the_person_making_the_request: str  # Turing email address of the person making the request
+    github_username: str
+    """GitHub Username"""
+    person_to_be_added_to_github_organisation: str
+    """Person to be added to GitHub Organisation"""
+    requested_by: str
+    """Requested by"""
+    turing_email_address_of_the_person_being_added_to_the_github_organisation: str
+    """Turing email address of the person being added to the GitHub organisation"""
+    turing_email_address_of_the_person_making_the_request: str
+    """Turing email address of the person making the request"""
 
 
 @dataclass
 class ResearchLeaversGitHubTicket(Ticket):
+    """A ticket; includes full details from the original submission."""
+
     MATCH_CRITERIA: ClassVar[MappingProxyType[str, str]] = MappingProxyType(
         {"short_description": "Research Record for GitHub Admins through Leaver Process"}
     )
+    """Field/value pairs that a base ``Ticket`` must satisfy to be classified as this type."""
 
-    leaver_department: str  # Leaver Department
-    leaver_email: str  # Leaver Email
-    leaver_github_username: str  # Leaver Github Username
-    leaver_leave_date: str  # Leaver Leave Date
-    leaver_title: str  # Leaver Title
-    research_leaver: str  # Research Leaver
+    leaver_department: str
+    """Leaver Department"""
+    leaver_email: str
+    """Leaver Email"""
+    leaver_github_username: str
+    """Leaver Github Username"""
+    leaver_leave_date: str
+    """Leaver Leave Date, as supplied by ServiceNow. Kept as text: it reaches the LLM via
+    ``json.dumps(dataclasses.asdict(...))``, which cannot serialise a ``date``."""
+    leaver_title: str
+    """Leaver Title"""
+    research_leaver: str
+    """Research Leaver"""
 
 
 ## Maps an arbitrary, developer-chosen key to the dataclass that represents that ticket type.
