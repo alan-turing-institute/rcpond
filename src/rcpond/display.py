@@ -14,7 +14,14 @@ from rich.table import Table
 from rich.text import Text
 
 from rcpond.llm import LLMResponse
-from rcpond.servicenow import ComputeAllocationRequestTicket, NoteEntry, RelatedTicketMatch, Ticket
+from rcpond.servicenow import (
+    ComputeAllocationRequestTicket,
+    GitHubOnboardingRequestTicket,
+    NoteEntry,
+    RelatedTicketMatch,
+    ResearchLeaversGitHubTicket,
+    Ticket,
+)
 
 _console = Console()
 
@@ -93,7 +100,92 @@ def display_short_ticket(ticket: Ticket, *, console: Console | None = None) -> N
     con.print(_header_panel(ticket))
 
 
-def display_full_ticket(ticket: ComputeAllocationRequestTicket, *, console: Console | None = None) -> None:
+def display_github_onboarding_request_ticket(
+    ticket: GitHubOnboardingRequestTicket, *, console: Console | None = None
+) -> None:
+    """Display the full details of a GitHub organisation membership request.
+
+    The person being added and the person asking are split into separate sections: they
+    are often different people, and each has their own name and Turing email, which run
+    together confusingly in a single list.
+
+    Parameters
+    ----------
+    ticket : GitHubOnboardingRequestTicket
+        The ticket to display.
+    console : Console | None
+        Rich Console to write to. Defaults to the module-level console (stdout).
+    """
+    con = console or _console
+
+    con.print(_header_panel(ticket))
+
+    con.print(
+        _section(
+            "Person to be added",
+            [
+                ("Name", ticket.person_to_be_added_to_github_organisation),
+                ("GitHub username", ticket.github_username),
+                ("Turing email", ticket.turing_email_address_of_the_person_being_added_to_the_github_organisation),
+            ],
+        )
+    )
+
+    con.print(
+        _section(
+            "Requested by",
+            [
+                ("Name", ticket.requested_by),
+                ("Turing email", ticket.turing_email_address_of_the_person_making_the_request),
+            ],
+        )
+    )
+
+    ## Work notes and comments, merged chronologically
+    notes = ticket.get_combined_notes()
+    if notes:
+        con.print(_notes_panel(notes))
+
+
+def display_github_leavers_request_ticket(
+    ticket: ResearchLeaversGitHubTicket, *, console: Console | None = None
+) -> None:
+    """Display the full details of a GitHub leaver record.
+
+    Parameters
+    ----------
+    ticket : ResearchLeaversGitHubTicket
+        The ticket to display.
+    console : Console | None
+        Rich Console to write to. Defaults to the module-level console (stdout).
+    """
+    con = console or _console
+
+    con.print(_header_panel(ticket))
+
+    con.print(
+        _section(
+            "Leaver",
+            [
+                ("Name", ticket.research_leaver),
+                ("Title", ticket.leaver_title),
+                ("Department", ticket.leaver_department),
+                ("Email", ticket.leaver_email),
+                ("GitHub username", ticket.leaver_github_username),
+                ("Leave date", ticket.leaver_leave_date),
+            ],
+        )
+    )
+
+    ## Work notes and comments, merged chronologically
+    notes = ticket.get_combined_notes()
+    if notes:
+        con.print(_notes_panel(notes))
+
+
+def display_compute_allocation_request_ticket(
+    ticket: ComputeAllocationRequestTicket, *, console: Console | None = None
+) -> None:
     """Display the full details of a ticket using Rich formatting.
 
     Parameters
