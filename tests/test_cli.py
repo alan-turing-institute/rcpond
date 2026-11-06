@@ -246,18 +246,24 @@ def test_check_templates_fails_when_no_types_are_configured():
     [
         (["login"], False),
         (["whoami"], False),
+        (["analytics"], False),
         (["check-templates"], True),
         (["display-all"], True),
         (["process-next", "--ticket-type", "compute_allocation_request"], True),
     ],
-    ids=["login", "whoami", "check_templates", "display_all", "process_next"],
+    ids=["login", "whoami", "analytics", "check_templates", "display_all", "process_next"],
 )
-def test_only_auth_commands_opt_out_of_rules_and_templates(argv, requires):
-    """`login` and `whoami` authenticate only, so must not demand config they never read.
+def test_commands_that_read_no_rules_or_templates_opt_out(argv, requires):
+    """A command must not demand configuration it never reads.
 
-    Every other command keeps the strict default. The opt-out is permanent and narrow:
-    the other commands that read no rules or templates are served by `--ticket-type`
-    giving them a route to a per-type config, not by exempting them here.
+    Three commands qualify, for two different reasons. `login` and `whoami` authenticate
+    only. `analytics` is cross-type by nature — it groups results by each ticket's own
+    type — so it can never resolve a single per-ticket-type config, and reads neither
+    rules nor templates anyway.
+
+    Every other command keeps the strict default, including those that read no rules or
+    templates today: they still need a ticket type for their *query*, so `--ticket-type`
+    gives them a route to a per-type config rather than exempting them here.
     """
     captured = {}
 

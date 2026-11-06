@@ -384,7 +384,7 @@ try:
         time intervals (days), and over-time trends bucketed by --period. The markdown
         is written to stdout; redirect it to a file to save it.
         """
-        command.analytics(config=_config(ctx), refresh=refresh, period=period)
+        command.analytics(config=_config(ctx, require_rules_and_templates=False), refresh=refresh, period=period)
 
 except ImportError:
     pass
