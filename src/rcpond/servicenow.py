@@ -521,8 +521,52 @@ def _parse_comment_display_values(input: str) -> list[NoteEntry]:
     return result
 
 
-## Default ServiceNow query used when no per-type config overrides it.
-_DEFAULT_SERVICENOW_QUERY = "short_description=Request access to HPC and cloud computing facilities"
+def _criteria_query(ticket_type: str) -> str:
+    """Return a ServiceNow query matching one registered type's ``MATCH_CRITERIA``.
+
+    Criteria are ANDed with ``^``, which is what ``MATCH_CRITERIA`` means for a single
+    type.
+    """
+    criteria = _TICKET_TYPES[ticket_type].MATCH_CRITERIA
+    return "^".join(f"{field}={value}" for field, value in criteria.items())
+
+
+def default_ticket_type_query() -> str:
+    """Return the ServiceNow query used when no per-type config supplies one.
+
+    Derived from ``DEFAULT_TICKET_TYPE``'s ``MATCH_CRITERIA`` rather than written out
+    again: ``short_description`` is free text an administrator can reword, and a
+    hand-copied query would keep the stale wording and quietly fetch nothing.
+    """
+    return _criteria_query(DEFAULT_TICKET_TYPE)
+
+
+def all_registered_types_query() -> str:
+    """Return a ServiceNow query matching tickets of *every* registered type.
+
+    For commands that span ticket types. Without it they fall back to the default type's
+    query and silently report on that one type alone.
+
+    Built from the same ``MATCH_CRITERIA`` that ``ticket_type_key()`` classifies by, so
+    every ticket fetched is one the registry can identify.
+
+    Raises
+    ------
+    ValueError
+        If any registered type declares more than one criterion. ServiceNow's ``^`` and
+        ``^OR`` have no grouping, so ANDed criteria cannot be safely combined with OR —
+        better to fail than to emit a query whose precedence differs from what
+        ``MATCH_CRITERIA`` means.
+    """
+    multi = sorted(key for key, cls in _TICKET_TYPES.items() if len(cls.MATCH_CRITERIA) > 1)
+    if multi:
+        msg = (
+            f"Cannot build a combined query: {', '.join(multi)} declare multiple MATCH_CRITERIA, "
+            "and ServiceNow's '^'/'^OR' operators have no grouping to express that safely."
+        )
+        raise ValueError(msg)
+    return "^OR".join(_criteria_query(key) for key in _TICKET_TYPES)
+
 
 _EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
 _AZURE_UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE)
@@ -629,7 +673,7 @@ class ServiceNow:
     def __init__(self, config: Config):
         self._base_api_url = config.servicenow_url
         self._web_base_url: str = config.servicenow_web_url
-        self._query: str = config.servicenow_query or _DEFAULT_SERVICENOW_QUERY
+        self._query: str = config.servicenow_query or default_ticket_type_query()
         self._id_token: str | None = None
         self._auth_mode: AuthMode = config.servicenow_auth_mode
         self._ticket_type: str | None = config.ticket_type
@@ -715,7 +759,7 @@ class ServiceNow:
         """True when requests carry an OAuth bearer token rather than only a gateway key."""
         return self._auth_mode is not AuthMode.token
 
-    def get_tickets(self, state: TicketState = TicketState.user_focus) -> list[Ticket]:
+    def get_tickets(self, state: TicketState = TicketState.user_focus, query: str | None = None) -> list[Ticket]:
         """Get tickets that are applications for HPC/Azure credits.
 
         Parameters
@@ -725,6 +769,10 @@ class ServiceNow:
             - ``user_focus`` (default): curated shortlist relevant to the current user or bot.
             - ``all_open``: all non-closed/resolved/cancelled tickets.
             - ``all_including_closed``: every ticket in the query result; no filters applied.
+        query : str | None
+            ServiceNow query overriding the configured one, for this call only. A command
+            spanning ticket types passes ``all_registered_types_query()``; without it the
+            configured query is a single type's, which would silently narrow the result.
 
         Returns
         -------
@@ -732,7 +780,8 @@ class ServiceNow:
         """
         ticket_fields = {field.name for field in dataclasses.fields(Ticket)}
         resp = self.session.get(
-            f"{self._base_api_url}/{self._TABLE}", params={"sysparm_query": self._query, "sysparm_display_value": "all"}
+            f"{self._base_api_url}/{self._TABLE}",
+            params={"sysparm_query": query or self._query, "sysparm_display_value": "all"},
         )
         resp.raise_for_status()
 

@@ -39,6 +39,7 @@ from rcpond.servicenow import (
     ServiceNow,
     Ticket,
     TicketState,
+    all_registered_types_query,
 )
 from rcpond.tools import CombineTicketHistoryTool, get_available_tools, verify_render_all_templates
 
@@ -358,7 +359,13 @@ def analytics(config: Config | None = None, refresh: bool = False, period: "Peri
     period = period or Period.quarter
     config = config or Config()
     service_now: ServiceNow = ServiceNow(config)
-    tickets = service_now.get_tickets(state=TicketState.all_including_closed)
+    ## Analytics reports per ticket type, so it must fetch every type. The configured
+    ## query belongs to a single type (or falls back to the default type's), which would
+    ## silently narrow the report to that one type.
+    tickets = service_now.get_tickets(
+        state=TicketState.all_including_closed,
+        query=all_registered_types_query(),
+    )
     report = render_markdown(build_ticket_frame(tickets), period)
     ## Write verbatim (not via rich.print, which would wrap/format the markdown table).
     sys.stdout.write(report)

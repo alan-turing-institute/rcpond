@@ -86,7 +86,7 @@ class HtmlServiceNow(ServiceNow):
 
     ## ---- Read methods ----
 
-    def get_tickets(self, state: TicketState = TicketState.user_focus) -> list[Ticket]:
+    def get_tickets(self, state: TicketState = TicketState.user_focus, query: str | None = None) -> list[Ticket]:
         """Return a ``ComputeAllocationRequestTicket`` for each HTML file in ``html_dir``.
 
         Parameters
@@ -94,12 +94,25 @@ class HtmlServiceNow(ServiceNow):
         state : TicketState
             ``user_focus``: only unassigned tickets are returned.
             ``all_open`` or ``all_including_closed``: all tickets regardless of assignment.
+        query : str | None
+            Accepted only to match ``ServiceNow.get_tickets``. These tickets come from
+            local HTML files rather than a ServiceNow query, so there is nothing to apply
+            it to; passing one raises rather than silently returning unfiltered results.
 
         Returns
         -------
         list[Ticket]
             Each element is actually a ``ComputeAllocationRequestTicket``.
+
+        Raises
+        ------
+        NotImplementedError
+            If ``query`` is given.
         """
+        if query is not None:
+            msg = "HtmlServiceNow reads local files; it cannot apply a ServiceNow query."
+            raise NotImplementedError(msg)
+
         tickets: list[Ticket] = []
         for f in sorted(self._html_dir.glob("*.html")):
             facts = extract_key_facts(f)
