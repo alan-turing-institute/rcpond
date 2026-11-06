@@ -26,13 +26,14 @@ if response.planned_tool_call:
 
 """
 
+import subprocess
 from pathlib import Path
 
 import jinja2
 import jinja2.meta
 
 from rcpond.config import Config
-from rcpond.servicenow import RelatedTicketMatch, ServiceNow, Ticket
+from rcpond.servicenow import GitHubOnboardingRequestTicket, RelatedTicketMatch, ServiceNow, Ticket
 from rcpond.tool import Tool
 
 ## --------------------------------------------------------------------------------
@@ -265,6 +266,86 @@ class CombineTicketHistoryTool(Tool):
         return history
 
 
+class GitHubOnboardingTool(Tool):
+    """
+    A Tool to support the Onboarding process for the Turing's Github Organisation
+    """
+
+    @property
+    def name(self) -> str:
+        return "github_onboarding"
+
+    @property
+    def description(self) -> str:
+        return (
+            "A tool to guide the process of onboarding someone into the "
+            "Turing's Github Organisation."
+            "Based on the user's email address and github_username, it will"
+            "determine the next step"
+            "a) An admin should invite them to GitHub Org"
+            "b) The user has been invited via Github and they should also be notified vis ServiceNow"
+            "c) The user has been notified by ServiceNow and the ticket should be put on hold the user has accepted, or until 7 days have elapsed"
+            "d) The user has accepted the invitation and the ticket should be marked as accepted and closed"
+            "e) The user has not accepted the invitation and the ticket should be marked as rejected and closed"
+        )
+
+    @property
+    def is_terminal(self) -> bool:
+        return True
+
+    def to_openai_dict(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    # The email_address and github_username are not required parameters
+                    # because they can be pulled directly from the ticket.
+                    "properties": {},
+                    "required": [],
+                },
+            },
+        }
+
+    def execute(self, service_now: ServiceNow, ticket: Ticket, *, dry_run: bool = False, **kwargs) -> str | None:
+        assert type(ticket) is GitHubOnboardingRequestTicket
+
+        # TODO: Find a sufficiently universal way to ensure that the 'github-users' package is
+        # installed locally and available in the path
+        cmd = [
+            "pixi",
+            "run",
+            "--manifest-path /THIS/WILL/FAIL/_/PATH/TO/github-users/pyproject.toml",
+            "github-users",
+            "onboard",
+            "--json",
+            "--name",
+            f"'{ticket.person_to_be_added_to_github_organisation}'",
+            ticket.turing_email_address_of_the_person_being_added_to_the_github_organisation,
+            ticket.github_username,
+        ]
+
+        cmd = ["echo", "hello"]
+
+        if dry_run:
+            msg = "DRY RUN!! No changes made. If run without the `--dry-run` flag the following command would have been executed:\n\n"
+            cmd_str = " ".join(cmd)
+            print(msg)
+            print(cmd_str)
+            return None
+
+        result = subprocess.run(cmd, check=True)
+        output = result.stdout
+        print(f"{self.name} ran 'pixi run github-users onboard ...' and return this result:")
+        print(output)
+        # service_now.post_note(ticket, note=output, tool_name=self.name)
+        assert service_now  # Temp line to prevent ARG002 ruff error, until the use of service_now
+        # in this method is implemented
+        return None
+
+
 ## --------------------------------------------------------------------------------
 ## Interface to this module
 
@@ -328,4 +409,4 @@ def get_available_tools(config: Config) -> list[Tool]:
     list[Tool]
         The tools the LLM may call.
     """
-    return [PostFreeformNoteTool(), PostTemplatedNoteTool(config), CombineTicketHistoryTool()]
+    return [PostFreeformNoteTool(), PostTemplatedNoteTool(config), CombineTicketHistoryTool(), GitHubOnboardingTool()]

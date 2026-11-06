@@ -280,12 +280,59 @@ class ComputeAllocationRequestTicket(Ticket):
     cost_compute_time_breakdown: str
 
 
+@dataclass
+class GitHubOnboardingRequestTicket(Ticket):
+    """A ticket; includes full details from the original submission."""
+
+    MATCH_CRITERIA: ClassVar[MappingProxyType[str, str]] = MappingProxyType(
+        {"short_description": "Requesting Membership of Turing GitHub organisation"}
+    )
+    """Field/value pairs that a base ``Ticket`` must satisfy to be classified as this type."""
+
+    github_username: str
+    """GitHub Username"""
+    person_to_be_added_to_github_organisation: str
+    """Person to be added to GitHub Organisation"""
+    requested_by: str
+    """Requested by"""
+    turing_email_address_of_the_person_being_added_to_the_github_organisation: str
+    """Turing email address of the person being added to the GitHub organisation"""
+    turing_email_address_of_the_person_making_the_request: str
+    """Turing email address of the person making the request"""
+
+
+@dataclass
+class ResearchLeaversGitHubTicket(Ticket):
+    """A ticket; includes full details from the original submission."""
+
+    MATCH_CRITERIA: ClassVar[MappingProxyType[str, str]] = MappingProxyType(
+        {"short_description": "Research Record for GitHub Admins through Leaver Process"}
+    )
+    """Field/value pairs that a base ``Ticket`` must satisfy to be classified as this type."""
+
+    leaver_department: str
+    """Leaver Department"""
+    leaver_email: str
+    """Leaver Email"""
+    leaver_github_username: str
+    """Leaver Github Username"""
+    leaver_leave_date: str
+    """Leaver Leave Date, as supplied by ServiceNow. Kept as text: it reaches the LLM via
+    ``json.dumps(dataclasses.asdict(...))``, which cannot serialise a ``date``."""
+    leaver_title: str
+    """Leaver Title"""
+    research_leaver: str
+    """Research Leaver"""
+
+
 ## Maps an arbitrary, developer-chosen key to the dataclass that represents that ticket type.
 ## The key is never derived from ticket data (e.g. not a slugified short_description) — it serves
 ## as a stable identifier and is reused as the per-type config filename stem.
 ## Dispatch uses each class's MATCH_CRITERIA, not the key. See planning/multiple-ticket-types.md.
 _TICKET_TYPES: dict[str, type[Ticket]] = {
     "compute_allocation_request": ComputeAllocationRequestTicket,
+    "github_onboarding_request": GitHubOnboardingRequestTicket,
+    "github_leavers_request": ResearchLeaversGitHubTicket,
 }
 
 DEFAULT_TICKET_TYPE = "compute_allocation_request"
@@ -294,6 +341,8 @@ DEFAULT_TICKET_TYPE = "compute_allocation_request"
 A fixed, named default rather than "whichever type happens to be registered": the latter
 would silently change meaning the moment a second type is added. Must be a key of
 ``_TICKET_TYPES``."""
+
+assert DEFAULT_TICKET_TYPE in _TICKET_TYPES
 
 
 def ticket_type_key(ticket: Ticket) -> str | None:

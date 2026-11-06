@@ -21,7 +21,9 @@ from rich import print
 
 from rcpond.config import Config
 from rcpond.display import (
-    display_full_ticket,
+    display_compute_allocation_request_ticket,
+    display_github_leavers_request_ticket,
+    display_github_onboarding_request_ticket,
     display_multi_tickets,
     display_related_tickets,
     display_response,
@@ -29,7 +31,15 @@ from rcpond.display import (
 )
 from rcpond.llm import LLM, LLMResponse
 from rcpond.prompt import construct_prompt
-from rcpond.servicenow import ComputeAllocationRequestTicket, RelatedTicketMatch, ServiceNow, Ticket, TicketState
+from rcpond.servicenow import (
+    ComputeAllocationRequestTicket,
+    GitHubOnboardingRequestTicket,
+    RelatedTicketMatch,
+    ResearchLeaversGitHubTicket,
+    ServiceNow,
+    Ticket,
+    TicketState,
+)
 from rcpond.tools import CombineTicketHistoryTool, get_available_tools, verify_render_all_templates
 
 if TYPE_CHECKING:
@@ -259,8 +269,17 @@ def display_single_ticket(ticket_number: str, config: Config | None = None):
     service_now: ServiceNow = ServiceNow(config)
     ticket = service_now.get_ticket(ticket_number)
     full_ticket = service_now.get_full_ticket(ticket)
-    assert isinstance(full_ticket, ComputeAllocationRequestTicket)
-    display_full_ticket(full_ticket)
+
+    match full_ticket:
+        case ComputeAllocationRequestTicket():
+            display_compute_allocation_request_ticket(full_ticket)
+        case GitHubOnboardingRequestTicket():
+            display_github_onboarding_request_ticket(full_ticket)
+        case ResearchLeaversGitHubTicket():
+            display_github_leavers_request_ticket(full_ticket)
+        case _:
+            err_msg = f"unknown ticket type {type(full_ticket)}"
+            raise ValueError(err_msg)
 
 
 def get_ticket_url(ticket_number: str, config: Config | None = None) -> str:
