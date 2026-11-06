@@ -5,4 +5,4 @@ Note: These are toy example rules, not intended to be the actual logic. The real
 Does the user's username begin with a hyphen?
 
 - If yes, then they can be added to the Turing's GitHub Organisation immediately.
-- If no, then they must meet an Admin in person to request members
+- If no, then they must meet an Admin in person to request membership.

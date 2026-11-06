@@ -476,7 +476,7 @@ def _confirm_path_exists(path_as_str: str) -> Path:
     if path.exists():
         return path
 
-    err_msg = f"Path {path_as_str} cannot be found"
+    err_msg = f"Path '{path_as_str}' cannot be found"
     raise ValueError(err_msg)
 
 
