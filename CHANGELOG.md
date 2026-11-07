@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `combine_ticket_history` now posts a compact list of related ticket numbers as its work note while returning the full history to the LLM. Prior generated combine notes are omitted from that context to avoid recursively copying histories; original notes and other tool responses are retained.
 - A rejected token request now names the settings to check and warns that a shell may have altered the secret. The original error is preserved.
 - Surrounding quotes are now stripped from environment variables as well as config files, so the same text means the same thing in both.
 

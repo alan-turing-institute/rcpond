@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from rcpond.command import ReplyMode
-from rcpond.servicenow import ComputeAllocationRequestTicket, RelatedTicketMatch, ServiceNow, Ticket
+from rcpond.servicenow import ComputeAllocationRequestTicket, RelatedTicketMatch, ServiceNow, Ticket, _note_prefix
 from rcpond.tools import (
     CombineTicketHistoryTool,
     PostFreeformNoteTool,
@@ -277,7 +277,7 @@ def test_combine_ticket_history_schema_takes_no_params():
     assert params["required"] == []
 
 
-def test_combine_ticket_history_execute_posts_audit_note_and_returns_history():
+def test_combine_ticket_history_execute_posts_references_and_returns_full_history():
     source = _make_cart(number="RES0002000")
     related = _make_cart(
         number="RES0001000",
@@ -285,6 +285,7 @@ def test_combine_ticket_history_execute_posts_audit_note_and_returns_history():
         opened_at="01/01/2024 09:00:00",
         project_title="Genome Project",
         work_notes="01/01/2024 10:00:00 - Jane Doe (Work notes)\nApproved last year.",
+        comments="02/01/2024 11:00:00 - Alice (Additional comments)\nPlease keep the allocation.",
     )
     match = RelatedTicketMatch(ticket=related, matched_heuristics=("finance_code:TUR-2023-001",))
 
@@ -293,35 +294,143 @@ def test_combine_ticket_history_execute_posts_audit_note_and_returns_history():
 
     result = CombineTicketHistoryTool().execute(service_now, source)
 
-    ## The combined history is posted as an audit note and also returned for the next LLM turn.
+    ## Human readers get references; the next LLM turn still gets all decision context.
+    service_now.find_related_tickets.assert_called_once_with(source)
     service_now.post_note.assert_called_once()
     posted = service_now.post_note.call_args
     assert posted.args[0] is source
     assert posted.kwargs["tool_name"] == "combine_ticket_history"
-    assert posted.kwargs["note"] == result
+    assert posted.kwargs["note"] == "Related tickets for RES0002000 (1):\n- RES0001000"
 
-    assert "RES0001000" in result
-    assert "Closed" in result
-    assert "Genome Project" in result
-    assert "finance_code:TUR-2023-001" in result
-    assert "Approved last year." in result
+    assert isinstance(result, str)
+    assert "Related ticket: RES0001000" in result
+    assert "  State: Closed" in result
+    assert "  Opened: 01/01/2024 09:00:00" in result
+    assert "  Project title: Genome Project" in result
+    assert "  Matched on: finance_code:TUR-2023-001" in result
+    assert "  [01/01/2024 10:00:00] Jane Doe (Work notes):\n    Approved last year." in result
+    assert "  [02/01/2024 11:00:00] Alice (Additional comments):\n    Please keep the allocation." in result
+    service_now.web_url.assert_not_called()
 
 
-def test_combine_ticket_history_execute_no_matches_does_not_post():
+@pytest.mark.parametrize("count", [2, 25])
+def test_combine_ticket_history_execute_keeps_all_references_in_match_order(count):
+    source = _make_cart(number="RES0002000")
+    numbers = [f"RES{index:07d}" for index in reversed(range(count))]
+    long_history = "Detailed historical decision.\n" * 100
+    matches = [
+        RelatedTicketMatch(
+            ticket=_make_cart(
+                number=number,
+                work_notes=f"01/01/2024 10:00:00 - Jane Doe (Work notes)\n{number}: {long_history}",
+            ),
+            matched_heuristics=("project_title:Genome Project",),
+        )
+        for number in numbers
+    ]
+    service_now = MagicMock(spec=ServiceNow)
+    service_now.find_related_tickets.return_value = matches
+
+    result = CombineTicketHistoryTool().execute(service_now, source)
+
+    service_now.find_related_tickets.assert_called_once_with(source)
+    service_now.post_note.assert_called_once_with(
+        source,
+        note="\n".join([f"Related tickets for RES0002000 ({count}):", *(f"- {number}" for number in numbers)]),
+        tool_name="combine_ticket_history",
+    )
+    assert "Detailed historical decision." not in service_now.post_note.call_args.kwargs["note"]
+    assert isinstance(result, str)
+    assert [
+        line.removeprefix("Related ticket: ") for line in result.splitlines() if line.startswith("Related ticket: ")
+    ] == numbers
+    for number in numbers:
+        assert f"    {number}: " + long_history.rstrip().replace("\n", "\n    ") in result
+
+
+def test_combine_ticket_history_execute_excludes_only_exact_generated_combine_notes():
+    source = _make_cart(number="RES0002000")
+    generated = _note_prefix("combine_ticket_history", version="0.3.0") + "Old copied history."
+    summary = _note_prefix("combine_ticket_history") + "Related tickets for RES0001000 (1):\n- RES0000999"
+    preserved = [
+        "Please check combine_ticket_history before deciding.",
+        _note_prefix("post_freeform_note") + "Approved allocation.",
+        _note_prefix("combine_ticket_history_extra") + "A different tool's response.",
+        "Quoted marker for discussion: " + _note_prefix("combine_ticket_history") + "Keep this quotation.",
+        "[code]<b>RCPond v0.1 generated response:</b>[/code]\n----\nLegacy response without a tool name.",
+    ]
+    related = _make_cart(
+        number="RES0001000",
+        work_notes="\n\n".join(
+            f"01/01/2024 10:00:{index:02d} - Reviewer (Work notes)\n{content}"
+            for index, content in enumerate([generated, summary, *preserved])
+        ),
+    )
+    original_notes = related.work_notes
+    service_now = MagicMock(spec=ServiceNow)
+    service_now.find_related_tickets.return_value = [RelatedTicketMatch(related, ("project_title:Genome Project",))]
+
+    result = CombineTicketHistoryTool().execute(service_now, source)
+
+    assert isinstance(result, str)
+    assert "Old copied history." not in result
+    assert "RES0000999" not in result
+    for content in preserved:
+        assert content.replace("\n", "\n    ") in result
+    assert related.work_notes == original_notes
+    service_now.post_note.assert_called_once_with(
+        source, note="Related tickets for RES0002000 (1):\n- RES0001000", tool_name="combine_ticket_history"
+    )
+
+
+def test_combine_ticket_history_execute_handles_tickets_without_original_notes():
+    source = _make_cart(number="RES0002000")
+    related = _make_cart(
+        number="RES0001000",
+        work_notes="01/01/2024 10:00:00 - RCPond (Work notes)\n"
+        + _note_prefix("combine_ticket_history")
+        + "Old copied history.",
+    )
+    empty = _make_cart(number="RES0001001")
+    service_now = MagicMock(spec=ServiceNow)
+    service_now.find_related_tickets.return_value = [
+        RelatedTicketMatch(related, ("project_title:Genome Project",)),
+        RelatedTicketMatch(empty, ("project_title:Genome Project",)),
+    ]
+
+    result = CombineTicketHistoryTool().execute(service_now, source)
+
+    assert isinstance(result, str)
+    assert result.count("  (no notes or comments)") == 2
+    assert "Old copied history." not in result
+    service_now.post_note.assert_called_once_with(
+        source,
+        note="Related tickets for RES0002000 (2):\n- RES0001000\n- RES0001001",
+        tool_name="combine_ticket_history",
+    )
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_combine_ticket_history_execute_no_matches_does_not_post(dry_run):
     source = _make_cart(number="RES0002000")
     service_now = MagicMock(spec=ServiceNow)
     service_now.find_related_tickets.return_value = []
 
-    result = CombineTicketHistoryTool().execute(service_now, source)
+    result = CombineTicketHistoryTool().execute(service_now, source, dry_run=dry_run)
 
     service_now.post_note.assert_not_called()
-    assert "No related tickets" in result
-    assert "RES0002000" in result
+    service_now.find_related_tickets.assert_called_once_with(source)
+    assert result == "No related tickets were found for RES0002000."
 
 
 def test_combine_ticket_history_execute_dry_run_returns_history_without_posting():
     source = _make_cart(number="RES0002000")
-    related = _make_cart(number="RES0001000", state="Closed", project_title="Genome Project")
+    related = _make_cart(
+        number="RES0001000",
+        state="Closed",
+        project_title="Genome Project",
+        work_notes="01/01/2024 10:00:00 - Jane Doe (Work notes)\nApproved last year.",
+    )
     match = RelatedTicketMatch(ticket=related, matched_heuristics=("finance_code:TUR-2023-001",))
 
     service_now = MagicMock(spec=ServiceNow)
@@ -331,7 +440,12 @@ def test_combine_ticket_history_execute_dry_run_returns_history_without_posting(
 
     ## Dry run still computes and returns the combined history, but writes nothing.
     service_now.post_note.assert_not_called()
+    assert isinstance(result, str)
     assert "RES0001000" in result
+    assert "Approved last year." in result
+    assert "Genome Project" in result
+    assert "finance_code:TUR-2023-001" in result
+    assert result == CombineTicketHistoryTool().execute(service_now, source)
 
 
 # --- verify_render_all_templates ---
