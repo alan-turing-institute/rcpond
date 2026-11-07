@@ -32,7 +32,7 @@ import jinja2
 import jinja2.meta
 
 from rcpond.config import Config
-from rcpond.servicenow import RelatedTicketMatch, ServiceNow, Ticket
+from rcpond.servicenow import _RCPOND_TOOL_NAME_RE, RelatedTicketMatch, ServiceNow, Ticket
 from rcpond.tool import Tool
 
 ## --------------------------------------------------------------------------------
@@ -168,9 +168,10 @@ class PostTemplatedNoteTool(Tool):
 def _format_combined_history(source: Ticket, matches: list[RelatedTicketMatch]) -> str:
     """Build a deterministic, audit-ready combined history of related tickets.
 
-    No summarisation is performed: each related ticket's key fields and full note
-    history are reproduced verbatim so the result is fully traceable for audit and
-    readable by both a future LLM call and a human reviewer.
+    No summarisation is performed: each related ticket's key fields and note
+    history are reproduced verbatim, except for prior ``combine_ticket_history``
+    responses identified by their exact RCPond tool prefix. Omitting those copies
+    avoids recursively including generated histories; original notes are unchanged.
 
     Parameters
     ----------
@@ -191,7 +192,8 @@ def _format_combined_history(source: Ticket, matches: list[RelatedTicketMatch]) 
     lines: list[str] = [
         f"Combined project history for {source.number}.",
         f"{len(matches)} related ticket(s) were found via field-matching heuristics.",
-        "Each block below reproduces a related ticket's key fields and full note history verbatim.",
+        "Each block below reproduces a related ticket's key fields and full note history verbatim, "
+        "excluding prior combine_ticket_history responses.",
     ]
     for match in matches:
         t = match.ticket
@@ -205,7 +207,13 @@ def _format_combined_history(source: Ticket, matches: list[RelatedTicketMatch]) 
             f"  Matched on: {', '.join(match.matched_heuristics)}",
             "",
         ]
-        notes = t.get_combined_notes()
+        notes = [
+            entry
+            for entry in t.get_combined_notes()
+            if not (
+                (marker := _RCPOND_TOOL_NAME_RE.match(entry.content)) and marker.group(1) == "combine_ticket_history"
+            )
+        ]
         if notes:
             lines.append("  Notes and comments:")
             for entry in notes:
@@ -221,9 +229,10 @@ def _format_combined_history(source: Ticket, matches: list[RelatedTicketMatch]) 
 class CombineTicketHistoryTool(Tool):
     """Finds historical tickets related to the current ticket and combines their history.
 
-    This is a non-terminal tool: it posts the combined history to the current ticket
-    as an audit note (for traceability and human readers) and returns the same
-    combined history so it can be injected as context for the next LLM turn.
+    This is a non-terminal tool: it posts a compact list of related ticket numbers
+    to the current ticket for human readers, in matching order. It returns the full
+    combined history as context for the next LLM turn, excluding prior generated
+    combine notes. No notes are posted for empty matches or in a dry run.
 
     Example:
     >>> tool = CombineTicketHistoryTool()
@@ -259,9 +268,11 @@ class CombineTicketHistoryTool(Tool):
     def execute(self, service_now: ServiceNow, ticket: Ticket, *, dry_run: bool = False, **kwargs) -> str | None:
         matches = service_now.find_related_tickets(ticket)
         history = _format_combined_history(ticket, matches)
-        ## Post an audit note only when there is history to preserve and this is not a dry run.
+        ## Keep the work note compact while retaining the full history for the LLM.
         if matches and not dry_run:
-            service_now.post_note(ticket, note=history, tool_name=self.name)
+            references = [f"Related tickets for {ticket.number} ({len(matches)}):"]
+            references.extend(f"- {match.ticket.number}" for match in matches)
+            service_now.post_note(ticket, note="\n".join(references), tool_name=self.name)
         return history
 
 
