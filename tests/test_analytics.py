@@ -4,7 +4,7 @@ import pandas as pd
 
 from rcpond import command, servicenow
 from rcpond.analytics import Period, build_ticket_frame, render_markdown
-from rcpond.servicenow import Ticket, TicketState
+from rcpond.servicenow import Ticket, TicketState, all_registered_types_query
 
 ## short_description that matches ComputeAllocationRequestTicket.MATCH_CRITERIA
 _CART_DESC = "Request access to HPC and cloud computing facilities"
@@ -219,7 +219,12 @@ def test_command_analytics_fetches_all_states_prints_and_returns_markdown(capsys
         MockSN.return_value.get_tickets.return_value = tickets
         out = command.analytics(config=MagicMock())
 
-    MockSN.return_value.get_tickets.assert_called_once_with(state=TicketState.all_including_closed)
+    ## The explicit query is what makes the report cover every ticket type: the configured
+    ## query is a single type's, so without it analytics silently reports on one type.
+    MockSN.return_value.get_tickets.assert_called_once_with(
+        state=TicketState.all_including_closed,
+        query=all_registered_types_query(),
+    )
     assert "# RCPond analytics report" in out
     assert "## Trends by quarter" in out
     assert out == capsys.readouterr().out

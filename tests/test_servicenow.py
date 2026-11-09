@@ -5,6 +5,7 @@ import json
 import os
 import time
 from datetime import datetime
+from types import MappingProxyType
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -829,6 +830,74 @@ def test_get_tickets_state_combinations(auth_mode, state, expected):
         tickets = sn.get_tickets(state=state)
 
     assert {t.number for t in tickets} == expected
+
+
+## ── Queries derived from MATCH_CRITERIA ─────────────────────────────────────
+##
+## Two problems solved by one builder. The default query used to be a hand-written
+## duplicate of the default type's MATCH_CRITERIA, free to drift from it; and a command
+## that spans types (analytics) fell back to that single-type default, silently narrowing
+## its report to one type.
+
+
+def test_default_ticket_type_query_matches_the_default_types_criteria():
+    """Derived, not duplicated: a reworded short_description cannot leave the two stale."""
+    criteria = servicenow._TICKET_TYPES[servicenow.DEFAULT_TICKET_TYPE].MATCH_CRITERIA
+
+    query = servicenow.default_ticket_type_query()
+
+    for field, value in criteria.items():
+        assert f"{field}={value}" in query
+
+
+def test_all_registered_types_query_covers_every_registered_type():
+    query = servicenow.all_registered_types_query()
+
+    for cls in servicenow._TICKET_TYPES.values():
+        for field, value in cls.MATCH_CRITERIA.items():
+            assert f"{field}={value}" in query
+
+
+def test_all_registered_types_query_joins_alternatives_with_or():
+    query = servicenow.all_registered_types_query()
+
+    assert query.count("^OR") == len(servicenow._TICKET_TYPES) - 1
+
+
+def test_all_registered_types_query_rejects_multi_criteria_types():
+    """ServiceNow's ^ and ^OR have no grouping, so ANDed criteria cannot be safely ORed.
+
+    No registered type has more than one criterion today. Failing loudly beats emitting a
+    query whose precedence quietly differs from what MATCH_CRITERIA means.
+    """
+
+    class _TwoCriteria(Ticket):
+        MATCH_CRITERIA = MappingProxyType({"short_description": "A", "u_category": "B"})
+
+    with (
+        patch.dict(servicenow._TICKET_TYPES, {"two_criteria": _TwoCriteria}),
+        pytest.raises(ValueError, match="two_criteria"),
+    ):
+        servicenow.all_registered_types_query()
+
+
+def test_get_tickets_uses_an_explicit_query_when_given():
+    """The override is what lets a cross-type command escape the single-type default."""
+    sn = _make_sn()
+    _setup_session(sn, [_raw_ticket(number="ok")])
+
+    sn.get_tickets(state=TicketState.all_including_closed, query="short_description=A^ORshort_description=B")
+
+    assert sn.session.get.call_args.kwargs["params"]["sysparm_query"] == "short_description=A^ORshort_description=B"
+
+
+def test_get_tickets_uses_the_configured_query_by_default():
+    sn = _make_sn()
+    _setup_session(sn, [_raw_ticket(number="ok")])
+
+    sn.get_tickets(state=TicketState.all_including_closed)
+
+    assert sn.session.get.call_args.kwargs["params"]["sysparm_query"] == _TEST_QUERY
 
 
 ## ── MATCH_CRITERIA guard ────────────────────────────────────────────────────

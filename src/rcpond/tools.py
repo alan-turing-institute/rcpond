@@ -409,4 +409,5 @@ def get_available_tools(config: Config) -> list[Tool]:
     list[Tool]
         The tools the LLM may call.
     """
-    return [PostFreeformNoteTool(), PostTemplatedNoteTool(config), CombineTicketHistoryTool(), GitHubOnboardingTool()]
+    # For now exclude GitHubOnboardingTool() for now as a feature toggle
+    return [PostFreeformNoteTool(), PostTemplatedNoteTool(config), CombineTicketHistoryTool()]
