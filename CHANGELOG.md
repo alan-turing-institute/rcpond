@@ -13,10 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `analytics` no longer triggers a pandas deprecation warning when building the cross-type aggregate row. The row is now constructed directly instead of by assigning a label into a numeric column, which pandas 3.1 warns about and pandas 4 will reject.
 - The OAuth token is now refreshed for each request rather than just once when the ServiceNow client is created. Previously, if a token expired part way through a long-running job such as `process-all`, the expired token kept being sent and every remaining request failed.
 
 ### Changed
 
+- The `html` extra now requires `pandas>=3.0` (previously `>=2.0`). The `analytics` tables were already failing on pandas 2.x, so the old floor did not reflect what the code supports.
 - A rejected token request now names the settings to check and warns that a shell may have altered the secret. The original error is preserved.
 - Surrounding quotes are now stripped from environment variables as well as config files, so the same text means the same thing in both.
 
