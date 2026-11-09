@@ -9,13 +9,16 @@ The four main entry points are:
 - `batch_evaluate_tickets`: Evaluate LLM performance against pre-downloaded HTML tickets.
   Requires the ``html`` optional dependency group (``uv sync --extra html``).
 - `check_templates`: Render all Jinja2 templates in a directory with dummy variable values (for CI).
+- `dump_tickets`: Write every ticket of every registered type to a jsonl dump file.
 """
 
 import json
 import sys
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
 from rich import print
 
@@ -41,6 +44,7 @@ from rcpond.servicenow import (
     TicketState,
     all_registered_types_query,
 )
+from rcpond.ticket_dumps import write_dump
 from rcpond.tools import CombineTicketHistoryTool, get_available_tools, verify_render_all_templates
 
 if TYPE_CHECKING:
@@ -321,6 +325,116 @@ def find_related_tickets(ticket_number: str, config: Config | None = None) -> li
     matches = service_now.find_related_tickets(full_ticket)
     display_related_tickets(full_ticket, matches)
     return matches
+
+
+def default_dump_filename(servicenow_web_url: str, now: datetime | None = None) -> str:
+    """Return the default ``dump-tickets`` filename for an instance.
+
+    ``<web-domain>_<YYYYmmddTHHMMSS>.jsonl`` in local time. Colons are deliberately absent:
+    unlike the header's ``created_at``, this has to be a valid filename on every platform.
+
+    Parameters
+    ----------
+    servicenow_web_url : str
+        The configured ServiceNow web UI URL; its domain names the instance.
+    now : datetime | None
+        Timestamp to use, defaulting to the local time now.
+
+    Returns
+    -------
+    str
+        The filename, without any directory part.
+    """
+    domain = urlparse(servicenow_web_url).netloc or "unknown-instance"
+    stamp = (now or datetime.now()).strftime("%Y%m%dT%H%M%S")  # - local time, by design
+    return f"{domain}_{stamp}.jsonl"
+
+
+def dump_tickets(out_file: Path | None = None, limit: int | None = None, config: Config | None = None) -> Path:
+    """Dump every ticket of every registered type to a jsonl file.
+
+    Fetches the base tickets in one bulk call, then the full ticket — including the
+    catalogue variables — one request at a time. That fan-out is the expensive part, taking
+    around 70 seconds against the production instance, so progress is reported as it goes.
+
+    Parameters
+    ----------
+    out_file : Path | None
+        Where to write. Defaults to ``default_dump_filename()`` in the current directory.
+    limit : int | None
+        Dump only the first ``limit`` tickets by ticket number. Sampling aid: the result is
+        a deliberately partial dump, recorded as such in the file's header.
+    config : Config | None
+        Configuration to use. If None, Config() is constructed from the environment.
+
+    Returns
+    -------
+    Path
+        The file written.
+
+    Raises
+    ------
+    ValueError
+        If the output file already exists, or its directory does not.
+    Exception
+        Whatever a failed ticket fetch raised, with the ticket number added. No file is
+        written: a dump missing tickets would be indistinguishable from a complete one.
+    """
+    config = config or Config()
+
+    path = Path(out_file) if out_file is not None else Path.cwd() / default_dump_filename(config.servicenow_web_url)
+    ## Both checks precede the query. The fan-out takes ~70sec, and discovering the path is
+    ## unusable after it would waste the whole run.
+    if path.exists():
+        msg = f"Output file already exists: {path}. Delete it, or choose a different --output-file."
+        raise ValueError(msg)
+    if not path.parent.is_dir():
+        msg = f"Output directory does not exist: {path.parent}"
+        raise ValueError(msg)
+
+    service_now: ServiceNow = ServiceNow(config)
+    query = all_registered_types_query()
+    ## The configured query is a single type's, so without the explicit cross-type query the
+    ## dump would silently hold only that type.
+    tickets = service_now.get_tickets(state=TicketState.all_including_closed, query=query)
+
+    ## Sort before slicing, not merely before writing: it is what makes --limit reproducible,
+    ## since ServiceNow's result order is not guaranteed stable between runs.
+    tickets = sorted(tickets, key=lambda t: t.number)
+    if limit is not None:
+        tickets = tickets[:limit]
+
+    full_tickets: list[Ticket] = []
+    for num, ticket in enumerate(tickets, start=1):
+        try:
+            full_tickets.append(service_now.get_full_ticket(ticket))
+        except Exception as exc:
+            ## Abort rather than skip: a skipped ticket would make record_count under-count,
+            ## leaving a quietly partial dump. Re-raised with the ticket named rather than
+            ## annotated via add_note, because notes do not appear in str(exc) and the CLI
+            ## prints exactly that — the context would be lost where it is most needed.
+            msg = (
+                f"Failed to fetch full details for ticket {ticket.number} "
+                f"({num} of {len(tickets)}): {exc!r}. No dump was written."
+            )
+            raise RuntimeError(msg) from exc
+        ## One rewritten line, so a long run does not look hung. Written straight to
+        ## stdout, not via rich's print: rich strips the carriage return, so every update
+        ## would append instead of overwriting — 73 counters on one line for 731 tickets.
+        if num % 10 == 0 or num == len(tickets):
+            sys.stdout.write(f"\r  {num}/{len(tickets)} tickets")
+            sys.stdout.flush()
+    sys.stdout.write("\n")
+
+    write_dump(
+        path,
+        full_tickets,
+        servicenow_url=config.servicenow_url,
+        servicenow_web_url=config.servicenow_web_url,
+        query=query,
+        limit=limit,
+    )
+    return path
 
 
 def analytics(config: Config | None = None, refresh: bool = False, period: "Period | None" = None) -> str:

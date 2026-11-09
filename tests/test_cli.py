@@ -5,6 +5,7 @@ read and no validation runs; the auth and ServiceNow layers are patched at their
 source so no browser opens and no HTTP request is made.
 """
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -247,19 +248,20 @@ def test_check_templates_fails_when_no_types_are_configured():
         (["login"], False),
         (["whoami"], False),
         (["analytics"], False),
+        (["dump-tickets"], False),
         (["check-templates"], True),
         (["display-all"], True),
         (["process-next", "--ticket-type", "compute_allocation_request"], True),
     ],
-    ids=["login", "whoami", "analytics", "check_templates", "display_all", "process_next"],
+    ids=["login", "whoami", "analytics", "dump_tickets", "check_templates", "display_all", "process_next"],
 )
 def test_commands_that_read_no_rules_or_templates_opt_out(argv, requires):
     """A command must not demand configuration it never reads.
 
-    Three commands qualify, for two different reasons. `login` and `whoami` authenticate
-    only. `analytics` is cross-type by nature — it groups results by each ticket's own
-    type — so it can never resolve a single per-ticket-type config, and reads neither
-    rules nor templates anyway.
+    Four commands qualify, for two different reasons. `login` and `whoami` authenticate
+    only. `analytics` and `dump-tickets` are cross-type by nature — they span every
+    registered type — so neither can resolve a single per-ticket-type config, and neither
+    reads rules or templates anyway.
 
     Every other command keeps the strict default, including those that read no rules or
     templates today: they still need a ticket type for their *query*, so `--ticket-type`
@@ -282,6 +284,67 @@ def test_commands_that_read_no_rules_or_templates_opt_out(argv, requires):
     assert result.exit_code == 0, result.output
     ## Commands constructing Config directly never pass the flag, so absent means strict.
     assert captured.get("require_rules_and_templates", True) is requires
+
+
+# --- dump-tickets ---
+
+
+def _invoke_dump_tickets(argv, mock_config):
+    """Run dump-tickets with Config and the command body stubbed out."""
+    with (
+        patch("rcpond.cli._config", return_value=mock_config),
+        patch("rcpond.command.dump_tickets") as mock_dump,
+    ):
+        mock_dump.return_value = Path("dump.jsonl")
+        result = CliRunner().invoke(cli, argv)
+    return result, mock_dump
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [
+        (["dump-tickets"], {"out_file": None, "limit": None}),
+        (["dump-tickets", "--output-file", "out.jsonl"], {"out_file": Path("out.jsonl"), "limit": None}),
+        (["dump-tickets", "--limit", "20"], {"out_file": None, "limit": 20}),
+    ],
+    ids=["no_options", "explicit_output_file", "limit"],
+)
+def test_dump_tickets_forwards_its_options(mock_config, argv, expected):
+    """Both options are optional, and absent must stay absent.
+
+    `out_file=None` is what selects the default-filename rule, so a CLI-side default would
+    pre-empt it; `limit=None` is the difference between a complete dump and a partial one.
+    """
+    result, mock_dump = _invoke_dump_tickets(argv, mock_config)
+
+    assert result.exit_code == 0, result.output
+    kwargs = mock_dump.call_args.kwargs
+    assert kwargs["out_file"] == expected["out_file"]
+    assert kwargs["limit"] == expected["limit"]
+
+
+def test_dump_tickets_reports_the_file_it_wrote(mock_config):
+    """The default filename is generated, so the user has no other way to know it."""
+    with (
+        patch("rcpond.cli._config", return_value=mock_config),
+        patch("rcpond.command.dump_tickets", return_value=Path("example.service-now.com_20261106T145321.jsonl")),
+    ):
+        result = CliRunner().invoke(cli, ["dump-tickets"])
+
+    assert result.exit_code == 0, result.output
+    assert "example.service-now.com_20261106T145321.jsonl" in result.output
+
+
+def test_dump_tickets_exits_nonzero_when_the_dump_fails(mock_config):
+    """A failed fetch or an existing output file must not look like success."""
+    with (
+        patch("rcpond.cli._config", return_value=mock_config),
+        patch("rcpond.command.dump_tickets", side_effect=ValueError("Output file already exists: out.jsonl")),
+    ):
+        result = CliRunner().invoke(cli, ["dump-tickets"])
+
+    assert result.exit_code == 1
+    assert "already exists" in result.output
 
 
 # --- login ---
