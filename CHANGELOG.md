@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `rcpond dump-tickets` writes every ticket of every registered type to a jsonl file, with `--output-file` and `--limit`. The file carries a header recording the instance, query, registry and timestamp; it is written at `schema_version` 1. A reader accepts only the `schema_version` it was built for, so this entry is how to find the rcpond version that can read a given dump.
 - `rcpond login --force` discards cached tokens and authenticates from scratch. Without it, `login` can succeed from a cached token without checking the configured credentials.
 
 ### Fixed

@@ -3,6 +3,7 @@ nav:
     - index.md
     - configuration.md
     - command_reference.md
+    - ticket_dumps.md
   - Development:
     - contributing.md
     - changelog.md
