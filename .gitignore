@@ -169,3 +169,6 @@ curl-cmd.txt
 /evaluate/evaluate_llm_options.html
 /scripts/html_download
 /temp
+
+# Dump files
+servicedesk.turing.ac.uk_*T*.jsonl

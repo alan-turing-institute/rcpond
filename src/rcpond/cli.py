@@ -14,6 +14,7 @@ It adds the following subcommands
 - `process-ticket`
 - `process-all`
 - `evaluate-all`
+- `dump-tickets`
 
 Each delegating to the corresponding function in `command.py`.
 
@@ -356,6 +357,39 @@ def find_related(ctx: typer.Context, ticket_number: str, ticket_type: TicketType
     always of the same type as ``ticket_number``.
     """
     command.find_related_tickets(ticket_number=ticket_number, config=_config(ctx, ticket_type=ticket_type))
+
+
+@cli.command()
+def dump_tickets(
+    ctx: typer.Context,
+    output_file: Annotated[
+        Path | None,
+        typer.Option("--output-file", help="Where to write the dump. Absolute, or relative to the CWD."),
+    ] = None,
+    limit: Annotated[
+        int | None,
+        typer.Option("--limit", help="Dump only the first N tickets by ticket number (sampling aid)."),
+    ] = None,
+) -> None:
+    """Dump every ticket of every registered type to a jsonl file.
+
+    Takes around 70 seconds against the production instance: the catalogue variables are
+    only available one ticket at a time. Progress is reported as it goes.
+
+    With no --output-file the dump is written to the current directory, named for the
+    ServiceNow web domain and the current local time.
+    """
+    ## Built outside the try: typer.Exit subclasses RuntimeError, so a broad `except`
+    ## around _config would swallow typer's own control flow, including --help.
+    config = _config(ctx, require_rules_and_templates=False)
+
+    try:
+        written = command.dump_tickets(out_file=output_file, limit=limit, config=config)
+    except Exception as exc:
+        print(f"[red]Dump failed:[/red] {exc}")
+        raise typer.Exit(1) from exc
+
+    print(f"[green]Wrote[/green] {written}")
 
 
 try:
