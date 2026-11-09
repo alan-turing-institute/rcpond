@@ -190,9 +190,11 @@ def _processing_section(df: pd.DataFrame) -> list[str]:
     agg = agg.reset_index()
     ## A cross-type total is only meaningful (and non-redundant) with multiple types.
     if len(agg) > 1:
-        totals = agg.drop(columns="type_key").sum()
-        totals["type_key"] = "**All types (aggregate)**"
-        agg = pd.concat([agg, totals.to_frame().T[agg.columns]], ignore_index=True)
+        ## Build the row as a dict rather than assigning the label into the summed
+        ## Series: that assignment expands an int64 Series with a str, which pandas
+        ## 3.1 warns about (Pandas4Warning) and pandas 4 will reject.
+        totals = {"type_key": "**All types (aggregate)**"} | agg.drop(columns="type_key").sum().to_dict()
+        agg = pd.concat([agg, pd.DataFrame([totals], columns=agg.columns)], ignore_index=True)
     agg = agg.rename(
         columns={
             "type_key": "Ticket type",
