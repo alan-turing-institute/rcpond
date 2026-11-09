@@ -104,7 +104,9 @@ These record the choices made while implementing the stages, so they are not los
 
 ## Caching
 
-* **Deferred.** A single bulk `get_tickets(all_including_closed)` call already returns every base ticket (with notes/state/dates), which is all the implemented metrics need, so the per-ticket cache buys little. It will be built when a stage needs expensive per-ticket full fetches. The `--refresh` flag is accepted but is currently a no-op.
+* **NO LONGER REQUIRED.** 
+Previously it had been planned to inplement a local cache of tickets. This has been superceeded by the `dump-tickets` subcmd in 'planning/ticket-dump.md':
+    "A single bulk `get_tickets(all_including_closed)` call already returns every base ticket (with notes/state/dates), which is all the implemented metrics need, so the per-ticket cache buys little. It will be built when a stage needs expensive per-ticket full fetches. The `--refresh` flag is accepted but is currently a no-op."
 
 ## Stage 2 (distributions and time intervals)
 
