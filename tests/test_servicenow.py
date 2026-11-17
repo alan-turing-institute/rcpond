@@ -1360,6 +1360,31 @@ def test_find_related_core_finance_code_does_not_match(sn_instance):
     assert results == []
 
 
+def test_find_related_core_finance_code_suppresses_only_that_heuristic(sn_instance):
+    """A shared "CORE" code silences the finance heuristic, not the whole comparison.
+
+    Tickets sharing "CORE" are still related if some *other* heuristic matches. Only
+    the finance code is discounted, and it is absent from the reported heuristics.
+    """
+    source = _make_full_ticket(
+        number="RES0001000",
+        which_finance_code="CORE",
+        pi_supervisor_email="pi@example.com",
+    )
+    match = _make_full_ticket(
+        number="RES0002000",
+        which_finance_code="CORE",
+        pi_supervisor_email="pi@example.com",
+    )
+    _setup_find_related(sn_instance, [match])
+
+    results = sn_instance.find_related_tickets(source)
+
+    assert len(results) == 1
+    assert results[0].ticket.number == "RES0002000"
+    assert results[0].matched_heuristics == ("pi_email:pi@example.com",)
+
+
 def test_find_related_shared_users_reports_all_source_users(sn_instance):
     """With the default 'all shared users' heuristic, any user overlap reports every source user.
 
