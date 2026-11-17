@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-17
+
 ### Added
 
 - `rcpond dump-tickets` writes every ticket of every registered type to a jsonl file, with `--output-file` and `--limit`. The file carries a header recording the instance, query, registry and timestamp; it is written at `schema_version` 1. A reader accepts only the `schema_version` it was built for, so this entry is how to find the rcpond version that can read a given dump.
@@ -19,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `find-related` no longer treats a shared finance code of `CORE` as evidence that two tickets are related. `CORE` is core funding rather than a project-specific code, so a large share of tickets carry it and matching on it linked tickets that had nothing else in common.
 - The `html` extra now requires `pandas>=3.0` (previously `>=2.0`). The `analytics` tables were already failing on pandas 2.x, so the old floor did not reflect what the code supports.
 - A rejected token request now names the settings to check and warns that a shell may have altered the secret. The original error is preserved.
 - Surrounding quotes are now stripped from environment variables as well as config files, so the same text means the same thing in both.
