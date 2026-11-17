@@ -583,6 +583,7 @@ def _extract_azure_ids(text: str) -> set[str]:
 
 # Feature toggles for different match criteria
 MATCH_ON_FINANCE_CODE = True
+MATCH_ON_CORE_FUNDING_FINANCE = False
 MATCH_ON_PI_EMAIL = True
 MATCH_ON_PMU_EMAIL = False
 MATCH_ON_ANY_SHARED_USERS = False
@@ -613,8 +614,12 @@ def _match_heuristics(source: Ticket, candidate: Ticket) -> list[str]:
     if MATCH_ON_FINANCE_CODE:
         src_fc = getattr(source, "which_finance_code", "").strip().upper()
         cand_fc = getattr(candidate, "which_finance_code", "").strip().upper()
-        if src_fc and cand_fc and src_fc == cand_fc:
-            matched.append(f"finance_code:{src_fc}")
+        ## "CORE" is core funding rather than a project-specific code, so a large share
+        ## of tickets carry it and a shared "CORE" is not evidence that two tickets are
+        ## related. MATCH_ON_CORE_FUNDING_FINANCE re-enables it.
+        if MATCH_ON_CORE_FUNDING_FINANCE or src_fc != "CORE":  # noqa: SIM102: Keep feature-toggle and logic on separate lines
+            if src_fc and cand_fc and src_fc == cand_fc:
+                matched.append(f"finance_code:{src_fc}")
 
     ## PI supervisor email
     if MATCH_ON_PI_EMAIL:

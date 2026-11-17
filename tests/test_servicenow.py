@@ -1344,6 +1344,22 @@ def test_find_related_by_heuristic(sn_instance, field, source_value, match_value
     assert any(heuristic_substr in h for h in results[0].matched_heuristics)
 
 
+def test_find_related_core_finance_code_does_not_match(sn_instance):
+    """A shared finance code of "CORE" is not evidence that two tickets are related.
+
+    "CORE" is core funding rather than a project-specific code, so a large share of
+    tickets carry it. Matching on it would relate tickets that have nothing else in
+    common, so it is excluded even though an ordinary shared code is a match.
+    """
+    source = _make_full_ticket(number="RES0001000", which_finance_code="CORE")
+    same_core = _make_full_ticket(number="RES0002000", which_finance_code="CORE")
+    _setup_find_related(sn_instance, [same_core])
+
+    results = sn_instance.find_related_tickets(source)
+
+    assert results == []
+
+
 def test_find_related_shared_users_reports_all_source_users(sn_instance):
     """With the default 'all shared users' heuristic, any user overlap reports every source user.
 
