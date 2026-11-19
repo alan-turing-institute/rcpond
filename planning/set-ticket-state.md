@@ -6,6 +6,12 @@ just on the local `Ticket` object.
 Build this incrementally. Steps 1–3 are the deliverable; Step 6 is recorded but deliberately
 not actioned.
 
+> **BLOCKED as of 2026-11-18.** The Step 0 spike found that `state` cannot be written through
+> the REST Table API at all — every form of the write returns HTTP 200 and changes nothing,
+> even as a named human user. See "Step 0 results" below. A ServiceNow-side ACL change is
+> needed before any of Steps 1–5 can be built. The design below is unchanged and still
+> correct; it simply cannot run yet.
+
 ## Decisions
 
 | Question | Decision |
@@ -90,6 +96,96 @@ created or chosen for the purpose, it should:
 
 The result decides option 1 vs option 2 and resolves the open question about `Resolved` below.
 **Do not write to production while establishing this.**
+
+### Step 0 results — run 2026-11-18, Dev instance
+
+Run via `scripts/probe_state_write.py --ticket RES0001345 --yes-i-am-sure` against
+`alanturingdev.service-now.com`, authenticated as a human user (interactive OAuth, Andrew
+Smith) — i.e. with *more* privilege than the service account the bot would use.
+
+**The state field could not be written by any method.**
+
+| Probe | Sent | HTTP | Outcome |
+|---|---|---|---|
+| (a) display label | `{"state": "On Hold"}` | 200 | state unchanged |
+| (b) label + `sysparm_input_display_value=true` | `{"state": "On Hold"}` | 200 | state unchanged |
+| (c) raw backing value | `{"state": "3"}` | 200 | state unchanged |
+
+Every attempt returned 200 and did nothing — the silent no-op this plan anticipated, in all
+three forms.
+
+**PUT behaves identically.** `PUT /{table}/{sys_id}` (full-record update) was tried with both
+the backing value and the display label: HTTP 200, no change, same as PATCH. That is what a
+field-level ACL predicts, since ACLs are evaluated per field regardless of verb. POST was not
+tried and should not be: in the Table API it *creates* records, so it tests nothing about
+updating and would litter Dev. **The verb is not the problem — do not revisit this.**
+
+**It is field-level, not a broken request.** A single PATCH carrying *both* `state` and
+`work_notes` had the work note applied and the state ignored. Auth, URL, and request shape
+are therefore all fine; ServiceNow is dropping `state` specifically and reporting success,
+which is its documented behaviour for a field the caller may not write. The response body
+confirms it, echoing the record back with the old value:
+
+```json
+{"result":{"number":{...,"value":"RES0001345"},
+           "state":{"display_value":"In Progress","value":"2"}}}
+```
+
+**Backing values, recovered incidentally.** `sys_choice` 404s through the APIM gateway, but
+`sysparm_display_value=all` exposes both halves of the field on ordinary records:
+
+| Value | Label |
+|---|---|
+| 1 | New |
+| 2 | In Progress |
+| 3 | On Hold |
+| 5 | Closed |
+| 6 | Cancelled |
+
+Worth keeping even though the write is blocked, because **these are not the stock ServiceNow
+numbers** — stock uses 7 for Closed and 8 for Cancelled. Anyone who hard-codes the
+conventional map against this table will be wrong in exactly the way that is hardest to
+notice. `Resolved` is absent: no Dev ticket is currently in that state, so its value is still
+unknown. (Production has them — 2 in the November dump.)
+
+### What this means for the rest of the plan
+
+**Steps 1–5 are blocked.** `set_state` cannot be built as specified, because the write it
+depends on does not work. This is not a design problem to code around: the enum, the
+validation order and the re-read guard are all still right, and the re-read guard is now
+*demonstrably* load-bearing rather than theoretical — it is the only thing that would have
+caught this.
+
+What is needed first is a ServiceNow-side change: a write ACL permitting the REST Table API
+to set `state` on `x_tati_resmgt_research`, for whichever account RCPond will act as. That is
+an instance-configuration request, not a code change, and it needs an owner.
+
+Two things to establish when raising it:
+
+1. **Which account.** The probe ran as a named human user and was still refused, so this is
+   not simply "the bot lacks rights". Whatever is granted must cover the Client Credentials
+   service account, since that is what unattended runs use.
+2. **Whether the WebUI path differs.** An operator *can* change state in the WebUI, so the
+   restriction is specific to the Table API rather than to the field. It is worth asking
+   whether that is deliberate policy — in which case this feature may not be wanted at all —
+   or an oversight in the ACL.
+3. **Whether it is ServiceNow at all, or the APIM gateway.** This is the weakest point in the
+   diagnosis above. Every request goes through `turing-api.azure-api.net`, which already
+   demonstrably interferes with the path — it is what 404s `sys_choice`. A gateway policy
+   that strips `state` from request bodies would produce exactly the symptom observed, and
+   would be indistinguishable from a ServiceNow ACL from this side of it. Distinguishing them
+   needs either a direct-to-ServiceNow request bypassing the gateway, or someone who can read
+   the gateway's policy and the table's ACLs. **Establish this before asking for an ACL change
+   — the fix may belong to a different system and a different owner.**
+
+Until then, Q5 (`Resolved` without close fields) and Q6 (writing to a `Closed` ticket) cannot
+be answered: both presuppose a write that works. `--probe-resolved` and `--probe-closed` were
+not run, and would have reported silent no-ops regardless.
+
+One stray artifact: the diagnostic left a work note reading
+`[rcpond step-0 probe] field-level ACL diagnostic` on Dev ticket RES0001345. Harmless — the
+existing `test_post_note` integration test adds notes to Dev tickets routinely — but it is
+there.
 
 ## Step 1 — rename `TicketState` to `TicketStateFilter`
 
