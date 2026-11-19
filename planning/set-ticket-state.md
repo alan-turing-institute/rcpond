@@ -6,11 +6,18 @@ just on the local `Ticket` object.
 Build this incrementally. Steps 1–3 are the deliverable; Step 6 is recorded but deliberately
 not actioned.
 
-> **BLOCKED as of 2026-11-18.** The Step 0 spike found that `state` cannot be written through
-> the REST Table API at all — every form of the write returns HTTP 200 and changes nothing,
-> even as a named human user. See "Step 0 results" below. A ServiceNow-side ACL change is
-> needed before any of Steps 1–5 can be built. The design below is unchanged and still
-> correct; it simply cannot run yet.
+> **BLOCKED as of 2026-11-18, and REDIRECTED on 2026-11-19.** The Step 0 spike found that
+> `state` cannot be written through the REST Table API at all — every form of the write
+> returns HTTP 200 and changes nothing, even as a named human user. See "Step 0 results".
+>
+> A browser HAR capture on 2026-11-19 then established *why*, and it is not an oversight:
+> **the WebUI does not write `state` either.** State transitions are performed by named UI
+> Actions, and the `state` field in the submitted payload is ignored. See "Step 0b" below.
+>
+> Whether an ACL grant on `state` is still the right ask now hinges on one unanswered
+> question: whether the transition logic lives in **business rules** (which do fire on Table
+> API writes) or in the **UI Action scripts** (which do not). Settle that before requesting
+> anything or redesigning Steps 2–5.
 
 ## Decisions
 
@@ -134,19 +141,33 @@ confirms it, echoing the record back with the old value:
 **Backing values, recovered incidentally.** `sys_choice` 404s through the APIM gateway, but
 `sysparm_display_value=all` exposes both halves of the field on ordinary records:
 
+**Complete as of 2026-11-19**, once Dev tickets in every state were identified (a Resolved one
+exists after all — `RES0001125`). Recovered read-only from 336 Dev tickets with
+`scripts/probe_field_writes.py --recover`:
+
 | Value | Label |
 |---|---|
 | 1 | New |
 | 2 | In Progress |
 | 3 | On Hold |
+| 4 | Resolved |
 | 5 | Closed |
 | 6 | Cancelled |
 
-`Resolved` is absent: no Dev ticket is currently in that state, so its value is still unknown.
-(Production has them — 2 in the November dump.)
+The same read recovered the two companion choice fields. Note that `on_hold_reason`'s backing
+value is lowercase while its display value is capitalised; the HAR capture submitted the
+lowercase form:
+
+| Field | Display value | Backing value |
+|---|---|---|
+| `on_hold_reason` | Awaiting for customer | `awaiting for customer` |
+| `on_hold_reason` | Awaiting for vendor | `awaiting for vendor` |
+| `resolution_code` | Request Accepted | `request_accepted` |
+| `resolution_code` | Request Declined | `request_declined` |
 
 **An earlier draft of this plan called these "not the stock ServiceNow numbers". That claim was
-withdrawn — it could not be sourced.** What the references actually say:
+withdrawn — it could not be sourced, and the completed table above now refutes it outright.**
+What the references say:
 
 - ServiceNow's own docs ([Configure state field choice values][sn-state-choices]) give numeric
   values for the **incident** table only, and only for two states: `Resolved = 6`, `Closed = 7`.
@@ -154,9 +175,10 @@ withdrawn — it could not be sourced.** What the references actually say:
   community lore, and one thread reports an upgrade in which `IncidentStateSNC` set both
   `CANCELED` and `CLOSED` to 7.
 - A community reply ([developer-forum thread][sn-forum-mapping]) gives 1 New, 2 In Progress,
-  3 On Hold, 4 Resolved, 5 Closed, 6 Canceled — matching every value observed above. It is one
-  post, self-described as "a general mapping", and it contradicts the official docs on Resolved
-  and Closed, so it is most likely that poster's instance rather than a standard.
+  3 On Hold, 4 Resolved, 5 Closed, 6 Canceled — which matches this table **exactly, including
+  its prediction of `Resolved = 4`** before that value had been observed. It is nonetheless one
+  post, self-described as "a general mapping", and it contradicts the official docs. Treat the
+  agreement as corroboration of *this* instance's values, not as evidence of a standard.
 
 **The framing was the real error.** `x_tati_resmgt_research` is a custom scoped-application
 table. There is no vendor "stock" state mapping for a custom table — only what the app's author
@@ -167,46 +189,158 @@ defined. Comparing it to the *incident* mapping assumed a baseline that does not
 instance, never assume it.** Whichever reference is right about incidents says nothing binding
 about this table.
 
-One cheap open check: the community mapping predicts `Resolved = 4`. A read-only
-`sysparm_display_value=all` fetch of a Resolved production ticket would confirm or refute it.
+**Dev reference tickets**, one per state, for any future probe:
+
+| State | Ticket |
+|---|---|
+| New | RES0001297 |
+| In Progress | RES0001142 |
+| On Hold | — |
+| Resolved | RES0001125 |
+| Closed | RES0001053 |
+| Cancelled | RES0001198 |
+
+Use `RES0001142` (In Progress) for write probes: it is in a settable state, so anything that
+does take effect can be put back.
 
 [sn-state-choices]: https://www.servicenow.com/docs/r/SbrhqYG7UKQCk7uYwvgVBA/nfh3EZBspumdwavZgFHGuw
 [sn-forum-mapping]: https://www.servicenow.com/community/developer-forum/looking-for-the-following-tables-that-will-show-state-values-and/m-p/2800527
 
 
+### Step 0b results — browser HAR capture, 2026-11-19, Dev instance
+
+An operator stepped through the WebUI on Dev ticket `RES0001345` with the network log
+recording: two rejected attempts to set On Hold (missing mandatory fields), one successful
+On Hold, then a revert to In Progress. Capture saved to `temp/` (gitignored — **it holds live
+session cookies and CSRF tokens; delete it once this section is settled**).
+
+**The WebUI does not write `state`.** Each successful transition is a form POST to
+`/x_tati_resmgt_research.do` (HTTP 302 on success) carrying `sys_action=<ui-action-name>`.
+The decisive evidence is the diff between the two successful POSTs:
+
+```
+sys_action:  'on_hold'  ->  'in_progress'
+state:       '3'        ->  '3'            <-- unchanged
+```
+
+The second POST submitted `state = '3'` (On Hold) and the record came out **In Progress**.
+The `state` value in the payload is inert; the UI Action determines the outcome.
+
+**Transition vocabulary**, recovered from the `gsftSubmit` targets in the form HTML:
+
+| UI Action | Target state | Mandatory companion fields |
+|---|---|---|
+| `in_progress` | In Progress | `assigned_to` |
+| `on_hold` | On Hold | `on_hold_reason`, `comments` |
+| `resolve_research_request` | Resolved | `resolution_code`, `comments` |
+| `cancel_research` | Cancelled | — |
+| `sysverb_check_save` | (plain save, no transition) | — |
+
+Two things this confirms independently of anything above:
+
+- **There is no `close` UI Action.** Closed is system-driven and not operator-selectable,
+  exactly as described in the Decisions table. `SettableState`'s three members map one-to-one
+  onto the three operator transitions.
+- **The mandatory companions are part of the transition, not decoration.** The two rejected
+  attempts failed client-side on them and never reached the network.
+
+Extraction script: `scratchpad/har_state_extract.py` (throwaway; prints no headers or cookies).
+
+### Step 0c results — companion-field writability, 2026-11-19, Dev `RES0001192`
+
+Run with `scripts/probe_field_writes.py`. Every write was verified by re-reading, and the run
+carried two controls so that the verdicts are interpretable: `state` as a known-negative and
+`work_notes` as a known-positive. **Both controls behaved as expected, so the results stand.**
+
+| Field | Role | Verdict |
+|---|---|---|
+| `state` | negative control | **NOT-WRITABLE** — HTTP 200, value unchanged |
+| `work_notes` | positive control | WRITABLE |
+| `comments` | target | **WRITABLE** |
+| `on_hold_reason` | target | **WRITABLE** (`awaiting for customer` → reads back `Awaiting for customer`) |
+| `resolution_code` | target | **WRITABLE** (`request_accepted` → reads back `Request Accepted`) |
+
+**`state` is the only field on this table RCPond cannot write.** Every companion the UI Actions
+require is already writable — and writable *outside* any transition, unconditionally. The
+anticipated caveat that an ACL might permit those writes only mid-transition did not apply.
+
+Two consequences:
+
+- **The ask is now a single field.** RCPond can already set `assigned_to`, `on_hold_reason`,
+  `resolution_code` and `comments`. Nothing else needs requesting.
+- **It strengthens the "deliberate" reading.** This is not a blanket lockdown of the scoped
+  app's fields; `state` alone is protected, while its companions are wide open. That is the
+  shape of a specific decision, not an oversight.
+
+The plain fields were restored afterwards (verified: both read back empty). The two journal
+probes appended permanent entries prefixed `[rcpond probe-field-writes]` — append-only fields
+cannot be reverted.
+
 ### What this means for the rest of the plan
 
-**Steps 1–5 are blocked.** `set_state` cannot be built as specified, because the write it
-depends on does not work. This is not a design problem to code around: the enum, the
-validation order and the re-read guard are all still right, and the re-read guard is now
-*demonstrably* load-bearing rather than theoretical — it is the only thing that would have
-caught this.
+**Steps 2–5 need redesigning, and Step 0's conclusion needs correcting.** The re-read guard is
+vindicated — it is the only thing that caught the silent no-op, and it stays. But the write it
+guards was never the sanctioned mechanism.
 
-What is needed first is a ServiceNow-side change: a write ACL permitting the REST Table API
-to set `state` on `x_tati_resmgt_research`, for whichever account RCPond will act as. That is
-an instance-configuration request, not a code change, and it needs an owner.
+**`sys_action` is not a field and cannot be granted.** It is a parameter of the UI16 *form
+processor* at `/x_tati_resmgt_research.do`, which uses it to look up a UI Action record and run
+that action's server script. The Table API has no form processor — it writes dictionary columns
+through GlideRecord. `sys_action` is not a dictionary element, so a PATCH carrying it is simply
+dropped, and no ACL can attach to it.
 
-Two things to establish when raising it:
+**The open question is where the transition logic lives.** What runs on a Table API PATCH:
 
-1. **Which account.** The probe ran as a named human user and was still refused, so this is
-   not simply "the bot lacks rights". Whatever is granted must cover the Client Credentials
-   service account, since that is what unattended runs use.
-2. **Whether the WebUI path differs.** An operator *can* change state in the WebUI, so the
-   restriction is specific to the Table API rather than to the field. It is worth asking
-   whether that is deliberate policy — in which case this feature may not be wanted at all —
-   or an oversight in the ACL.
-3. **Whether it is ServiceNow at all, or the APIM gateway.** This is the weakest point in the
-   diagnosis above. Every request goes through `turing-api.azure-api.net`, which already
-   demonstrably interferes with the path — it is what 404s `sys_choice`. A gateway policy
-   that strips `state` from request bodies would produce exactly the symptom observed, and
-   would be indistinguishable from a ServiceNow ACL from this side of it. Distinguishing them
-   needs either a direct-to-ServiceNow request bypassing the gateway, or someone who can read
-   the gateway's policy and the table's ACLs. **Establish this before asking for an ACL change
-   — the fix may belong to a different system and a different owner.**
+| | Runs on Table API PATCH? |
+|---|---|
+| Business rules | **Yes** — they fire on GlideRecord insert/update whatever the channel |
+| UI Action scripts | No — form layer only |
+| Client scripts / UI policies | No — browser only |
 
-Until then, Q5 (`Resolved` without close fields) and Q6 (writing to a `Closed` ticket) cannot
-be answered: both presuppose a write that works. `--probe-resolved` and `--probe-closed` were
-not run, and would have reported silent no-ops regardless.
+So a write ACL on `state` is the right ask *if and only if* the transitions are implemented in
+business rules. If they live in the UI Action scripts, a PATCH would set a bare field and skip
+`resolved_by`, `closed_at`, notifications and SLA handling. The mandatory-field enforcement
+observed in the capture was client-side (`setMandatory`), which settles nothing either way.
+
+**Answer that before choosing an implementation.** Reading the `sys_ui_action` records for
+`x_tati_resmgt_research` settles it directly, for anyone with that access; otherwise ask the app
+owner: *are the state transitions implemented in business rules on the table, or in the UI
+Action scripts?* It is cheaper than either option below.
+
+Then, in order of preference:
+
+1. **A write ACL on `state` alone — only if the logic is in business rules.** The cheapest
+   route, and the one the original plan assumed. Step 0c reduced it to a single field: every
+   companion is already writable. It must cover the Client Credentials service account, since
+   that is what unattended runs use. `set_state` would then write `state` together with the
+   companion fields the transition expects, all of which RCPond can already set.
+2. **A Scripted REST API wrapping the transitions**, provided by the app owner: an endpoint per
+   operator action, taking the mandatory companions as arguments. Required if the logic is in
+   the UI Actions, and the more robust option either way. The ask is concrete — the three
+   action names and their required fields are in the table above.
+3. **Replicating the form POST.** Technically possible and now fully characterised, but it
+   needs a session cookie, the `sysparm_ck` CSRF token, `sys_modCount`/`onLoad_sys_updated_on`
+   for the optimistic-concurrency check, and the full field payload echoed back. It is
+   screen-scraping a browser endpoint, it breaks on any form change, and it cannot use the
+   service account's Client Credentials flow. **Not recommended.**
+
+Regardless of route: **ask whether unattended state changes are wanted at all.** The transitions
+demand `assigned_to`, `on_hold_reason`, `resolution_code` and `comments` — fields that encode a
+human judgement. Worth confirming before building anything.
+
+**One earlier open item is now moot and one is resolved.** The question of whether the block
+was a ServiceNow ACL or an APIM gateway policy no longer gates anything, since we are not
+asking for the ACL. Note the browser reached `alanturingdev.service-now.com` directly, not
+through `turing-api.azure-api.net`, so the capture does not settle that question either — it
+makes it irrelevant rather than answering it.
+
+Q5 (`Resolved` without close fields) is partly answered: `resolve_research_request` requires
+`resolution_code` and `comments`. Q6 (writing to a `Closed` ticket) remains unanswered and is
+now academic.
+
+One stray artifact: the diagnostic left a work note reading
+`[rcpond step-0 probe] field-level ACL diagnostic` on Dev ticket RES0001345. Harmless — the
+existing `test_post_note` integration test adds notes to Dev tickets routinely — but it is
+there.
 
 One stray artifact: the diagnostic left a work note reading
 `[rcpond step-0 probe] field-level ACL diagnostic` on Dev ticket RES0001345. Harmless — the
