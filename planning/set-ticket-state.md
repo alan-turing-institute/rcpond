@@ -142,11 +142,37 @@ confirms it, echoing the record back with the old value:
 | 5 | Closed |
 | 6 | Cancelled |
 
-Worth keeping even though the write is blocked, because **these are not the stock ServiceNow
-numbers** — stock uses 7 for Closed and 8 for Cancelled. Anyone who hard-codes the
-conventional map against this table will be wrong in exactly the way that is hardest to
-notice. `Resolved` is absent: no Dev ticket is currently in that state, so its value is still
-unknown. (Production has them — 2 in the November dump.)
+`Resolved` is absent: no Dev ticket is currently in that state, so its value is still unknown.
+(Production has them — 2 in the November dump.)
+
+**An earlier draft of this plan called these "not the stock ServiceNow numbers". That claim was
+withdrawn — it could not be sourced.** What the references actually say:
+
+- ServiceNow's own docs ([Configure state field choice values][sn-state-choices]) give numeric
+  values for the **incident** table only, and only for two states: `Resolved = 6`, `Closed = 7`.
+  They say nothing about `Cancelled = 8`, which the earlier draft asserted; that figure is
+  community lore, and one thread reports an upgrade in which `IncidentStateSNC` set both
+  `CANCELED` and `CLOSED` to 7.
+- A community reply ([developer-forum thread][sn-forum-mapping]) gives 1 New, 2 In Progress,
+  3 On Hold, 4 Resolved, 5 Closed, 6 Canceled — matching every value observed above. It is one
+  post, self-described as "a general mapping", and it contradicts the official docs on Resolved
+  and Closed, so it is most likely that poster's instance rather than a standard.
+
+**The framing was the real error.** `x_tati_resmgt_research` is a custom scoped-application
+table. There is no vendor "stock" state mapping for a custom table — only what the app's author
+defined. Comparing it to the *incident* mapping assumed a baseline that does not apply; the base
+`task` mapping (1 Open, 3 Closed Complete, 4 Closed Incomplete) does not match ours either.
+
+**The practical conclusion is unchanged, and is in fact stronger: read the mapping from the
+instance, never assume it.** Whichever reference is right about incidents says nothing binding
+about this table.
+
+One cheap open check: the community mapping predicts `Resolved = 4`. A read-only
+`sysparm_display_value=all` fetch of a Resolved production ticket would confirm or refute it.
+
+[sn-state-choices]: https://www.servicenow.com/docs/r/SbrhqYG7UKQCk7uYwvgVBA/nfh3EZBspumdwavZgFHGuw
+[sn-forum-mapping]: https://www.servicenow.com/community/developer-forum/looking-for-the-following-tables-that-will-show-state-values-and/m-p/2800527
+
 
 ### What this means for the rest of the plan
 
