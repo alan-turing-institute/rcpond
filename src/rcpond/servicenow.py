@@ -8,8 +8,13 @@ API. The only methods are:
 - `ServiceNow.get_full_ticket()`: Get full details of a ticket;
 - `ServiceNow.find_related_tickets()`: Find tickets related to a given ticket via field-matching heuristics;
 - `assign_to()` Assigns a ticket to the named user;
-- `get_work_notes()` List the work notes for a specific ticket; and
-- `post_note()` Post a “work note” to a ticket.
+- `get_work_notes()` List the work notes for a specific ticket;
+- `post_note()` Post a “work note” to a ticket;
+- `get_comments()` List the additional comments for a specific ticket; and
+- `post_comment()` Post an “additional comment” to a ticket.
+
+Work notes are internal to the operators; comments are visible to the requester and
+notify them. See `post_comment()` before using it.
 
 Tickets are returned as instances of a `Ticket` dataclass which
 contains a few, high-level details. The subclass `ComputeAllocationRequestTicket` contains
@@ -963,6 +968,25 @@ class ServiceNow:
         result = self._fetch_fields(tkt.sys_id, {"work_notes"})
         return _parse_comment_display_values(result["work_notes"])
 
+    def get_comments(self, tkt: Ticket) -> list[NoteEntry]:
+        """List the additional comments on a ticket.
+
+        The counterpart to `get_work_notes`. ServiceNow surfaces this journal as
+        "Additional comments"; unlike work notes, its entries are visible to the requester.
+
+        Parameters
+        ----------
+        tkt : Ticket
+            The ticket whose comments are wanted.
+
+        Returns
+        -------
+        list[NoteEntry]
+            One entry per comment, newest first, as ServiceNow returns them.
+        """
+        result = self._fetch_fields(tkt.sys_id, {"comments"})
+        return _parse_comment_display_values(result["comments"])
+
     def get_assignee(self, tkt: Ticket) -> dict[str, str]:
         """
         A convenience method to retrieve the current `assigned_to` field for a Ticket.
@@ -996,6 +1020,42 @@ class ServiceNow:
         resp = self.session.patch(
             f"{self._base_api_url}/{self._TABLE}/{tkt.sys_id}",
             json={"work_notes": prefix + note},
+        )
+        resp.raise_for_status()
+
+    def post_comment(self, tkt: Ticket, comment: str, tool_name: str) -> None:
+        """Post an additional comment to a ticket.
+
+        **This is visible to the requester and notifies them.** It is the only thing RCPond
+        writes that reaches someone outside the operator team, so the text should be one a
+        researcher can read: template-rendered, not LLM-composed. See
+        planning/post-comments.md.
+
+        The comment carries the same RCPond prefix as a work note, so that
+        `Ticket.is_rcpond_processed`, `Ticket.rcpond_note_count` and
+        `Ticket.has_subsequent_manual_interaction` recognise it across both journals.
+
+        Parameters
+        ----------
+        tkt : Ticket
+            The ticket to comment on.
+        comment : str
+            The comment text, which the requester will see.
+        tool_name : str
+            Identifies the tool that posted this comment, included in the prefix.
+
+        Returns
+        -------
+        None
+        """
+        prefix = _note_prefix(tool_name)
+
+        ## Appends to `comments`, the journal ServiceNow shows as "Additional comments".
+        ## Writing `comments` and `work_notes` in one PATCH would put the same text in
+        ## both journals, so this deliberately sends only the one field.
+        resp = self.session.patch(
+            f"{self._base_api_url}/{self._TABLE}/{tkt.sys_id}",
+            json={"comments": prefix + comment},
         )
         resp.raise_for_status()
 

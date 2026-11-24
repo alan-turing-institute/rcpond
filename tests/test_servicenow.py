@@ -42,8 +42,14 @@ def _make_jwt(sub: str) -> str:
 
 @pytest.fixture()
 def dev_instance_config(monkeypatch, tmp_path) -> config.Config:
+    ## XDG_CONFIG_HOME is pointed at an empty tmp_path so the repo-root `.env` is the only
+    ## file that loads. The default XDG config names the *production* instance, and these
+    ## tests write to tickets.
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    return config.Config(".env")
+    ## `ServiceNow` reads none of the rules/templates config — only the URLs, auth mode,
+    ## query and ticket type. Requiring them here would make these tests fail when an
+    ## unrelated Jinja2 template broke, and would need a rules file none of them use.
+    return config.Config(".env", require_rules_and_templates=False)
 
 
 @pytest.fixture()
@@ -466,6 +472,93 @@ def test_parse_comment_display_values():
 
     assert len(actual_output) == len(expected_output)
     assert actual_output == expected_output
+
+
+## ── get_comments / post_comment ─────────────────────────────────────────────
+
+
+## A `comments` display-value string as ServiceNow returns it. Note the journal name:
+## `comments` is surfaced as "Additional comments", not "Work notes".
+_COMMENTS_DISPLAY_VALUE = (
+    "11/03/2026 13:32:41 - Joe Bloggs (Additional comments)\n"
+    "A reply from the requester\n"
+    "\n"
+    "11/03/2026 11:18:09 - RCPond (Additional comments)\n"
+    "An earlier comment\n"
+    "\n"
+)
+
+
+def test_get_comments_parses_the_comments_field(sn_instance, ticket):
+    """get_comments reads `comments` and parses it, mirroring get_work_notes."""
+    with patch.object(sn_instance, "_fetch_fields", return_value={"comments": _COMMENTS_DISPLAY_VALUE}) as mock_fetch:
+        result = sn_instance.get_comments(ticket)
+
+    ## It must request `comments` and nothing else — reading work_notes here would make
+    ## the two journals indistinguishable to callers.
+    mock_fetch.assert_called_once_with(ticket.sys_id, {"comments"})
+    assert result == [
+        NoteEntry(
+            datetime(2026, 3, 11, 13, 32, 41),
+            "Joe Bloggs",
+            "Additional comments",
+            "A reply from the requester",
+        ),
+        NoteEntry(datetime(2026, 3, 11, 11, 18, 9), "RCPond", "Additional comments", "An earlier comment"),
+    ]
+
+
+def test_get_comments_on_a_ticket_with_none(sn_instance, ticket):
+    """A ticket with no comments yields an empty list, not an error."""
+    with patch.object(sn_instance, "_fetch_fields", return_value={"comments": ""}):
+        assert sn_instance.get_comments(ticket) == []
+
+
+def test_post_comment_patches_only_the_comments_field(sn_instance, ticket):
+    """post_comment writes `comments`, and must not touch `work_notes`."""
+    sn_instance.post_comment(ticket, "Hello researcher", tool_name="post_freeform_comment")
+
+    sn_instance.session.patch.assert_called_once()
+    url = sn_instance.session.patch.call_args.args[0]
+    payload = sn_instance.session.patch.call_args.kwargs["json"]
+
+    assert url.endswith(f"/{ticket.sys_id}")
+    assert set(payload) == {"comments"}
+    assert payload["comments"].endswith("Hello researcher")
+
+
+def test_post_comment_is_recognised_as_an_rcpond_note(sn_instance, ticket):
+    """A comment RCPond posts must be identifiable as RCPond's own by the audit logic.
+
+    This is decision (a) in planning/post-comments.md: comments carry the same prefix as
+    work notes, so ``is_rcpond_processed``, ``rcpond_note_count`` and
+    ``has_subsequent_manual_interaction`` keep working for this field. If the prefix
+    format is ever changed, this is the test that should fail first.
+    """
+    sn_instance.post_comment(ticket, "Hello researcher", tool_name="post_freeform_comment")
+    posted = sn_instance.session.patch.call_args.kwargs["json"]["comments"]
+
+    entry = NoteEntry(datetime(2026, 1, 1, 12, 0, 0), "RCPond", "Additional comments", posted)
+    assert servicenow._is_rcpond_note(entry)
+    assert not servicenow._is_manual_note(entry)
+
+
+def test_post_comment_records_the_tool_name(sn_instance, ticket):
+    """The posting tool is recoverable from the comment, as it is for work notes."""
+    sn_instance.post_comment(ticket, "Hello researcher", tool_name="github_onboarding")
+    posted = sn_instance.session.patch.call_args.kwargs["json"]["comments"]
+
+    match = servicenow._RCPOND_TOOL_NAME_RE.match(posted)
+    assert match is not None
+    assert match.group(1) == "github_onboarding"
+
+
+def test_post_comment_raises_on_http_error(sn_instance, ticket):
+    """A failed write is not swallowed: comments reach a researcher, so silence is unsafe."""
+    sn_instance.session.patch.return_value.raise_for_status.side_effect = _requests.HTTPError("500")
+
+    with pytest.raises(_requests.HTTPError):
+        sn_instance.post_comment(ticket, "Hello researcher", tool_name="post_freeform_comment")
 
 
 ## ── is_rcpond_processed / is_rcpond_most_recent_process ─────────────────────
@@ -1229,6 +1322,31 @@ def test_post_note(dev_instance_sn):
     after_work_note_count = len(dev_instance_sn.get_work_notes(my_tkt))
 
     assert after_work_note_count == before_work_note_count + 2
+
+
+@pytest.mark.integration()
+def test_post_comment(dev_instance_sn):
+    """Comments append to `comments` and leave `work_notes` untouched.
+
+    Journal fields cannot be reverted, so this appends permanently to a Dev ticket — the
+    same precedent as ``test_post_note`` above. Comments are customer-visible, but email
+    notifications are disabled on the Dev instance (see planning/post-comments.md).
+    """
+    tickets = dev_instance_sn.get_tickets()
+
+    # get first alphanumeric ticket number
+    first_num = min([t.number for t in tickets])
+    my_tkt = [t for t in tickets if t.number == first_num].pop()
+
+    before_comment_count = len(dev_instance_sn.get_comments(my_tkt))
+    before_work_note_count = len(dev_instance_sn.get_work_notes(my_tkt))
+
+    dev_instance_sn.post_comment(my_tkt, "Test comment A", tool_name="post_freeform_comment")
+    dev_instance_sn.post_comment(my_tkt, "Test comment B", tool_name="post_freeform_comment")
+
+    assert len(dev_instance_sn.get_comments(my_tkt)) == before_comment_count + 2
+    ## The two journals are separate: writing one must not append to the other.
+    assert len(dev_instance_sn.get_work_notes(my_tkt)) == before_work_note_count
 
 
 @pytest.mark.integration()

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `ServiceNow.get_comments()` lists the additional comments on a ticket, the counterpart to `get_work_notes()`.
+- `ServiceNow.post_comment()` posts an additional comment to a ticket. Unlike a work note, a comment is visible to the requester and notifies them. Nothing in rcpond calls it yet; it is plumbing for a later change that will post comments from within existing tools. Comments carry the same rcpond prefix as work notes, so the existing "was this processed by rcpond" and "has a human replied since" checks work across both journals.
+
 ## [0.4.1] - 2026-11-17
 
 ### Added
