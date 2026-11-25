@@ -8,8 +8,9 @@ Public API
 ----------
 - ``HtmlServiceNow(html_dir)``: Construct from a directory of ``*.html`` files.
 - All read methods from ``ServiceNow`` are supported:
-  ``get_tickets()``, ``get_ticket()``, ``get_full_ticket()``, ``get_work_notes()``.
-- Write methods (``post_note()``, ``assign_to()``) are no-ops.
+  ``get_tickets()``, ``get_ticket()``, ``get_full_ticket()``, ``get_work_notes()``,
+  ``get_comments()``.
+- Write methods (``post_note()``, ``post_comment()``, ``assign_to()``) are no-ops.
 - ``get_assignee()`` returns an empty assignee dict — assignment state is not
   stored in the HTML export.
 
@@ -155,15 +156,53 @@ class HtmlServiceNow(ServiceNow):
         list[NoteEntry]
             One entry per work note, sorted chronologically (oldest first).
         """
+        return self._journal_entries(tkt, "work_notes", "Work notes")
+
+    def get_comments(self, tkt: Ticket) -> list[NoteEntry]:
+        """Return the additional comments for ``tkt`` extracted from the HTML activity log.
+
+        The counterpart to `get_work_notes`: same source, different ``field_name``. Without
+        this override the inherited implementation would reach for ``self.session``, which
+        this class does not have.
+
+        Parameters
+        ----------
+        tkt : Ticket
+            The ticket to look up.
+
+        Returns
+        -------
+        list[NoteEntry]
+            One entry per comment, sorted chronologically (oldest first).
+        """
+        return self._journal_entries(tkt, "comments", "Additional comments")
+
+    def _journal_entries(self, tkt: Ticket, field_name: str, default_label: str) -> list[NoteEntry]:
+        """Extract one journal's entries from the HTML activity log.
+
+        Parameters
+        ----------
+        tkt : Ticket
+            The ticket to look up.
+        field_name : str
+            The activity-log ``field_name`` to select (``work_notes`` or ``comments``).
+        default_label : str
+            Note type to use when the export does not carry a field label.
+
+        Returns
+        -------
+        list[NoteEntry]
+            Matching entries, sorted chronologically (oldest first).
+        """
         html_file = self._find_html_for_ticket(tkt)
         facts = extract_key_facts(html_file)
         activities = facts["activities"]
-        rows = activities[activities["field_name"] == "work_notes"].dropna(subset=["date", "text"])
+        rows = activities[activities["field_name"] == field_name].dropna(subset=["date", "text"])
         entries = [
             NoteEntry(
                 datetime_stamp=datetime.strptime(row["date"], "%d/%m/%Y %H:%M:%S"),
                 user=row["user"] or "",
-                note_type=row["field_label"] or "Work notes",
+                note_type=row["field_label"] or default_label,
                 content=row["text"],
             )
             for _, row in rows.iterrows()
@@ -192,6 +231,14 @@ class HtmlServiceNow(ServiceNow):
 
     def post_note(self, _tkt: Ticket, note: str = "", tool_name: str = "") -> None:
         """No-op — HTML source is read-only."""
+
+    def post_comment(self, _tkt: Ticket, comment: str = "", tool_name: str = "") -> None:
+        """No-op — HTML source is read-only.
+
+        Deliberately does *not* honour `ALLOW_COMMENTS_ON_SN_TICKETS`. That flag exists to
+        stop text reaching a researcher; this backend writes to nothing at all, so there is
+        nothing to gate and no reason to make a read-only run fail.
+        """
 
     def _attempt_assign_to(self, _ticket: Ticket, _assignee: str) -> None:
         """No-op — HTML source is read-only."""

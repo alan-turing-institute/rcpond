@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `ServiceNow.get_comments()` lists the additional comments on a ticket, the counterpart to `get_work_notes()`.
+- `ALLOW_COMMENTS_ON_SN_TICKETS` in `rcpond.servicenow` gates customer-visible comments. While it is False, `post_comment()` refuses with a `RuntimeError` rather than doing nothing quietly, so a caller is never told a comment was sent when it was not. Callers that want to carry on regardless — posting a work note instead, say — should check the flag and decide before calling.
+- `HtmlServiceNow.get_comments()` reads comments from a downloaded HTML export, and `post_comment()` is a no-op there as the other write methods already are. Without these, the HTML backend raised `AttributeError` for both.
 - `ServiceNow.post_comment()` posts an additional comment to a ticket. Unlike a work note, a comment is visible to the requester and notifies them. Nothing in rcpond calls it yet; it is plumbing for a later change that will post comments from within existing tools. Comments carry the same rcpond prefix as work notes, so the existing "was this processed by rcpond" and "has a human replied since" checks work across both journals.
 
 ## [0.4.1] - 2026-11-17

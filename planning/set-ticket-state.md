@@ -141,6 +141,13 @@ confirms it, echoing the record back with the old value:
 **Backing values, recovered incidentally.** `sys_choice` 404s through the APIM gateway, but
 `sysparm_display_value=all` exposes both halves of the field on ordinary records:
 
+> **Re-verified 2026-11-24.** The original probe built that URL as
+> `_base_api_url.rsplit("/", 1)[0] + "/sys_choice"`, which strips the trailing `/table` and
+> yields `.../api/now/sys_choice` — not a Table API path, so it would 404 anywhere. Retested
+> with the correct `.../api/now/table/sys_choice`: still 404, while the app table returns 200
+> on the same session. `sys_journal_field` and `sys_mention` 404 the same way. The conclusion
+> stands; the original evidence for it was weaker than it looked.
+
 **Complete as of 2026-11-19**, once Dev tickets in every state were identified (a Resolved one
 exists after all — `RES0001125`). Recovered read-only from 336 Dev tickets with
 `scripts/probe_field_writes.py --recover`:

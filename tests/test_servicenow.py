@@ -477,6 +477,24 @@ def test_parse_comment_display_values():
 ## ── get_comments / post_comment ─────────────────────────────────────────────
 
 
+@pytest.fixture()
+def _comments_enabled(monkeypatch):
+    """Open the customer-visible-comment gate for the duration of one test.
+
+    Every test here sets `ALLOW_COMMENTS_ON_SN_TICKETS` explicitly, in whichever direction
+    it needs, rather than relying on the module default. The default is expected to change
+    as this feature is rolled out, and a test that silently depends on it would start
+    passing or failing for reasons that have nothing to do with the code under test.
+    """
+    monkeypatch.setattr(servicenow, "ALLOW_COMMENTS_ON_SN_TICKETS", True)
+
+
+@pytest.fixture()
+def _comments_disabled(monkeypatch):
+    """Close the customer-visible-comment gate. See `_comments_enabled`."""
+    monkeypatch.setattr(servicenow, "ALLOW_COMMENTS_ON_SN_TICKETS", False)
+
+
 ## A `comments` display-value string as ServiceNow returns it. Note the journal name:
 ## `comments` is surfaced as "Additional comments", not "Work notes".
 _COMMENTS_DISPLAY_VALUE = (
@@ -514,6 +532,21 @@ def test_get_comments_on_a_ticket_with_none(sn_instance, ticket):
         assert sn_instance.get_comments(ticket) == []
 
 
+@pytest.mark.usefixtures("_comments_disabled")
+def test_post_comment_raises_when_the_gate_is_closed(sn_instance, ticket):
+    """With comments disabled, post_comment refuses loudly and writes nothing.
+
+    Refusing rather than quietly doing nothing is deliberate. A silent no-op is exactly the
+    failure mode that made the `state` field so expensive to diagnose: the caller is told
+    the write succeeded, the recipient never hears, and nothing looks wrong.
+    """
+    with pytest.raises(RuntimeError, match="ALLOW_COMMENTS_ON_SN_TICKETS"):
+        sn_instance.post_comment(ticket, "Hello researcher", tool_name="post_freeform_comment")
+
+    sn_instance.session.patch.assert_not_called()
+
+
+@pytest.mark.usefixtures("_comments_enabled")
 def test_post_comment_patches_only_the_comments_field(sn_instance, ticket):
     """post_comment writes `comments`, and must not touch `work_notes`."""
     sn_instance.post_comment(ticket, "Hello researcher", tool_name="post_freeform_comment")
@@ -527,6 +560,7 @@ def test_post_comment_patches_only_the_comments_field(sn_instance, ticket):
     assert payload["comments"].endswith("Hello researcher")
 
 
+@pytest.mark.usefixtures("_comments_enabled")
 def test_post_comment_is_recognised_as_an_rcpond_note(sn_instance, ticket):
     """A comment RCPond posts must be identifiable as RCPond's own by the audit logic.
 
@@ -543,6 +577,7 @@ def test_post_comment_is_recognised_as_an_rcpond_note(sn_instance, ticket):
     assert not servicenow._is_manual_note(entry)
 
 
+@pytest.mark.usefixtures("_comments_enabled")
 def test_post_comment_records_the_tool_name(sn_instance, ticket):
     """The posting tool is recoverable from the comment, as it is for work notes."""
     sn_instance.post_comment(ticket, "Hello researcher", tool_name="github_onboarding")
@@ -553,6 +588,7 @@ def test_post_comment_records_the_tool_name(sn_instance, ticket):
     assert match.group(1) == "github_onboarding"
 
 
+@pytest.mark.usefixtures("_comments_enabled")
 def test_post_comment_raises_on_http_error(sn_instance, ticket):
     """A failed write is not swallowed: comments reach a researcher, so silence is unsafe."""
     sn_instance.session.patch.return_value.raise_for_status.side_effect = _requests.HTTPError("500")
@@ -1325,6 +1361,7 @@ def test_post_note(dev_instance_sn):
 
 
 @pytest.mark.integration()
+@pytest.mark.usefixtures("_comments_enabled")
 def test_post_comment(dev_instance_sn):
     """Comments append to `comments` and leave `work_notes` untouched.
 

@@ -673,6 +673,15 @@ def _match_heuristics(source: Ticket, candidate: Ticket) -> list[str]:
 ## Interface to this module
 
 
+## Feature toggle: may RCPond post a customer-visible comment to a ServiceNow ticket?
+## Comments notify the requester, so this is the only thing RCPond writes that reaches
+## someone outside the operator team. `post_comment` raises when this is False rather than
+## doing nothing quietly — a silent no-op is the failure mode that made the unwritable
+## `state` field so expensive to diagnose. Callers that want to degrade gracefully (posting
+## a work note instead, say) should read this flag and decide before calling.
+ALLOW_COMMENTS_ON_SN_TICKETS = False
+
+
 class ServiceNow:
     """Simple wrapper around limited parts of the ServiceNow API."""
 
@@ -1047,7 +1056,22 @@ class ServiceNow:
         Returns
         -------
         None
+
+        Raises
+        ------
+        RuntimeError
+            If `ALLOW_COMMENTS_ON_SN_TICKETS` is False. The refusal is deliberately loud:
+            a caller that wants to carry on without commenting should check the flag
+            itself and choose, rather than have this method decide silently.
         """
+        if not ALLOW_COMMENTS_ON_SN_TICKETS:
+            msg = (
+                "Refusing to post a customer-visible comment: ALLOW_COMMENTS_ON_SN_TICKETS "
+                "is False. Comments notify the requester. Set the flag in rcpond.servicenow "
+                "to enable them, or post a work note instead."
+            )
+            raise RuntimeError(msg)
+
         prefix = _note_prefix(tool_name)
 
         ## Appends to `comments`, the journal ServiceNow shows as "Additional comments".

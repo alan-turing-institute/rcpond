@@ -163,6 +163,36 @@ that the Table API does not honour at all.
 - **Fail:** the identifier appears as literal text. Templates must not promise tagging, and
   Step 3 shrinks accordingly.
 
+#### Spike attempt 1 — 2026-11-24 — blocked, not answered
+
+Run with `scripts/probe_mention.py`. **Neither pass nor fail could be established**, because
+both ways of verifying a mention are unreachable through the APIM gateway:
+
+| Table | What it would have told us | Result |
+|---|---|---|
+| `sys_mention` | that a mention was actually recorded — this is what drives the notification | **HTTP 404** |
+| `sys_journal_field` | the raw stored markup, before display rendering | **HTTP 404** |
+| `x_tati_resmgt_research` | control: auth and gateway path are fine | HTTP 200 |
+
+Writing candidate formats was therefore abandoned: a journal entry that merely *looks* like a
+mention notifies nobody, and without `sys_mention` there is no way to tell the two apart. The
+only readable view is the concatenated display value, which renders and may strip markup.
+
+**No example exists to copy, either.** A scan of all 731 tickets in the 2026-11-08 production
+dump found 15 containing `@Name` strings; all five inspected in the WebUI turned out to be
+pasted email threads, not mentions. So nobody has demonstrably used this feature on this table.
+
+**Two things follow.**
+
+1. **The decisive method is a browser HAR capture**, exactly as it was for the state question
+   (planning/set-ticket-state.md, Step 0b). Tag a user in the Dev WebUI with the network log
+   recording, then read the payload. That gives the real format rather than a guess, and the
+   comment can afterwards be read back through the API to see what survives.
+2. **First, confirm tagging is wanted.** Step 3 says templates should "ideally" carry user
+   identifiers. If the operators have not tagged anyone in 731 tickets, this may be solving a
+   problem they do not have — which is a cheaper question to answer than the HAR capture, and
+   should be asked first.
+
 ### PR 2 — templates, and wiring into existing tools
 
 Needs the spike result, and needs the arranged production test before anything runs
