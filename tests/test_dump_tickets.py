@@ -20,7 +20,7 @@ from rcpond import command
 from rcpond.servicenow import (
     ComputeAllocationRequestTicket,
     Ticket,
-    TicketState,
+    TicketStateFilter,
     all_registered_types_query,
 )
 
@@ -101,7 +101,7 @@ def test_fetches_every_registered_type_in_every_state(tmp_path):
     """The configured query is one type's, so without the explicit query the dump would
     silently hold only that type. Closed tickets are the bulk of the history."""
     _run(tmp_path, [_base("RES0000001")])[1].get_tickets.assert_called_once_with(
-        state=TicketState.all_including_closed,
+        state=TicketStateFilter.all_including_closed,
         query=all_registered_types_query(),
     )
 

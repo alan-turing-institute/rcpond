@@ -2,7 +2,7 @@
 
 Each command has a specific policy:
 
-- display_all_tickets:      honours an explicit state argument (TicketState)
+- display_all_tickets:      honours an explicit state argument (TicketStateFilter)
 - display_single_ticket:    uses get_ticket(), which always searches all tickets
 - process_next_ticket:      only ever selects from unassigned tickets
 - process_specific_ticket:  uses get_ticket(), which always searches all tickets
@@ -19,7 +19,7 @@ from rcpond import command
 from rcpond.command import _MAX_ITERATIONS, ReplyMode, _process_ticket
 from rcpond.config import Config
 from rcpond.llm import LLM, LLMResponse
-from rcpond.servicenow import ComputeAllocationRequestTicket, Ticket, TicketState, _note_prefix
+from rcpond.servicenow import ComputeAllocationRequestTicket, Ticket, TicketStateFilter, _note_prefix
 
 _WORKING_TEMPLATES_DIR = Path("tests/fixtures/working_templates")
 _MOCK_TEMPLATES_DIR = Path("tests/fixtures/mock_templates")
@@ -78,19 +78,19 @@ def ticket():
 ## ── display_all_tickets ─────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("state", list(TicketState))
+@pytest.mark.parametrize("state", list(TicketStateFilter))
 def test_display_all_tickets_passes_state_to_get_tickets(cfg, state):
-    """display_all_tickets passes the given TicketState through to get_tickets."""
+    """display_all_tickets passes the given TicketStateFilter through to get_tickets."""
     with patch("rcpond.command.ServiceNow") as MockSN:
         command.display_all_tickets(state=state, config=cfg)
     MockSN.return_value.get_tickets.assert_called_once_with(state=state)
 
 
 def test_display_all_tickets_defaults_to_user_focus(cfg):
-    """display_all_tickets defaults to TicketState.user_focus when no state is given."""
+    """display_all_tickets defaults to TicketStateFilter.user_focus when no state is given."""
     with patch("rcpond.command.ServiceNow") as MockSN:
         command.display_all_tickets(config=cfg)
-    MockSN.return_value.get_tickets.assert_called_once_with(state=TicketState.user_focus)
+    MockSN.return_value.get_tickets.assert_called_once_with(state=TicketStateFilter.user_focus)
 
 
 ## ── display_single_ticket ───────────────────────────────────────────────────

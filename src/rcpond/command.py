@@ -41,7 +41,7 @@ from rcpond.servicenow import (
     ResearchLeaversGitHubTicket,
     ServiceNow,
     Ticket,
-    TicketState,
+    TicketStateFilter,
     all_registered_types_query,
 )
 from rcpond.ticket_dumps import write_dump
@@ -261,7 +261,7 @@ def check_templates(config: Config) -> bool:
     return all(passed for _, passed, _ in results)
 
 
-def display_all_tickets(state: TicketState = TicketState.user_focus, config: Config | None = None):
+def display_all_tickets(state: TicketStateFilter = TicketStateFilter.user_focus, config: Config | None = None):
     """Display tickets from ServiceNow filtered by state."""
     config = config or Config()
     service_now: ServiceNow = ServiceNow(config)
@@ -396,7 +396,7 @@ def dump_tickets(out_file: Path | None = None, limit: int | None = None, config:
     query = all_registered_types_query()
     ## The configured query is a single type's, so without the explicit cross-type query the
     ## dump would silently hold only that type.
-    tickets = service_now.get_tickets(state=TicketState.all_including_closed, query=query)
+    tickets = service_now.get_tickets(state=TicketStateFilter.all_including_closed, query=query)
 
     ## Sort before slicing, not merely before writing: it is what makes --limit reproducible,
     ## since ServiceNow's result order is not guaranteed stable between runs.
@@ -477,7 +477,7 @@ def analytics(config: Config | None = None, refresh: bool = False, period: "Peri
     ## query belongs to a single type (or falls back to the default type's), which would
     ## silently narrow the report to that one type.
     tickets = service_now.get_tickets(
-        state=TicketState.all_including_closed,
+        state=TicketStateFilter.all_including_closed,
         query=all_registered_types_query(),
     )
     report = render_markdown(build_ticket_frame(tickets), period)
@@ -598,7 +598,7 @@ def batch_evaluate_tickets(in_dir: Path, out_file: Path, num_runs: int = 1, conf
     llm: LLM = LLM(config)
 
     ## Pre-filter to Azure tickets only
-    all_tickets = service_now.get_tickets(state=TicketState.all_open)
+    all_tickets = service_now.get_tickets(state=TicketStateFilter.all_open)
     azure_tickets = []
     for ticket in all_tickets:
         # TODO: Temporary, an messy way to limit tickets to only those related to Azure

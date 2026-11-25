@@ -40,7 +40,7 @@ from rich import print
 from rcpond import command
 from rcpond.command import ReplyMode
 from rcpond.config import Config
-from rcpond.servicenow import DEFAULT_TICKET_TYPE, TicketState
+from rcpond.servicenow import DEFAULT_TICKET_TYPE, TicketStateFilter
 
 cli = typer.Typer(name="rcpond", no_args_is_help=True)
 
@@ -250,7 +250,7 @@ def whoami(ctx: typer.Context) -> None:
 @cli.command()
 def display_all(
     ctx: typer.Context,
-    ticket_state: TicketState = TicketState.user_focus,
+    ticket_state: TicketStateFilter = TicketStateFilter.user_focus,
     ticket_type: TicketTypeOption = DEFAULT_TICKET_TYPE,
 ):
     """Display tickets from ServiceNow filtered by --ticket-state and --ticket-type.

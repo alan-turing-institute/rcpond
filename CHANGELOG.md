@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `TicketState` is renamed to `TicketStateFilter`. It selects *which tickets `get_tickets()` returns* — its members are `user_focus`, `all_open` and `all_including_closed`, none of which is a ticket state — so the old name described something it was not, and collided with the actual `state` field on a ticket. `rcpond.servicenow.TicketState` still resolves, with a `DeprecationWarning`, and will be removed in a future release.
+
 ### Added
 
 - `ServiceNow.get_comments()` lists the additional comments on a ticket, the counterpart to `get_work_notes()`.

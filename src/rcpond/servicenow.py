@@ -3,7 +3,7 @@
 Provides a class, `ServiceNow`, which wraps the ServiceNow
 API. The only methods are:
 
-- `ServiceNow.get_tickets()`: Get a list of tickets filtered by ``TicketState``;
+- `ServiceNow.get_tickets()`: Get a list of tickets filtered by ``TicketStateFilter``;
 - `ServiceNow.get_ticket()`: Get a single ticket by its ticket number (e.g. ``”RES0001234”``);
 - `ServiceNow.get_full_ticket()`: Get full details of a ticket;
 - `ServiceNow.find_related_tickets()`: Find tickets related to a given ticket via field-matching heuristics;
@@ -384,10 +384,10 @@ def ticket_type_key(ticket: Ticket) -> str | None:
 _CLOSED_TICKET_STATES = frozenset({"Closed", "Resolved", "Cancelled"})
 
 
-class TicketState(Enum):
+class TicketStateFilter(Enum):
     """Controls which tickets get_tickets() returns based on their state.
 
-    >>> sn.get_tickets(state=TicketState.user_focus)
+    >>> sn.get_tickets(state=TicketStateFilter.user_focus)
     """
 
     user_focus = "user_focus"
@@ -411,22 +411,28 @@ class RelatedTicketMatch:
     """Human-readable descriptions of each matching heuristic, e.g. ``('finance_code:TUR-2023-001',)``."""
 
 
-## Backward compatibility alias for pre-rename imports.
+## Backward compatibility aliases for pre-rename imports.
+_DEPRECATED_ALIASES: dict[str, str] = {
+    "FullTicket": "ComputeAllocationRequestTicket",
+    "TicketState": "TicketStateFilter",
+}
+
+
 def __getattr__(name: str):
-    if name == "FullTicket":
+    replacement = _DEPRECATED_ALIASES.get(name)
+    if replacement is not None:
         warnings.warn(
-            "FullTicket is deprecated and will be removed in a future release; "
-            "use ComputeAllocationRequestTicket instead.",
+            f"{name} is deprecated and will be removed in a future release; " f"use {replacement} instead.",
             DeprecationWarning,
             stacklevel=2,
         )
-        return ComputeAllocationRequestTicket
+        return globals()[replacement]
     msg = f"module {__name__!r} has no attribute {name!r}"
     raise AttributeError(msg)
 
 
 def __dir__() -> list[str]:
-    return sorted(globals().keys() | {"FullTicket"})
+    return sorted(globals().keys() | _DEPRECATED_ALIASES.keys())
 
 
 ## --------------------------------------------------------------------------------
@@ -778,12 +784,14 @@ class ServiceNow:
         """True when requests carry an OAuth bearer token rather than only a gateway key."""
         return self._auth_mode is not AuthMode.token
 
-    def get_tickets(self, state: TicketState = TicketState.user_focus, query: str | None = None) -> list[Ticket]:
+    def get_tickets(
+        self, state: TicketStateFilter = TicketStateFilter.user_focus, query: str | None = None
+    ) -> list[Ticket]:
         """Get tickets that are applications for HPC/Azure credits.
 
         Parameters
         ----------
-        state : TicketState
+        state : TicketStateFilter
             Controls which tickets are returned:
             - ``user_focus`` (default): curated shortlist relevant to the current user or bot.
             - ``all_open``: all non-closed/resolved/cancelled tickets.
@@ -807,7 +815,7 @@ class ServiceNow:
         tickets = [Ticket(**_extract_ticket_fields(tkt, ticket_fields)) for tkt in resp.json()["result"]]
         self._assert_expected_ticket_type(tickets)
 
-        if state is TicketState.all_including_closed:
+        if state is TicketStateFilter.all_including_closed:
             return tickets
 
         ## user_focus and all_open both exclude closed/resolved/cancelled
@@ -816,7 +824,7 @@ class ServiceNow:
         ## Filtering keys on whether a human is behind the session, not on whether OAuth is
         ## in use: a Client Credentials session is OAuth-authenticated but is a bot, and
         ## must see exactly what static token auth sees.
-        if state is TicketState.all_open:
+        if state is TicketStateFilter.all_open:
             ## Bot: exclude tickets RCPond already handled; interactive: everything non-closed
             if not self._acts_as_user:
                 tickets = [t for t in tickets if not t.is_rcpond_processed()]
@@ -847,7 +855,9 @@ class ServiceNow:
             If no ticket matches, or if more than one matches (should not happen
             in practice — ServiceNow enforces uniqueness, but guarded defensively).
         """
-        matched = [t for t in self.get_tickets(state=TicketState.all_including_closed) if t.number == ticket_number]
+        matched = [
+            t for t in self.get_tickets(state=TicketStateFilter.all_including_closed) if t.number == ticket_number
+        ]
         if len(matched) == 0:
             err_msg = f"Ticket '{ticket_number}' not found."
             raise ValueError(err_msg)
@@ -932,7 +942,7 @@ class ServiceNow:
             One entry per related ticket, each with the matched heuristic descriptions.
             The source ticket itself is never included.
         """
-        all_tickets = self.get_tickets(state=TicketState.all_including_closed)
+        all_tickets = self.get_tickets(state=TicketStateFilter.all_including_closed)
         candidates = [t for t in all_tickets if t.number != ticket.number]
 
         if len(candidates) > 50:

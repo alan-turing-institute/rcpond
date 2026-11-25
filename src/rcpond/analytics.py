@@ -102,7 +102,7 @@ def build_ticket_frame(tickets: list[Ticket]) -> pd.DataFrame:
     ----------
     tickets : list[Ticket]
         Base tickets with ``work_notes``/``comments``/``state``/``opened_at`` populated,
-        e.g. from ``ServiceNow.get_tickets(state=TicketState.all_including_closed)``.
+        e.g. from ``ServiceNow.get_tickets(state=TicketStateFilter.all_including_closed)``.
 
     Returns
     -------

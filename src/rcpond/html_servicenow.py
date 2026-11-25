@@ -27,7 +27,7 @@ from datetime import datetime
 from pathlib import Path
 
 from rcpond.parse_html import extract_key_facts, parse_ticket_html
-from rcpond.servicenow import ComputeAllocationRequestTicket, NoteEntry, ServiceNow, Ticket, TicketState
+from rcpond.servicenow import ComputeAllocationRequestTicket, NoteEntry, ServiceNow, Ticket, TicketStateFilter
 
 ## ---- Interface to this module ----
 
@@ -87,12 +87,14 @@ class HtmlServiceNow(ServiceNow):
 
     ## ---- Read methods ----
 
-    def get_tickets(self, state: TicketState = TicketState.user_focus, query: str | None = None) -> list[Ticket]:
+    def get_tickets(
+        self, state: TicketStateFilter = TicketStateFilter.user_focus, query: str | None = None
+    ) -> list[Ticket]:
         """Return a ``ComputeAllocationRequestTicket`` for each HTML file in ``html_dir``.
 
         Parameters
         ----------
-        state : TicketState
+        state : TicketStateFilter
             ``user_focus``: only unassigned tickets are returned.
             ``all_open`` or ``all_including_closed``: all tickets regardless of assignment.
         query : str | None
@@ -118,7 +120,7 @@ class HtmlServiceNow(ServiceNow):
         for f in sorted(self._html_dir.glob("*.html")):
             facts = extract_key_facts(f)
             is_assigned = bool(facts["assigned_to"]["display_value"])
-            if is_assigned and state is TicketState.user_focus:
+            if is_assigned and state is TicketStateFilter.user_focus:
                 continue
             tickets.append(parse_ticket_html(f))
         return tickets

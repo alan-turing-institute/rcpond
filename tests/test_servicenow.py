@@ -19,7 +19,7 @@ from rcpond.servicenow import (
     RelatedTicketMatch,
     ServiceNow,
     Ticket,
-    TicketState,
+    TicketStateFilter,
 )
 
 
@@ -31,6 +31,22 @@ def test_fullticket_alias_warns_and_resolves_to_new_class():
 
 def test_fullticket_alias_is_listed_in_dir():
     assert "FullTicket" in dir(servicenow)
+
+
+def test_ticketstate_alias_warns_and_resolves_to_new_enum():
+    with pytest.warns(DeprecationWarning, match="TicketState is deprecated"):
+        alias = servicenow.TicketState
+    assert alias is TicketStateFilter
+
+
+def test_ticketstate_alias_is_listed_in_dir():
+    assert "TicketState" in dir(servicenow)
+
+
+def test_unknown_attribute_still_raises():
+    """The alias table must not turn a typo into a silent miss."""
+    with pytest.raises(AttributeError, match="no attribute 'NoSuchName'"):
+        _ = servicenow.NoSuchName
 
 
 def _make_jwt(sub: str) -> str:
@@ -883,7 +899,7 @@ def _setup_session(sn_instance, raw_tickets: list[dict]) -> None:
     sn_instance.session.get.return_value.raise_for_status = MagicMock()
 
 
-## OAuth/bot behaviour across TicketState values.
+## OAuth/bot behaviour across TicketStateFilter values.
 
 _COMMON_RAW_TICKETS = [
     _raw_ticket(number="unassigned_new", state="New", assigned_to=""),
@@ -926,13 +942,13 @@ _BOT_USER_FOCUS = {"unassigned_new", "human_note", "unassigned_in_progress"}
 @pytest.mark.parametrize(
     ("auth_mode", "state", "expected"),
     [
-        (AuthMode.oauth_user, TicketState.all_open, _INTERACTIVE_ALL_OPEN),
-        (AuthMode.oauth_user, TicketState.user_focus, _INTERACTIVE_USER_FOCUS),
-        (AuthMode.token, TicketState.all_open, _BOT_ALL_OPEN),
-        (AuthMode.token, TicketState.user_focus, _BOT_USER_FOCUS),
+        (AuthMode.oauth_user, TicketStateFilter.all_open, _INTERACTIVE_ALL_OPEN),
+        (AuthMode.oauth_user, TicketStateFilter.user_focus, _INTERACTIVE_USER_FOCUS),
+        (AuthMode.token, TicketStateFilter.all_open, _BOT_ALL_OPEN),
+        (AuthMode.token, TicketStateFilter.user_focus, _BOT_USER_FOCUS),
         ## Same expectations as static token, deliberately:
-        (AuthMode.oauth_client_credentials, TicketState.all_open, _BOT_ALL_OPEN),
-        (AuthMode.oauth_client_credentials, TicketState.user_focus, _BOT_USER_FOCUS),
+        (AuthMode.oauth_client_credentials, TicketStateFilter.all_open, _BOT_ALL_OPEN),
+        (AuthMode.oauth_client_credentials, TicketStateFilter.user_focus, _BOT_USER_FOCUS),
     ],
     ids=[
         "interactive_all_open",
@@ -1015,7 +1031,7 @@ def test_get_tickets_uses_an_explicit_query_when_given():
     sn = _make_sn()
     _setup_session(sn, [_raw_ticket(number="ok")])
 
-    sn.get_tickets(state=TicketState.all_including_closed, query="short_description=A^ORshort_description=B")
+    sn.get_tickets(state=TicketStateFilter.all_including_closed, query="short_description=A^ORshort_description=B")
 
     assert sn.session.get.call_args.kwargs["params"]["sysparm_query"] == "short_description=A^ORshort_description=B"
 
@@ -1024,7 +1040,7 @@ def test_get_tickets_uses_the_configured_query_by_default():
     sn = _make_sn()
     _setup_session(sn, [_raw_ticket(number="ok")])
 
-    sn.get_tickets(state=TicketState.all_including_closed)
+    sn.get_tickets(state=TicketStateFilter.all_including_closed)
 
     assert sn.session.get.call_args.kwargs["params"]["sysparm_query"] == _TEST_QUERY
 
@@ -1045,7 +1061,7 @@ def test_get_tickets_rejects_a_ticket_of_another_type():
     _setup_session(sn, [_raw_ticket(number="ok"), _FOREIGN_TYPE_TICKET])
 
     with pytest.raises(ValueError, match="foreign_type"):
-        sn.get_tickets(state=TicketState.all_open)
+        sn.get_tickets(state=TicketStateFilter.all_open)
 
 
 def test_get_tickets_rejects_an_unclassifiable_ticket():
@@ -1057,7 +1073,7 @@ def test_get_tickets_rejects_an_unclassifiable_ticket():
     _setup_session(sn, [_raw_ticket(number="ok"), _UNCLASSIFIABLE_TICKET])
 
     with pytest.raises(ValueError, match="unknown_type"):
-        sn.get_tickets(state=TicketState.all_open)
+        sn.get_tickets(state=TicketStateFilter.all_open)
 
 
 def test_get_tickets_error_names_the_expected_type():
@@ -1066,14 +1082,14 @@ def test_get_tickets_error_names_the_expected_type():
     _setup_session(sn, [_FOREIGN_TYPE_TICKET])
 
     with pytest.raises(ValueError, match="compute_allocation_request"):
-        sn.get_tickets(state=TicketState.all_open)
+        sn.get_tickets(state=TicketStateFilter.all_open)
 
 
 def test_get_tickets_accepts_tickets_of_the_expected_type():
     sn = _make_sn(ticket_type="compute_allocation_request")
     _setup_session(sn, _COMMON_RAW_TICKETS)
 
-    tickets = sn.get_tickets(state=TicketState.all_including_closed)
+    tickets = sn.get_tickets(state=TicketStateFilter.all_including_closed)
 
     assert len(tickets) == len(_COMMON_RAW_TICKETS)
 
@@ -1083,18 +1099,18 @@ def test_get_tickets_skips_the_check_without_an_expected_type():
     sn = _make_sn(ticket_type=None)
     _setup_session(sn, [_raw_ticket(number="ok"), _FOREIGN_TYPE_TICKET, _UNCLASSIFIABLE_TICKET])
 
-    tickets = sn.get_tickets(state=TicketState.all_including_closed)
+    tickets = sn.get_tickets(state=TicketStateFilter.all_including_closed)
 
     assert {t.number for t in tickets} == {"ok", "foreign_type", "unknown_type"}
 
 
 def test_get_tickets_all_including_closed_returns_everything(sn_instance):
-    """TicketState.all_including_closed bypasses all filters: returns every ticket regardless of state or assignment."""
+    """TicketStateFilter.all_including_closed bypasses all filters: returns every ticket regardless of state or assignment."""
 
     assert sn_instance._auth_mode is AuthMode.token
 
     _setup_session(sn_instance, _COMMON_RAW_TICKETS)
-    tickets = sn_instance.get_tickets(state=TicketState.all_including_closed)
+    tickets = sn_instance.get_tickets(state=TicketStateFilter.all_including_closed)
 
     assert {t.number for t in tickets} == {
         "unassigned_new",
@@ -1251,7 +1267,7 @@ def test_sys_user_lookup_via_apim(dev_instance_sn):
         pytest.skip("Requires OAuth authentication")
 
     ## Get a known sys_id from an assigned ticket's assignee field
-    all_tickets = dev_instance_sn.get_tickets(TicketState.all_open)
+    all_tickets = dev_instance_sn.get_tickets(TicketStateFilter.all_open)
     assigned = [t for t in all_tickets if t.assigned_to]
     if not assigned:
         pytest.skip("No assigned tickets available to extract a sys_id from")
@@ -1389,7 +1405,7 @@ def test_post_comment(dev_instance_sn):
 @pytest.mark.integration()
 def test_get_tickets(dev_instance_sn):
     unassigned_tickets = dev_instance_sn.get_tickets()
-    all_tickets = dev_instance_sn.get_tickets(TicketState.all_open)
+    all_tickets = dev_instance_sn.get_tickets(TicketStateFilter.all_open)
 
     assert len(all_tickets) >= len(unassigned_tickets)
 
@@ -1398,7 +1414,7 @@ def test_get_tickets(dev_instance_sn):
 def test_change_assignee(dev_instance_sn):
     # Attempt to select one assigned and on unassigned ticket
     unassigned_tickets = dev_instance_sn.get_tickets()
-    all_tickets = dev_instance_sn.get_tickets(TicketState.all_open)
+    all_tickets = dev_instance_sn.get_tickets(TicketStateFilter.all_open)
 
     unassigned_sys_ids = {t.sys_id for t in unassigned_tickets}
     assigned_tickets = [t for t in all_tickets if t.sys_id not in unassigned_sys_ids]
