@@ -1,6 +1,7 @@
 # Post comments
 
-**Status: DRAFT.** Decisions taken; ready to start PR 1.
+**Status: DRAFT.** PR 1 merged. Tagging retired and replaced by `watch_list` (2026-11-25);
+the last technical unknown is now answered, so PR 2 is unblocked bar the production test.
 
 Add read and write wrappers for the `comments` field, mirroring the existing `work_notes`
 pair.
@@ -80,7 +81,7 @@ The two requirements pull against each other:
 
 Option (a) keeps the audit logic untouched, which is why it is the starting assumption.
 
-### Step 3 - Notifying and tagging users
+### Step 3 - Notifying users
 
 Within this PR the `post_comment()` function will only be called within existing Tools (eg the
 GitHubOnboardingTool). In practice the messages will be rendered using jinja2 templates (which
@@ -101,15 +102,23 @@ LLM-composed content to review at the point of sending, so a confirmation step w
 approving a string that was already fixed when the template was written. The safeguards are
 placed elsewhere — a config toggle, and a supervised first production run (see Sequencing).
 
-With the ServiceNow WebUI, it is possible to tag individuals or groups. Ideally it would be
-possible to specify user-identifiers in the jinja templates and that these users/groups will be
-tagged when the message is posted. Some experimentation is required to test if/how this can be
-achieved; the spike under Sequencing defines what counts as an answer.
+#### Notifying someone other than the requester — settled 2026-11-25
 
-For testing:
- - on the Dev instance, tagging is possible, but email notifications are disabled.
- - on the Production instance, email notifications are enabled. A specific ticket and willing
-   test user can be arranged in due course.
+The users asked for a way to prompt an email to someone else. This was originally scoped as
+*tagging* (`@<name>` in a comment). **Tagging is not the mechanism, and is no longer part of
+this plan.** Manual testing on production established that:
+
+- tagging a person with `@<name>` in a comment does **not** send them mail;
+- adding them to the ticket's **`watch_list`** and then commenting **does** — with or without
+  any `@<name>`.
+
+That retires the blocked spike below and replaces it with a narrower question — *can RCPond
+write `watch_list`?* — which `scripts/probe_watch_list.py` has now answered: **yes, on both
+instances.** See "Spike attempt 2" for the evidence and the constraints that come with it.
+
+The practical consequence for templates: a template does not carry a tag, it carries (or the
+calling tool supplies) an **email address to add to the watch list** before the comment is
+posted. Notification is then a property of the ticket, not of the comment text.
 
 ### Step 4 — tests, docs, changelog
 
@@ -149,7 +158,12 @@ Nothing calls `post_comment()` yet. Production behaviour is unchanged and nothin
 external person, so this half can merge without waiting on either unknown below. It is also
 the half `set-ticket-state` will need.
 
-### Spike, in parallel — can the Table API tag a user?
+### Spike, in parallel — can the Table API tag a user? — **SUPERSEDED**
+
+> **Superseded 2026-11-25.** The question below is the wrong one: tagging does not notify
+> anybody (see Step 3). It is kept because attempt 1's findings about what the APIM gateway
+> exposes remain true and are relied on elsewhere. The live question, and its answer, are in
+> "Spike attempt 2".
 
 Run this *before* writing any templates, not while writing them. It is the only real unknown
 left, and it has the same shape as Step 0 in planning/set-ticket-state.md: a cheap experiment
@@ -193,17 +207,64 @@ pasted email threads, not mentions. So nobody has demonstrably used this feature
    problem they do not have — which is a cheaper question to answer than the HAR capture, and
    should be asked first.
 
+#### Spike attempt 2 — 2026-11-25 — ANSWERED
+
+Run with `scripts/probe_watch_list.py`, against Dev `RES0001369` and then production
+`RES0001933` in a single invocation. Both stages' controls behaved as expected (`state`
+NOT-WRITABLE, `assigned_to` WRITABLE), so the verdicts are trustworthy.
+
+| Question | Result |
+|---|---|
+| Is `watch_list` readable? | **Yes**, both instances. Production already held one watcher. |
+| Can it be written with a `sys_user` sys_id? | **WRITABLE**, both instances |
+| Can it be written with a bare email address? | **WRITABLE**, both instances — ServiceNow resolves the address to the right user server-side |
+| `GET /sys_user` (collection) | **HTTP 404** — no search by name or email |
+| `GET /sys_user/{sys_id}` (single record) | HTTP 200 — resolves the *wrong* direction |
+| Dot-walk `?sysparm_query=assigned_to.email=<addr>` on the app table | **HTTP 200**, returns the sys_id |
+
+**The feature is unblocked and needs nothing from the API owner.** Write the email address
+straight into `watch_list`; ServiceNow does the resolution. No `sys_user` access is required.
+
+Three constraints that fall out of the run, all of which bind the implementation:
+
+1. **`watch_list` is overwritten by a PATCH, not appended to.** The production probe replaced
+   an existing watcher with its probe value — and returned HTTP 200 while doing so. Adding a
+   watcher must therefore be **read–modify–write**: fetch the current list, append, write the
+   whole list back. Done naively, adding one watcher silently un-watches everyone else, and
+   nothing in the response indicates it happened.
+2. **The email route is proven only for addresses that map to a real `sys_user`.** What an
+   unknown address does — stored verbatim, or silently dropped — is untested. Silently dropped
+   is the dangerous case: the comment still posts, and nobody is notified. Worth a deliberate
+   test before any template depends on an address RCPond has not already seen on the ticket.
+3. **Order matters.** The watcher must be on the list *before* the comment is posted; the
+   notification fires on the comment, not on the watch-list change.
+
+A fallback exists if the email route ever stops working: the dot-walk query resolves an
+address to a sys_id using only the table the gateway already exposes, for anyone appearing in
+a reference field on any ticket. Worth recording, not worth building now.
+
+**Not retested, and not in doubt:** that a watcher receives mail when a comment is posted.
+The manual production test of 2026-11-25 established it.
+
 ### PR 2 — templates, and wiring into existing tools
 
-Needs the spike result, and needs the arranged production test before anything runs
-unattended. Two constraints on it:
+The spike is now answered (attempt 2), so this is unblocked bar the arranged production test.
+Constraints on it:
 
 - **The first production comment must be a single manual invocation**, not a tool run. The
   first email to a researcher should be deliberate and watched. This is also the run that
   confirms who actually receives mail.
-- **Put `post_comment()` behind a config toggle.** This is the first thing RCPond does that
-  reaches a researcher; a flag disables it in production without needing a revert. The repo
-  already has the pattern (`MATCH_ON_CORE_FUNDING_FINANCE` in `servicenow.py`).
+- **Put `post_comment()` behind a config toggle.** Done — `ALLOW_COMMENTS_ON_SN_TICKETS` in
+  `servicenow.py`, which `post_comment()` raises on when False. Note that nothing *enforces*
+  that a caller checks the flag first: a tool that forgets will crash rather than degrade.
+  Tools that want to degrade gracefully (posting a work note instead, say) must read the flag
+  and decide before calling.
+- **Adding a watcher needs its own wrapper, and it must read–modify–write.** See Spike attempt
+  2, constraint 1. This is the one place in the feature where the obvious implementation is
+  silently destructive, so it wants a test that starts from a non-empty watch list — an empty
+  one cannot tell appending from overwriting.
+- **Watch list before comment.** The notification fires on the comment; a watcher added
+  afterwards gets nothing.
 
 ### Then `set-ticket-state`
 
