@@ -246,6 +246,72 @@ a reference field on any ticket. Worth recording, not worth building now.
 **Not retested, and not in doubt:** that a watcher receives mail when a comment is posted.
 The manual production test of 2026-11-25 established it.
 
+### PR 1b — watch-list plumbing, with no callers
+
+Same shape as PR 1, and mergeable for the same reason: nothing calls it, so nothing reaches a
+researcher. `post_comment` work does not block on it.
+
+```python
+def get_watchers(self, tkt: Ticket) -> list[dict[str, str]]
+def add_watcher(self, tkt: Ticket, identifier: str) -> list[dict[str, str]]
+def remove_watcher(self, tkt: Ticket, sys_id: str) -> list[dict[str, str]]
+```
+
+`identifier` takes an email address or a sys_id, mirroring `assign_to`'s signature.
+
+**`assign_to` is the pattern to follow, not `post_comment`.** It already writes, re-reads, and
+treats an empty `display_value` as "ServiceNow did not recognise that identifier" — then
+reverts and raises. That is exactly the guard the unknown-address risk (Spike attempt 2,
+constraint 2) needs, and it already exists in this codebase.
+
+Design points, each of which exists because of something the probe showed:
+
+- **Read–modify–write, verified by re-reading.** Read the current list, append, write the whole
+  list back, re-read, and confirm both that the new entry is present *and* that every prior
+  entry survived. A PATCH overwrites. The response cannot be trusted: this table returns
+  HTTP 200 for writes it discards.
+- **Idempotent.** Adding someone already on the list returns the list unchanged rather than
+  duplicating them.
+- **Parse the `value` side, never `display_value`.** With `sysparm_display_value=all` both come
+  back comma-separated. Backing values are 32-character hex sys_ids, so splitting is safe.
+  Display names are not — a name like `Smith, Andrew` would split into two entries and silently
+  mis-pair every name after it. For names, `GET /sys_user/{sys_id}` works through the gateway
+  (Spike attempt 2); that endpoint is useless for *adding* people but correct for *displaying*
+  them.
+- **`HtmlServiceNow` counterparts belong in the same PR.** PR 1 shipped `get_comments` and
+  `post_comment` without them and both raised `AttributeError`, because that class has no
+  `self.session` by design. `watch_list` is not in the HTML export, so `get_watchers` returns
+  `[]` and `add_watcher` is a no-op.
+- **The test that matters starts from a NON-EMPTY watch list.** An empty one cannot tell
+  appending from overwriting, so the obvious test passes against a destructive implementation.
+
+Two decisions taken 2026-11-26:
+
+- **`add_watcher` is NOT behind `ALLOW_COMMENTS_ON_SN_TICKETS`.** That gate exists to stop text
+  reaching a researcher; adding a watcher sends no mail. Noted for the record: it is not inert
+  either, since the new watcher will receive mail the next time *anyone*, including a human
+  operator, comments on the ticket. Revisit if that proves surprising in practice.
+- **`watch_list` is NOT added to the `Ticket` dataclass.** The user prompt is the full ticket
+  serialised as JSON, so a field there would put watchers' names into every LLM prompt — prompt
+  bloat and personal data, for something no tool reads. Fetch on demand instead.
+
+**`remove_watcher` was deferred, then un-deferred — the integration test needs it.** Without
+it that test is only honest once: the first run leaves the watcher on the ticket, so every
+later run finds them already present, appends nothing, and silently decays into a test of
+idempotency while still passing. Establishing the precondition requires removal, so the
+"nothing needs it yet" argument was wrong — the test does.
+
+It takes a **sys_id, not an email**. The stored list holds sys_ids, and matching an email
+against them would need the reverse lookup the gateway does not expose. `add_watcher` can
+take either because ServiceNow does that resolution server-side on write; removal has no
+equivalent, so the asymmetry is real rather than an oversight and belongs in the docstring.
+
+The integration test's own identifiers live in an uncommitted fixture
+(`tests/fixtures/local_watch_list.json`, gitignored) holding both the email and the sys_id of
+someone who has agreed to be used for testing: the email so the run exercises server-side
+resolution, the sys_id so the test can assert and clean up exactly. The test skips when the
+file is absent, so it is a no-op for anyone who has not set one up.
+
 ### PR 2 — templates, and wiring into existing tools
 
 The spike is now answered (attempt 2), so this is unblocked bar the arranged production test.

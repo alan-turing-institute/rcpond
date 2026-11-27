@@ -10,11 +10,18 @@ API. The only methods are:
 - `assign_to()` Assigns a ticket to the named user;
 - `get_work_notes()` List the work notes for a specific ticket;
 - `post_note()` Post a “work note” to a ticket;
-- `get_comments()` List the additional comments for a specific ticket; and
-- `post_comment()` Post an “additional comment” to a ticket.
+- `get_comments()` List the additional comments for a specific ticket;
+- `post_comment()` Post an “additional comment” to a ticket;
+- `get_watchers()` List the users on a ticket's watch list;
+- `add_watcher()` Add a user to a ticket's watch list; and
+- `remove_watcher()` Remove a user from a ticket's watch list.
 
 Work notes are internal to the operators; comments are visible to the requester and
 notify them. See `post_comment()` before using it.
+
+Everyone on a ticket's watch list is emailed when a comment is posted, so the watch list
+is how RCPond notifies anyone other than the requester. Tagging a person with ``@name``
+in the comment text does *not* notify them.
 
 Tickets are returned as instances of a `Ticket` dataclass which
 contains a few, high-level details. The subclass `ComputeAllocationRequestTicket` contains
@@ -491,6 +498,40 @@ def _extract_display_value(fld: dict | str) -> str:
 ## tkt: The JSON from the API call (as a dictionary)
 def _extract_ticket_fields(tkt: dict[str, dict | str], fields: set[str]) -> dict:
     return {field: _extract_display_value(tkt.get(field, "")) for field in fields}
+
+
+def _parse_watch_list(cell: dict[str, str] | str) -> list[dict[str, str]]:
+    """Parse a ``watch_list`` cell into one dict per watcher.
+
+    Parameters
+    ----------
+    cell : dict[str, str] | str
+        The ``watch_list`` value from a ``sysparm_display_value=all`` read, which is a dict
+        of ``value`` and ``display_value``; a bare string is accepted for the simpler read
+        modes and treated as both.
+
+    Returns
+    -------
+    list[dict[str, str]]
+        One ``{"value": sys_id, "display_value": name}`` per watcher, in stored order.
+
+    Notes
+    -----
+    **The sys_ids are authoritative and the names are not.** Both sides arrive as
+    comma-separated strings, but a sys_id is fixed-width hex and can never contain a comma,
+    whereas a display name of the form ``Surname, Forename`` can — and that would split into
+    two entries, shifting every later name onto the wrong sys_id. Silently attaching the
+    wrong person's name to a watcher is worse than showing none, so when the two sides
+    disagree in length the names are dropped rather than guessed at. `GET /sys_user/{sys_id}`
+    can resolve them individually if they are ever needed.
+    """
+    if isinstance(cell, str):
+        cell = {"value": cell, "display_value": cell}
+    values = [v.strip() for v in cell.get("value", "").split(",") if v.strip()]
+    names = [n.strip() for n in cell.get("display_value", "").split(",") if n.strip()]
+    if len(names) != len(values):
+        names = [""] * len(values)
+    return [{"value": v, "display_value": n} for v, n in zip(values, names, strict=True)]
 
 
 def _parse_comment_display_values(input: str) -> list[NoteEntry]:
@@ -1024,6 +1065,169 @@ class ServiceNow:
         )
         resp.raise_for_status()
         return resp.json()["result"]["assigned_to"]
+
+    ## ---- Watch list ----
+    ##
+    ## `watch_list` is how RCPond causes someone other than the requester to be notified.
+    ## Tagging a person with `@name` in a comment does *not* notify them; adding them here
+    ## and then commenting does. See planning/post-comments.md, "Spike attempt 2".
+    ##
+    ## Two ServiceNow behaviours shape every method below, both established by probing:
+    ##   1. A PATCH *replaces* `watch_list`; it never appends. Adding one watcher naively
+    ##      removes all the others, and returns HTTP 200 while doing it.
+    ##   2. An identifier ServiceNow does not recognise is silently dropped — again HTTP 200,
+    ##      no error, nothing stored.
+    ## Both failures are invisible in the response, so every write here is verified by
+    ## re-reading. The response is not evidence that anything happened.
+
+    def get_watchers(self, tkt: Ticket) -> list[dict[str, str]]:
+        """List the users on a ticket's watch list.
+
+        Parameters
+        ----------
+        tkt : Ticket
+            The ticket to read.
+
+        Returns
+        -------
+        list[dict[str, str]]
+            One dict per watcher, with ``value`` (sys_id) and ``display_value`` (name).
+            ``display_value`` is an empty string when the names cannot be matched to the
+            sys_ids with confidence — see `_parse_watch_list`.
+        """
+        resp = self.session.get(
+            f"{self._base_api_url}/{self._TABLE}/{tkt.sys_id}",
+            params={
+                "sysparm_display_value": "all",
+                "sysparm_exclude_reference_link": "true",
+                "sysparm_fields": "watch_list",
+            },
+        )
+        resp.raise_for_status()
+        return _parse_watch_list(resp.json()["result"].get("watch_list", ""))
+
+    def _write_watch_list(self, sys_id: str, values: list[str]) -> None:
+        """Replace the whole watch list. Callers must have read it first."""
+        resp = self.session.patch(
+            f"{self._base_api_url}/{self._TABLE}/{sys_id}",
+            json={"watch_list": ",".join(values)},
+        )
+        resp.raise_for_status()
+
+    def add_watcher(self, tkt: Ticket, identifier: str) -> list[dict[str, str]]:
+        """Add a user to a ticket's watch list, keeping everyone already on it.
+
+        Watch-list members are emailed when a comment is posted, so this is the mechanism
+        for notifying someone other than the requester. It is deliberately **not** behind
+        `ALLOW_COMMENTS_ON_SN_TICKETS`: adding a watcher sends no mail by itself. Note
+        that it is not inert either — the new watcher will be emailed the next time anyone,
+        including a human operator, comments on the ticket.
+
+        >>> sn.add_watcher(tkt, "someone@example.com")
+
+        Parameters
+        ----------
+        tkt : Ticket
+            The ticket to modify.
+        identifier : str
+            An email address or a sys_id, as `assign_to` accepts. ServiceNow resolves an
+            address to a user server-side on write.
+
+        Returns
+        -------
+        list[dict[str, str]]
+            The watch list after the change, in the form `get_watchers` returns.
+
+        Raises
+        ------
+        RuntimeError
+            If the re-read shows the watcher was not added, or that someone already on the
+            list was lost. An unrecognised identifier and an already-present one are
+            indistinguishable here: both leave the list unchanged, and ServiceNow offers no
+            way to tell them apart without a `sys_user` lookup the API gateway does not
+            expose. Passing a sys_id avoids the ambiguity, since that is matched locally
+            before any write.
+        """
+        current = self.get_watchers(tkt)
+        existing = [w["value"] for w in current]
+        ## A sys_id already present can be recognised without writing at all, which is both
+        ## cheaper and the only form of idempotence that is unambiguous.
+        if identifier in existing:
+            return current
+
+        self._write_watch_list(tkt.sys_id, [*existing, identifier])
+
+        updated = self.get_watchers(tkt)
+        new_values = [w["value"] for w in updated]
+        self._assert_nobody_lost(tkt, existing, new_values)
+        if not set(new_values) - set(existing):
+            msg = (
+                f"Watcher '{identifier}' was not added to ticket '{tkt.number}'. ServiceNow "
+                f"accepted the write and stored nothing, which means either that it does not "
+                f"recognise that identifier, or that the user is already watching. The watch "
+                f"list is unchanged: {new_values}"
+            )
+            raise RuntimeError(msg)
+        return updated
+
+    def remove_watcher(self, tkt: Ticket, sys_id: str) -> list[dict[str, str]]:
+        """Remove a user from a ticket's watch list, keeping everyone else on it.
+
+        Takes a **sys_id only**, unlike `add_watcher`. The stored list holds sys_ids, and
+        matching an email address against them would need the reverse lookup that the API
+        gateway does not expose. `add_watcher` can accept an address only because
+        ServiceNow performs that resolution itself when writing; removal has no equivalent.
+
+        Removing someone who is not on the list is a no-op, not an error.
+
+        Parameters
+        ----------
+        tkt : Ticket
+            The ticket to modify.
+        sys_id : str
+            The sys_id of the watcher to remove.
+
+        Returns
+        -------
+        list[dict[str, str]]
+            The watch list after the change.
+
+        Raises
+        ------
+        RuntimeError
+            If the re-read shows the watcher still present, or someone else lost.
+        """
+        current = self.get_watchers(tkt)
+        existing = [w["value"] for w in current]
+        if sys_id not in existing:
+            return current
+
+        remaining = [v for v in existing if v != sys_id]
+        self._write_watch_list(tkt.sys_id, remaining)
+
+        updated = self.get_watchers(tkt)
+        new_values = [w["value"] for w in updated]
+        if sys_id in new_values:
+            msg = f"Watcher '{sys_id}' is still on ticket '{tkt.number}' after removal: {new_values}"
+            raise RuntimeError(msg)
+        self._assert_nobody_lost(tkt, remaining, new_values)
+        return updated
+
+    @staticmethod
+    def _assert_nobody_lost(tkt: Ticket, expected: list[str], actual: list[str]) -> None:
+        """Raise if any watcher that should have survived the write did not.
+
+        The guard that makes a read-modify-write trustworthy. Because a PATCH replaces the
+        field, a malformed payload removes people silently and successfully; without this
+        the caller would be told the operation worked.
+        """
+        lost = [v for v in expected if v not in actual]
+        if lost:
+            msg = (
+                f"Writing the watch list on ticket '{tkt.number}' lost existing watchers {lost}. "
+                f"Expected at least {expected}, found {actual}."
+            )
+            raise RuntimeError(msg)
 
     def post_note(self, tkt: Ticket, note: str, tool_name: str) -> None:
         """Post a work note to a ticket.

@@ -172,3 +172,6 @@ curl-cmd.txt
 
 # Dump files
 servicedesk.turing.ac.uk_*T*.jsonl
+
+# Local-only test fixtures holding real identifiers (see tests/test_servicenow.py)
+tests/fixtures/local_*.json

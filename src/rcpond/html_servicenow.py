@@ -10,7 +10,9 @@ Public API
 - All read methods from ``ServiceNow`` are supported:
   ``get_tickets()``, ``get_ticket()``, ``get_full_ticket()``, ``get_work_notes()``,
   ``get_comments()``.
-- Write methods (``post_note()``, ``post_comment()``, ``assign_to()``) are no-ops.
+- ``get_watchers()`` returns an empty list — ``watch_list`` is not in the HTML export.
+- Write methods (``post_note()``, ``post_comment()``, ``assign_to()``, ``add_watcher()``,
+  ``remove_watcher()``) are no-ops.
 - ``get_assignee()`` returns an empty assignee dict — assignment state is not
   stored in the HTML export.
 
@@ -211,6 +213,16 @@ class HtmlServiceNow(ServiceNow):
         ]
         return sorted(entries, key=lambda e: e.datetime_stamp)
 
+    def get_watchers(self, _tkt: Ticket) -> list[dict[str, str]]:
+        """Return an empty watch list — `watch_list` is not in the HTML export.
+
+        Overridden rather than inherited because the inherited version reaches for
+        ``self.session``, which this class does not have. Returning empty is honest: the
+        export genuinely carries no watch-list data, so this is "not recorded here" rather
+        than "nobody is watching".
+        """
+        return []
+
     def get_assignee(self, tkt: Ticket) -> dict[str, str]:
         """Return the assignee for ``tkt`` extracted from the HTML.
 
@@ -241,6 +253,14 @@ class HtmlServiceNow(ServiceNow):
         stop text reaching a researcher; this backend writes to nothing at all, so there is
         nothing to gate and no reason to make a read-only run fail.
         """
+
+    def add_watcher(self, _tkt: Ticket, _identifier: str = "") -> list[dict[str, str]]:
+        """No-op — HTML source is read-only. Returns an empty watch list."""
+        return []
+
+    def remove_watcher(self, _tkt: Ticket, _sys_id: str = "") -> list[dict[str, str]]:
+        """No-op — HTML source is read-only. Returns an empty watch list."""
+        return []
 
     def _attempt_assign_to(self, _ticket: Ticket, _assignee: str) -> None:
         """No-op — HTML source is read-only."""

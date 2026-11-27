@@ -5,6 +5,7 @@ import json
 import os
 import time
 from datetime import datetime
+from pathlib import Path
 from types import MappingProxyType
 from unittest.mock import MagicMock, call, patch
 
@@ -611,6 +612,242 @@ def test_post_comment_raises_on_http_error(sn_instance, ticket):
 
     with pytest.raises(_requests.HTTPError):
         sn_instance.post_comment(ticket, "Hello researcher", tool_name="post_freeform_comment")
+
+
+## ── get_watchers / add_watcher ──────────────────────────────────────────────
+
+## Synthetic sys_ids. No real identifier belongs in the repo, but the *shape* is part of what
+## these tests check — 32 hex characters, and in particular never containing a comma — so
+## these keep the shape while being obviously invented.
+_WATCHER_A = "a" * 31 + "1"
+_WATCHER_B = "b" * 31 + "2"
+_WATCHER_B_EMAIL = "second.watcher@example.com"
+
+
+class _FakeResponse:
+    """Just enough of a `requests.Response` for the ServiceNow client."""
+
+    def __init__(self, payload: dict, error: Exception | None = None) -> None:
+        self._payload = payload
+        self._error = error
+
+    def raise_for_status(self) -> None:
+        if self._error is not None:
+            raise self._error
+
+    def json(self) -> dict:
+        return self._payload
+
+
+class _FakeWatchListSession:
+    """A session that models the ServiceNow behaviour which makes this feature dangerous.
+
+    Two real behaviours, both established by `scripts/probe_watch_list.py`:
+
+    1. **A PATCH replaces `watch_list`; it does not append.** This is the whole reason
+       `add_watcher` is not a one-line method.
+    2. **An unrecognised identifier is silently dropped** — HTTP 200, nothing stored.
+
+    Modelling them rather than scripting replies matters. A canned `side_effect` list hands
+    back whatever the test author expected, so it cannot fail when the code under test is
+    wrong about how the API behaves: it would confirm the author's model, not the method.
+    Here the fake is faithful and uncooperative, so a destructive `add_watcher` genuinely
+    loses a watcher and the assertion genuinely fails.
+    """
+
+    def __init__(self, sys_ids: list[str], *, resolves: dict[str, str] | None = None, display: str = "") -> None:
+        self.value = ",".join(sys_ids)
+        self.display = display
+        ## Identifiers ServiceNow would recognise, mapped to the sys_id they resolve to.
+        ## Anything not in here (and not already a known sys_id) is dropped on write.
+        self.resolves = {_WATCHER_A: _WATCHER_A, _WATCHER_B: _WATCHER_B, **(resolves or {})}
+        self.patches: list[dict] = []
+        self.patch_error: Exception | None = None
+
+    def get(self, *_args, **_kwargs) -> _FakeResponse:
+        return _FakeResponse({"result": {"watch_list": {"value": self.value, "display_value": self.display}}})
+
+    def _store(self, submitted: str) -> None:
+        kept = [self.resolves[e] for e in (x.strip() for x in submitted.split(",")) if e in self.resolves]
+        self.value = ",".join(dict.fromkeys(kept))
+
+    def patch(self, *_args, **kwargs) -> _FakeResponse:
+        self.patches.append(kwargs["json"])
+        if self.patch_error is None:
+            self._store(kwargs["json"]["watch_list"])
+        return _FakeResponse({"result": {}}, error=self.patch_error)
+
+
+class _LosesExistingWatchersSession(_FakeWatchListSession):
+    """A server that keeps only the last identifier written.
+
+    Not behaviour anyone has observed — it exists so that `add_watcher`'s "did everyone
+    already there survive?" check is covered by a test rather than merely asserted in a
+    comment. The faithful fake above will never produce this, which is precisely why it
+    needs its own stub.
+    """
+
+    def _store(self, submitted: str) -> None:
+        last = [x.strip() for x in submitted.split(",") if x.strip()][-1]
+        self.value = self.resolves.get(last, "")
+
+
+def test_get_watchers_on_an_empty_watch_list(sn_instance, ticket):
+    """No watchers yields an empty list, not a list containing one empty string."""
+    sn_instance.session = _FakeWatchListSession([])
+    assert sn_instance.get_watchers(ticket) == []
+
+
+def test_get_watchers_pairs_display_names_when_unambiguous(sn_instance, ticket):
+    """When the two sides agree in length, each sys_id carries its name."""
+    sn_instance.session = _FakeWatchListSession([_WATCHER_A, _WATCHER_B], display="First Watcher,Second Watcher")
+
+    assert sn_instance.get_watchers(ticket) == [
+        {"value": _WATCHER_A, "display_value": "First Watcher"},
+        {"value": _WATCHER_B, "display_value": "Second Watcher"},
+    ]
+
+
+def test_get_watchers_does_not_mis_pair_a_name_containing_a_comma(sn_instance, ticket):
+    """A display name with a comma must not corrupt the list.
+
+    Both sides come back comma-separated. Splitting `display_value` turns
+    'Surname, Forename' into two entries, which would shift every later name onto the wrong
+    sys_id — wrong, and silently so. The sys_ids are fixed-width hex and never contain a
+    comma, so they are authoritative; names are dropped when the two sides disagree rather
+    than guessed at.
+    """
+    sn_instance.session = _FakeWatchListSession([_WATCHER_A, _WATCHER_B], display="Surname, Forename,Second Watcher")
+
+    watchers = sn_instance.get_watchers(ticket)
+
+    assert [w["value"] for w in watchers] == [_WATCHER_A, _WATCHER_B]
+    assert [w["display_value"] for w in watchers] == ["", ""]
+
+
+def test_add_watcher_preserves_the_existing_watchers(sn_instance, ticket):
+    """The whole point: a PATCH overwrites `watch_list`, so the write must carry everyone.
+
+    The fake drops whatever the write omits, exactly as ServiceNow does, so an
+    `add_watcher` that sends only the new identifier really does lose the existing watcher
+    here. A ticket with an *empty* watch list could not catch that — appending and
+    overwriting are indistinguishable from empty — which is how this would reach production.
+    """
+    fake = _FakeWatchListSession([_WATCHER_A])
+    sn_instance.session = fake
+
+    sn_instance.add_watcher(ticket, _WATCHER_B)
+
+    assert fake.value.split(",") == [_WATCHER_A, _WATCHER_B]
+
+
+def test_add_watcher_resolves_an_email_address(sn_instance, ticket):
+    """An email address is accepted, as it is by `assign_to`; ServiceNow resolves it."""
+    fake = _FakeWatchListSession([_WATCHER_A], resolves={_WATCHER_B_EMAIL: _WATCHER_B})
+    sn_instance.session = fake
+
+    result = sn_instance.add_watcher(ticket, _WATCHER_B_EMAIL)
+
+    assert fake.value.split(",") == [_WATCHER_A, _WATCHER_B]
+    assert [w["value"] for w in result] == [_WATCHER_A, _WATCHER_B]
+
+
+def test_add_watcher_is_idempotent(sn_instance, ticket):
+    """Adding someone already watching changes nothing and writes nothing."""
+    fake = _FakeWatchListSession([_WATCHER_A, _WATCHER_B])
+    sn_instance.session = fake
+
+    result = sn_instance.add_watcher(ticket, _WATCHER_B)
+
+    assert fake.patches == []
+    assert [w["value"] for w in result] == [_WATCHER_A, _WATCHER_B]
+
+
+def test_add_watcher_raises_when_the_identifier_is_not_recognised(sn_instance, ticket):
+    """An unrecognised address must fail loudly, and must not drop the existing watchers.
+
+    ServiceNow signals an unknown reference by accepting the write and storing nothing —
+    HTTP 200, no error. Left unchecked that would post a comment nobody is notified of,
+    which is the failure mode this whole feature exists to avoid. The fake reproduces it
+    rather than being told to return it.
+    """
+    fake = _FakeWatchListSession([_WATCHER_A])
+    sn_instance.session = fake
+
+    with pytest.raises(RuntimeError, match="nobody@example.com"):
+        sn_instance.add_watcher(ticket, "nobody@example.com")
+
+    ## The pre-existing watcher is still there: failing must not also destroy the list.
+    assert fake.value == _WATCHER_A
+
+
+def test_add_watcher_raises_if_an_existing_watcher_was_lost(sn_instance, ticket):
+    """A write that silently drops someone is caught by the re-read, not assumed away."""
+    fake = _LosesExistingWatchersSession([_WATCHER_A])
+    sn_instance.session = fake
+
+    with pytest.raises(RuntimeError, match=_WATCHER_A):
+        sn_instance.add_watcher(ticket, _WATCHER_B)
+
+
+def test_add_watcher_raises_on_http_error(sn_instance, ticket):
+    """A failed write is not swallowed."""
+    fake = _FakeWatchListSession([])
+    fake.patch_error = _requests.HTTPError("500")
+    sn_instance.session = fake
+
+    with pytest.raises(_requests.HTTPError):
+        sn_instance.add_watcher(ticket, _WATCHER_B)
+
+
+def test_remove_watcher_removes_only_the_named_watcher(sn_instance, ticket):
+    """Removal is the same read-modify-write, and must not take anyone else with it."""
+    fake = _FakeWatchListSession([_WATCHER_A, _WATCHER_B])
+    sn_instance.session = fake
+
+    result = sn_instance.remove_watcher(ticket, _WATCHER_B)
+
+    assert fake.value == _WATCHER_A
+    assert [w["value"] for w in result] == [_WATCHER_A]
+
+
+def test_remove_watcher_is_a_no_op_when_not_watching(sn_instance, ticket):
+    """Removing someone who is not on the list writes nothing and raises nothing.
+
+    The integration test calls this unconditionally to establish its precondition, so a
+    no-op on an absent watcher is required behaviour, not merely tolerated.
+    """
+    fake = _FakeWatchListSession([_WATCHER_A])
+    sn_instance.session = fake
+
+    result = sn_instance.remove_watcher(ticket, _WATCHER_B)
+
+    assert fake.patches == []
+    assert [w["value"] for w in result] == [_WATCHER_A]
+
+
+def test_remove_watcher_empties_the_list_when_removing_the_last_watcher(sn_instance, ticket):
+    """Clearing the final watcher writes an empty string, and is not mistaken for a failure."""
+    fake = _FakeWatchListSession([_WATCHER_A])
+    sn_instance.session = fake
+
+    assert sn_instance.remove_watcher(ticket, _WATCHER_A) == []
+    assert fake.value == ""
+
+
+def test_add_watcher_is_not_gated_by_the_comment_toggle(sn_instance, ticket):
+    """Adding a watcher sends no mail, so the customer-visible-comment gate does not apply.
+
+    Asserted explicitly, and with the gate shut, so that someone later tempted to tidy up by
+    putting every outward-facing write behind one flag has to change a test that says why.
+    """
+    fake = _FakeWatchListSession([])
+    sn_instance.session = fake
+
+    with patch.object(servicenow, "ALLOW_COMMENTS_ON_SN_TICKETS", False):
+        sn_instance.add_watcher(ticket, _WATCHER_B)
+
+    assert fake.value == _WATCHER_B
 
 
 ## ── is_rcpond_processed / is_rcpond_most_recent_process ─────────────────────
@@ -1374,6 +1611,80 @@ def test_post_note(dev_instance_sn):
     after_work_note_count = len(dev_instance_sn.get_work_notes(my_tkt))
 
     assert after_work_note_count == before_work_note_count + 2
+
+
+## Real identifiers for the watch-list integration test live outside the repo: they name a
+## person who has agreed to be used for testing, which is personal data and does not belong
+## in version control. Shape:
+##     {"watcher_email": "someone@example.com",
+##      "watcher_sys_id": "<their 32-character sys_user sys_id>"}
+##
+## Both are needed, and for different reasons. The *email* is what the test adds, so the run
+## exercises ServiceNow's server-side resolution — the thing this feature depends on. The
+## *sys_id* is what the test compares and cleans up with, because the stored list holds
+## sys_ids and an email cannot be matched against them without a lookup the gateway does not
+## expose (see planning/post-comments.md, Spike attempt 2).
+_LOCAL_WATCHER_FIXTURE = Path(__file__).parent / "fixtures" / "local_watch_list.json"
+
+
+@pytest.fixture()
+def local_watcher() -> dict[str, str]:
+    """A real watcher's email and sys_id from an uncommitted local fixture, or skip."""
+    if not _LOCAL_WATCHER_FIXTURE.exists():
+        pytest.skip(f"no local watcher fixture at {_LOCAL_WATCHER_FIXTURE}; see the comment above it")
+    data = json.loads(_LOCAL_WATCHER_FIXTURE.read_text())
+    missing = [k for k in ("watcher_email", "watcher_sys_id") if not data.get(k)]
+    if missing:
+        pytest.skip(f"local watcher fixture is missing: {', '.join(missing)}")
+    return data
+
+
+@pytest.mark.integration()
+def test_add_watcher_appends_without_displacing_anyone(dev_instance_sn, local_watcher):
+    """Against a real ticket: the watcher is genuinely added and nobody already there is lost.
+
+    The mocked tests prove the method builds the right payload. Only this one proves that
+    ServiceNow accepts it, that it resolves an email address to the right user, and that the
+    read-modify-write survives a round trip.
+
+    **The precondition is the point.** If the watcher were already on the list, nothing would
+    be appended and every assertion here would hold vacuously — it would silently decay into
+    a test of idempotency. That is not hypothetical: without the cleanup below, the first run
+    would leave the watcher in place and every later run would be the degenerate one.
+
+    Adding a watcher sends no mail by itself, and Dev has notifications disabled in any case.
+    """
+    tickets = dev_instance_sn.get_tickets()
+    first_num = min([t.number for t in tickets])
+    my_tkt = [t for t in tickets if t.number == first_num].pop()
+
+    sys_id, email = local_watcher["watcher_sys_id"], local_watcher["watcher_email"]
+    was_watching = sys_id in {w["value"] for w in dev_instance_sn.get_watchers(my_tkt)}
+
+    ## Clear any leftover from an earlier run, so that the add below really is an addition.
+    before = {w["value"] for w in dev_instance_sn.remove_watcher(my_tkt, sys_id)}
+    assert sys_id not in before, "precondition failed: remove_watcher did not clear the watcher"
+
+    try:
+        after = {w["value"] for w in dev_instance_sn.add_watcher(my_tkt, email)}
+
+        ## Added: the list strictly grew, by exactly this person.
+        assert after - before == {sys_id}
+        ## Resolved: the email became the sys_id we expected, not some other account.
+        assert sys_id in after
+        ## Displaced nobody: everyone present beforehand is still present.
+        assert before <= after
+
+        ## Idempotent against a real instance, not only against the fake. Deliberately by
+        ## sys_id: a repeat add by *email* cannot be recognised as a no-op, because an
+        ## already-watching user and an unrecognised address both leave the list unchanged
+        ## and ServiceNow offers no way to tell them apart (see add_watcher's docstring).
+        assert {w["value"] for w in dev_instance_sn.add_watcher(my_tkt, sys_id)} == after
+    finally:
+        ## Leave the ticket as found, so the next run starts from a clean precondition.
+        dev_instance_sn.remove_watcher(my_tkt, sys_id)
+        if was_watching:
+            dev_instance_sn.add_watcher(my_tkt, sys_id)
 
 
 @pytest.mark.integration()
