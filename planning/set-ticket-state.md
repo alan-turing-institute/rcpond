@@ -107,8 +107,7 @@ The result decides option 1 vs option 2 and resolves the open question about `Re
 ### Step 0 results — run 2026-11-18, Dev instance
 
 Run via `scripts/probe_state_write.py --ticket RES0001345 --yes-i-am-sure` against
-`alanturingdev.service-now.com`, authenticated as a human user (interactive OAuth, Andrew
-Smith) — i.e. with *more* privilege than the service account the bot would use.
+`alanturingdev.service-now.com`, authenticated as a human user (interactive using OAuth) — i.e. with *more* privilege than the service account the bot would use.
 
 **The state field could not be written by any method.**
 

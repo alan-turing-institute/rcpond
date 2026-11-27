@@ -1736,7 +1736,7 @@ def test_change_assignee(dev_instance_sn):
 
     unassigned_ticket = unassigned_tickets[0]
     # Get the assignee of the assigned ticket.
-    ## We explictly assume that this assignee is value, though it is not actually guaranteed by the ServiceNow API
+    ## We explicitly assume that this assignee is value, though it is not actually guaranteed by the ServiceNow API
     assignee_sys_id = dev_instance_sn.get_assignee(assigned_tickets[0])["value"]
 
     ## Assign the previously unassigned ticket
